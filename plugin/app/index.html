@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spec Book</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app/book.css">
+</head>
+<body>
+<header class="bar" role="toolbar" aria-label="Design bar">
+  <strong id="book-title" class="bar-title">Spec book</strong>
+  <div class="bar-group">
+    <span class="bar-label">Screens</span>
+    <div class="seg3" role="group" aria-label="Screens">
+      <button type="button" data-view="mockup" aria-pressed="true">Mockups</button>
+      <button type="button" data-view="shot" aria-pressed="false">Screenshots</button>
+      <button type="button" data-view="both" aria-pressed="false">Both</button>
+    </div>
+    <label class="check"><input type="checkbox" id="show-videos" checked> Recordings</label>
+    <span class="bar-hint" id="media-count"></span>
+  </div>
+  <div class="bar-group" id="coverage-group" hidden>
+    <label class="check" title="Dim requirements with no passing test"><input type="checkbox" id="show-coverage"> Coverage</label>
+  </div>
+  <div class="bar-group" role="group" aria-label="Changes">
+    <button type="button" id="changes-btn" class="bar-btn" aria-pressed="false">Changes (0)</button>
+    <button type="button" id="next-chg" class="bar-btn" title="Go to the next change" hidden>Next ›</button>
+    <label class="check" id="sent-toggle" title="Draw the pins of notes already sent to Claude, read-only" hidden><input type="checkbox" id="show-sent"> Show sent notes</label>
+    <span class="bar-hint" id="since"></span>
+  </div>
+  <div class="bar-spacer"></div>
+  <div class="bar-group">
+    <button type="button" id="mode" class="note-btn" aria-pressed="false" aria-keyshortcuts="C" title="Comment mode (C): click the book to drop a note"><svg class="bubble" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M3 21V12a9 9 0 1 1 9 9z"/></svg>Comment</button>
+    <button type="button" id="notes-btn" class="bar-btn" aria-expanded="false" aria-controls="notes-panel">Notes (0)</button>
+  </div>
+  <div class="bar-group claude" role="group" aria-labelledby="claude-label"><span class="bar-label" id="claude-label">Claude</span><button id="revise">Revise</button><button id="build">Build</button><span id="claude-status" class="bar-hint"></span></div>
+</header>
+<div id="build-banner" class="build-banner" role="status" hidden></div>
+<div class="layout">
+  <nav class="side" aria-label="Contents"><div id="toc"></div></nav>
+  <main id="main"><p class="loading">Loading the book…</p></main>
+</div>
+<aside id="notes-panel" class="notes-panel" aria-labelledby="np-title" tabindex="-1" hidden>
+  <div class="np-head"><h2 id="np-title">Notes</h2><button type="button" id="np-close" class="np-x" aria-label="Close notes">×</button></div>
+  <p id="np-empty" class="np-empty">No notes yet. Press <b>Comment</b> (or C), then click the book where you mean.</p>
+  <ol id="np-list" class="np-list"></ol>
+  <section id="np-send" class="np-send" aria-labelledby="np-send-title" hidden>
+    <h3 id="np-send-title">What Claude will receive</h3>
+    <ol id="np-items" class="np-items"></ol>
+    <details class="np-json"><summary>Show JSON</summary><pre id="np-json"></pre></details>
+    <button type="button" id="np-revise" class="make-btn">Revise</button>
+  </section>
+</aside>
+<aside id="review-panel" class="notes-panel review-panel" aria-labelledby="rp-title" tabindex="-1" hidden>
+  <div class="np-head"><h2 id="rp-title">Review calls</h2><button type="button" id="rp-close" class="np-x" aria-label="Close review">×</button></div>
+  <p class="np-empty">Calls the build made on its own. Accept one to keep it as a decision, or reject it with what you want instead.</p>
+  <ol id="rp-list" class="np-list"></ol>
+</aside>
+<p class="bar-msg" id="make-msg" role="status" title="Click to dismiss"></p>
+<textarea id="out" aria-label="Requests" class="out"></textarea>
+<script src="/app/host.js"></script>
+<script src="/app/model.js"></script>
+<script src="/app/book.js"></script>
+</body>
+</html>

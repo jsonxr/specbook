@@ -1,0 +1,14 @@
+// The specbook share server: serves the guest page and passes WebRTC handshakes between a book's host and its guests.
+// Deploy from this folder with `wrangler deploy`; run locally with `wrangler dev`.
+{
+  "name": "specbook-share",
+  "main": "src/worker.mjs",
+  // Served at its own hostname; the zone (jasonrowland.com) must be in the Cloudflare account it deploys to.
+  "routes": [{ "pattern": "specbook.jasonrowland.com", "custom_domain": true }],
+  "compatibility_date": "2026-05-01",
+  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true, "html_handling": "none" },
+  "durable_objects": { "bindings": [{ "name": "BROKER", "class_name": "Broker" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Broker"] }],
+  "vars": { "TURN_DAILY_CAP": "200" },
+  "observability": { "enabled": false }
+}

@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spec book: a Claude Code plugin</title>
+<meta name="description" content="Spec book turns your app's requirements into a book of phone mockups you can pin notes on. Claude revises the spec from your notes, and builds the sections you mark Ready.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #e8edf3;
+    --sheet: #f7f9fb;
+    --ink: #1b2a41;
+    --ink-soft: #4a5a72;
+    --rule: #c3ccd8;
+    --note: #ffd23f;
+    --note-ink: #3a2e00;
+    --go: #1f7a4d;
+    --display: 'Bricolage Grotesque', 'IBM Plex Sans', sans-serif;
+    --sans: 'IBM Plex Sans', system-ui, sans-serif;
+    --mono: 'IBM Plex Mono', ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--paper); color: var(--ink); }
+  body { margin: 0; font: 400 17px/1.6 var(--sans); }
+  a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; border-radius: 4px; }
+  .wrap { width: min(1120px, calc(100vw - 40px)); margin: 0 auto; }
+  code, .id { font-family: var(--mono); font-weight: 500; }
+
+  /* Top */
+  .top { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; }
+  .mark { display: flex; align-items: center; gap: 10px; font: 700 19px/1 var(--display); }
+  .mark svg { flex: none; }
+  .top nav { display: flex; gap: 22px; font-size: 15px; }
+  .top nav a { text-decoration: none; color: var(--ink-soft); }
+  .top nav a:hover { color: var(--ink); }
+
+  /* Hero: the pitch on the left, a page of a spec book being marked up on the right */
+  .hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 56px; align-items: center; padding: 48px 0 88px; }
+  .hero > * { min-width: 0; }
+  .hero h1 { font: 800 clamp(44px, 6.2vw, 78px)/0.98 var(--display); letter-spacing: -0.02em; margin: 0 0 26px; font-variation-settings: 'opsz' 96; }
+  .hero p.lede { font-size: 20px; line-height: 1.55; color: var(--ink-soft); max-width: 34ch; margin: 0 0 32px; }
+  .install { background: var(--ink); color: #eef2f7; border-radius: 10px; padding: 16px 18px; font: 500 14.5px/1.7 var(--mono); max-width: 470px; position: relative; }
+  .install .prompt { color: #8fa3bf; user-select: none; }
+  .install .lines { overflow-x: auto; white-space: nowrap; padding-right: 64px; }
+  .install button { position: absolute; top: 10px; right: 10px; font: 600 13px/1 var(--sans); color: var(--ink); background: #eef2f7; border: 0; border-radius: 6px; padding: 7px 10px; cursor: pointer; }
+  .install-note { font-size: 14px; color: var(--ink-soft); margin: 12px 0 0; }
+
+  .page { position: relative; margin: 0; background: var(--sheet); border-radius: 6px; box-shadow: 0 1px 0 var(--rule), 0 24px 60px -24px rgba(27, 42, 65, .35); padding: 28px 28px 30px; transform: rotate(0.6deg); }
+  .page-head { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid var(--rule); padding-bottom: 10px; margin-bottom: 18px; }
+  .page-head h2 { font: 700 19px/1.2 var(--display); margin: 0; }
+  .stage { font: 600 12px/1 var(--sans); background: #dfe7f0; color: var(--ink-soft); border-radius: 99px; padding: 6px 10px; }
+  .page-body { display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 24px; }
+  .phone { position: relative; width: 168px; height: 336px; border-radius: 26px; background: #fff; border: 7px solid var(--ink); overflow: hidden; }
+  .phone .hdr { height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid #e3e8ee; }
+  .phone .logo { width: 22px; height: 22px; border-radius: 6px; background: #2f6fd6; }
+  .phone .bar { height: 8px; border-radius: 4px; background: #dfe5ec; }
+  .phone .field { margin: 14px 12px 0; height: 34px; border: 1.5px solid #cfd8e3; border-radius: 8px; }
+  .phone .btn { margin: 14px 12px 0; height: 36px; border-radius: 8px; background: #2f6fd6; }
+  .phone .line { margin: 12px 12px 0; }
+  .reqs { list-style: none; margin: 0; padding: 0; font-size: 14px; line-height: 1.45; }
+  .reqs li { padding: 10px 0; border-bottom: 1px dashed var(--rule); }
+  .reqs li:last-child { border-bottom: 0; }
+  .reqs .id { font-size: 11.5px; color: var(--ink-soft); margin-right: 6px; }
+  .pill { display: inline-block; font: 500 11px/1 var(--mono); padding: 3px 6px; border-radius: 4px; margin-left: 4px; vertical-align: 1px; }
+  .pill.pass { background: #d6efe1; color: var(--go); }
+  .pill.new { background: #fff1bf; color: #6b5300; }
+  .accept { margin-top: 7px; font: 600 12.5px/1 var(--sans); color: #fff; background: var(--go); border: 0; border-radius: 6px; padding: 7px 10px; }
+
+  /* The pins and the sticky note: the reader's own yellow */
+  .pin { position: absolute; width: 26px; height: 26px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); background: var(--note); color: var(--note-ink); box-shadow: 0 3px 8px rgba(0,0,0,.25);
+    display: grid; place-items: center; font: 700 13px/1 var(--sans); }
+  .pin span { transform: rotate(45deg); }
+  .pin.p1 { left: 120px; top: 168px; }
+  .pin.p2 { left: 152px; top: 268px; }
+  .ties { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+  .ties path { fill: none; stroke: var(--note); stroke-width: 3; stroke-linecap: round; }
+  .sticky { position: absolute; width: 190px; background: var(--note); color: var(--note-ink); padding: 11px 13px; border-radius: 10px; font: 600 14px/1.35 var(--sans); box-shadow: 0 10px 22px rgba(0,0,0,.22); }
+  .sticky small { display: block; font-weight: 500; font-size: 12px; margin-top: 5px; opacity: .75; }
+  .sticky.s1 { left: -150px; top: 96px; transform: rotate(-3deg); }
+  .sticky.s2 { left: -126px; top: 332px; transform: rotate(2deg); }
+  @media (prefers-reduced-motion: no-preference) {
+    .pin, .sticky, .ties { animation: drop .5s cubic-bezier(.2, .9, .3, 1.3) both; }
+    .ties { animation-delay: 1.5s; }
+    .pin.p1 { animation-delay: .5s; } .sticky.s1 { animation-delay: .75s; }
+    .pin.p2 { animation-delay: 1.1s; } .sticky.s2 { animation-delay: 1.35s; }
+    @keyframes drop { from { opacity: 0; translate: 0 -18px; } to { opacity: 1; translate: 0 0; } }
+  }
+
+  /* Sections */
+  section { padding: 76px 0; border-top: 1px solid var(--rule); }
+  section h2 { font: 800 clamp(32px, 3.6vw, 46px)/1.05 var(--display); letter-spacing: -0.015em; margin: 0 0 14px; max-width: 22ch; }
+  section > .wrap > p.intro { font-size: 19px; color: var(--ink-soft); max-width: 60ch; margin: 0 0 40px; }
+
+  /* The loop: a real sequence, so it is numbered */
+  .loop { list-style: none; counter-reset: step; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; }
+  .loop li { counter-increment: step; position: relative; padding: 0 18px 0 0; }
+  .loop li::before { content: counter(step); display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; background: var(--ink); color: #fff; font: 700 16px/1 var(--display); margin-bottom: 16px; position: relative; z-index: 1; }
+  .loop li::after { content: ''; position: absolute; top: 19px; left: 38px; right: 0; height: 2px; background: var(--rule); }
+  .loop li:last-child::after { display: none; }
+  .loop h3 { font: 700 19px/1.25 var(--display); margin: 0 0 8px; }
+  .loop p { margin: 0; font-size: 15px; line-height: 1.55; color: var(--ink-soft); }
+  .loop code { font-size: 13px; background: #dde4ed; padding: 1px 5px; border-radius: 4px; color: var(--ink); }
+
+  /* What is in the book: two columns of plain statements, the left one larger */
+  .inside { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 20px 64px; }
+  .inside dl { margin: 0; }
+  .inside dt { font: 700 20px/1.3 var(--display); margin: 26px 0 6px; }
+  .inside dt:first-child { margin-top: 0; }
+  .inside dd { margin: 0; color: var(--ink-soft); max-width: 50ch; }
+
+  /* Share */
+  .share { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 56px; align-items: start; }
+  .share ul { margin: 0; padding: 0 0 0 20px; }
+  .share li { margin: 0 0 10px; color: var(--ink-soft); }
+  .share li strong { color: var(--ink); font-weight: 600; }
+  .link-card { background: var(--sheet); border: 1px solid var(--rule); border-radius: 12px; padding: 22px; }
+  .link-card .url { font: 500 14px/1.5 var(--mono); word-break: break-all; background: #eef2f7; border-radius: 8px; padding: 10px 12px; margin: 10px 0 14px; }
+  .link-card .who { display: flex; gap: 8px; flex-wrap: wrap; }
+  .link-card .who span { font: 600 13px/1 var(--sans); background: #dfe7f0; border-radius: 99px; padding: 7px 11px; }
+  .link-card .who span.host { background: var(--ink); color: #fff; }
+  .link-card p { margin: 14px 0 0; font-size: 14px; color: var(--ink-soft); }
+
+  /* Commands */
+  table { width: 100%; border-collapse: collapse; font-size: 16px; }
+  th, td { text-align: left; padding: 14px 16px 14px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font: 600 14px/1.4 var(--sans); color: var(--ink-soft); }
+  td:first-child { white-space: nowrap; width: 1%; padding-right: 32px; }
+  td code { font-size: 14.5px; }
+
+  footer { padding: 40px 0 60px; border-top: 1px solid var(--rule); font-size: 14px; color: var(--ink-soft); }
+  footer .wrap { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+
+  @media (max-width: 980px) {
+    .hero { grid-template-columns: 1fr; gap: 72px; padding-top: 24px; }
+    .page { margin: 0 0 0 150px; }
+    .loop { grid-template-columns: 1fr; gap: 26px; }
+    .loop li { padding: 0 0 0 56px; }
+    .loop li::before { position: absolute; left: 0; top: 0; margin: 0; }
+    .loop li::after { top: 38px; bottom: -26px; left: 18px; right: auto; width: 2px; height: auto; }
+    .inside, .share { grid-template-columns: 1fr; gap: 32px; }
+  }
+  @media (max-width: 640px) {
+    body { font-size: 16px; }
+    .top nav { display: none; }
+    .page { margin-left: 0; transform: none; padding: 20px; }
+    .page-body { grid-template-columns: 1fr; }
+    .ties { display: none; }
+    .install { padding-bottom: 52px; }
+    .install .lines { padding-right: 0; }
+    .install button { top: auto; bottom: 12px; right: auto; left: 18px; }
+    .phone { margin: 0 auto; }
+    .sticky.s1 { left: auto; right: 6px; top: 70px; }
+    .sticky.s2 { left: 6px; top: 300px; }
+    .pin.p1 { left: calc(50% + 36px); top: 160px; }
+    .pin.p2 { left: calc(50% + 62px); top: 260px; }
+    td:first-child { white-space: normal; }
+  }
+</style>
+</head>
+<body>
+<header class="wrap top">
+  <span class="mark">
+    <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><rect x="2" y="3" width="17" height="21" rx="2.5" fill="#1b2a41"/><rect x="6" y="8" width="9" height="2" rx="1" fill="#e8edf3"/><rect x="6" y="12" width="7" height="2" rx="1" fill="#e8edf3"/><path d="M17 2a7 7 0 0 1 7 7c0 4.5-7 11-7 11s-7-6.5-7-11a7 7 0 0 1 7-7z" fill="#ffd23f" transform="translate(-1 0) scale(.62) translate(14 -2)"/></svg>
+    Spec book
+  </span>
+  <nav aria-label="On this page"><a href="#loop">How it works</a><a href="#book">The book</a><a href="#share">Sharing</a><a href="#install">Commands</a></nav>
+</header>
+
+<main>
+  <div class="wrap hero">
+    <div>
+      <h1>Your app's spec, as a book you can mark up.</h1>
+      <p class="lede">A Claude Code plugin. Every screen, for every role, as phone mockups beside the requirements they prove. Pin notes where something is wrong, and Claude revises the spec. Mark a section Ready, and Claude builds it.</p>
+      <div class="install" id="install-cmd">
+        <div class="lines"><div><span class="prompt">$ </span>claude plugin marketplace add jsonxr/claude-plugins</div>
+        <div><span class="prompt">$ </span>claude plugin install specbook@jsonxr</div></div>
+        <button type="button" id="copy">Copy</button>
+      </div>
+      <p class="install-note">Then, in any project, run <code>/specbook</code> to lay out a book for the whole app.</p>
+    </div>
+
+    <figure class="page" aria-label="A page of a spec book with two notes pinned on it">
+      <div class="page-head"><h2>2.3 Sign in with a code</h2><span class="stage">Drafting · 2 changes</span></div>
+      <div class="page-body">
+        <div class="phone" aria-hidden="true">
+          <div class="hdr"><span class="logo"></span><span class="bar" style="width:62px"></span></div>
+          <div class="bar line" style="width:110px;height:12px;margin-top:20px"></div>
+          <div class="bar line" style="width:132px"></div>
+          <div class="field"></div>
+          <div class="btn"></div>
+          <div class="bar line" style="width:96px;margin-top:18px"></div>
+          <div class="field" style="margin-top:40px"></div>
+        </div>
+        <ul class="reqs">
+          <li><span class="id">ONB-8KAB</span>A wrong code reads <b>"That code didn't work"</b>, whatever was wrong with it. <span class="pill pass">unit ✓</span><span class="pill pass">e2e ✓</span></li>
+          <li><span class="id">ONB-J7AL</span>Five wrong guesses <b>burn</b> the code, and each guess waits longer. <span class="pill pass">unit ✓</span></li>
+          <li><span class="id">ONB-HKY4</span>Below the code field: <b>"Check your spam folder."</b> <span class="pill new">new</span><br><button type="button" class="accept" tabindex="-1">✓ Accept</button></li>
+        </ul>
+      </div>
+      <svg class="ties" aria-hidden="true"><path d="M38 132 C 80 136, 100 168, 124 180"/><path d="M62 356 C 110 352, 140 320, 156 284"/></svg>
+      <span class="pin p1" aria-hidden="true"><span>1</span></span>
+      <span class="pin p2" aria-hidden="true"><span>2</span></span>
+      <p class="sticky s1">Resend should wait 30 seconds, not 60.<small>Ann</small></p>
+      <p class="sticky s2">Say which address the code went to.<small>You</small></p>
+    </figure>
+  </div>
+
+  <section id="loop">
+    <div class="wrap">
+      <h2>One loop, from idea to tested code</h2>
+      <p class="intro">The book is where you and Claude agree on what the app does. Nothing is built until you say a section is ready, and nothing Claude changes sticks until you accept it.</p>
+      <ol class="loop">
+        <li><h3>Design</h3><p><code>/specbook:design</code> writes chapters, requirements and a mockup of each screen for each role, with you.</p></li>
+        <li><h3>Mark it up</h3><p>Press Comment and click the exact spot: a field, a button, a sentence. Your note pins there.</p></li>
+        <li><h3>Revise</h3><p>Press Revise. Claude works through every note with you, edits the spec, and answers notes that change nothing.</p></li>
+        <li><h3>Accept</h3><p>Each change waits under review, next to the wording before it, until you press ✓ Accept or pin another note.</p></li>
+        <li><h3>Build</h3><p>Mark a section Ready and press Build. Claude builds it and ties each requirement to the tests that prove it.</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="book">
+    <div class="wrap">
+      <h2>What the book holds</h2>
+      <p class="intro">One scrollable document for the whole app, kept in your repository beside the code it describes.</p>
+      <div class="inside">
+        <dl>
+          <dt>The app in the order a person meets it</dt>
+          <dd>Signing up, the first screen, each tab and what it leads to. Not the order of the code, and nothing hidden behind tabs.</dd>
+          <dt>Every screen for every role, side by side</dt>
+          <dd>An admin, a member and a visitor each get their own frame, so a difference between them is visible at a glance.</dd>
+          <dt>Requirements with ids that never change</dt>
+          <dd>Short, testable sentences with stable ids. Tests name the ids they prove, and the book shows which ones pass, beside the real screenshots.</dd>
+        </dl>
+        <dl>
+          <dt>A history of what you accepted</dt>
+          <dd>Each item keeps the versions you accepted before, and every build adds a plain-words entry to the changelog.</dd>
+          <dt>Decisions, written down once</dt>
+          <dd>What was settled or rejected stays in the book, so Claude doesn't propose it again.</dd>
+          <dt>Your data, in your project</dt>
+          <dd>The book is a folder of JSON and HTML in your repo. The plugin holds only the code that reads it.</dd>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <section id="share">
+    <div class="wrap share">
+      <div>
+        <h2>Share a live book with a link</h2>
+        <p class="intro" style="margin-bottom:24px">Run <code>/specbook:share</code> and send the link by text or Slack. Collaborators read the live book, on a phone or a laptop, and pin their own notes.</p>
+        <ul>
+          <li><strong>Only you run Claude.</strong> Guests can't Revise, Build or Accept. Their notes reach you with their name, and Revise passes them on.</li>
+          <li><strong>The book goes straight from your browser to theirs,</strong> encrypted end to end. This server only introduces the two.</li>
+          <li><strong>Close your tab and the share ends.</strong> Run <code>/specbook:share</code> again for a new link.</li>
+        </ul>
+      </div>
+      <div class="link-card" aria-label="An example share">
+        <strong>Sharing · 2 guests</strong>
+        <div class="url">specbook.jasonrowland.com/s/L9JO_MepC66T…</div>
+        <div class="who"><span class="host">You</span><span>Ann</span><span>Marcus</span></div>
+        <p>Ann's and Marcus's notes show their names. Yours show as Host on their screens.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="wrap">
+      <h2>The commands</h2>
+      <p class="intro">Type them in Claude Code, or just ask: each one also starts when what you ask for matches it.</p>
+      <table>
+        <thead><tr><th scope="col">Command</th><th scope="col">What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>/specbook</code></td><td>Creates a book for the project and lays out the whole app, or serves the one it has.</td></tr>
+          <tr><td><code>/specbook:open</code></td><td>Opens the book in your browser, starting its server if it isn't running.</td></tr>
+          <tr><td><code>/specbook:design</code></td><td>Writes or revises a part of the book with you: chapters, requirements and mockups.</td></tr>
+          <tr><td><code>/specbook:revise</code></td><td>Works through the notes you sent with Revise, and edits the spec from them.</td></tr>
+          <tr><td><code>/specbook:build</code></td><td>Builds the sections marked Ready, proves each requirement with tests, and collects the evidence.</td></tr>
+          <tr><td><code>/specbook:share</code></td><td>Gives you a link to the live book for collaborators. <code>/specbook:share stop</code> ends it.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Spec book is a plugin for <a href="https://claude.com/claude-code">Claude Code</a>, source-available under <a href="https://github.com/jsonxr/specbook/blob/main/LICENSE.md">FSL-1.1-MIT</a>.</span>
+    <a href="https://github.com/jsonxr/specbook">Source on GitHub</a>
+  </div>
+</footer>
+<script>
+  document.getElementById('copy').addEventListener('click', function () {
+    var b = this;
+    var text = 'claude plugin marketplace add jsonxr/claude-plugins\nclaude plugin install specbook@jsonxr';
+    (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(function () {
+      b.textContent = 'Copied';
+      setTimeout(function () { b.textContent = 'Copy'; }, 1600);
+    }, function () { b.textContent = 'Select and copy'; });
+  });
+</script>
+</body>
+</html>

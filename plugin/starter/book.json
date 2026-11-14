@@ -1,0 +1,307 @@
+{
+  "title": "Todos",
+  "eyebrow": "Spec book",
+  "lede": "A standard todo app, in the order a person meets it. Each section lists numbered requirements, each with a stable id, and shows every screen.",
+  "sources": [
+    {
+      "label": "Specs",
+      "path": "docs/specs/"
+    }
+  ],
+  "roles": [
+    {
+      "id": "user",
+      "label": "User",
+      "color": "#9cc3ff"
+    }
+  ],
+  "mockupCss": "mockups/phone.css",
+  "chapters": [
+    {
+      "id": "preface",
+      "prefix": "BK",
+      "title": "How to read this book",
+      "intro": "Each section has a stage: <b>Drafting</b> (being worked out), <b>Ready</b> (approved, the next build takes it), <b>Building</b> (a build is working on it) or <b>Built</b> (the app does this today, proven by passing tests). A word like \"Phase 2\" can sit on a pill after the stage.",
+      "sections": [
+        {
+          "id": "roles",
+          "title": "Roles",
+          "intro": "Who uses the app.",
+          "requirements": [
+            {
+              "id": "BK-SYY4",
+              "text": "<b>User:</b> anyone who opens the app. There are no accounts; todos are kept on the device."
+            }
+          ],
+          "frames": [],
+          "stage": "built"
+        }
+      ]
+    },
+    {
+      "id": "todos",
+      "prefix": "TOD",
+      "title": "Todos",
+      "intro": "The one screen: a field for new todos, the list, and a footer.",
+      "sections": [
+        {
+          "id": "list",
+          "title": "The todo list",
+          "intro": "What the user sees when the app opens.",
+          "requirements": [
+            {
+              "id": "TOD-VWFF",
+              "text": "The list shows every todo in the order it was added, each with a round check and its title."
+            },
+            {
+              "id": "TOD-FXDW",
+              "text": "The footer shows how many todos are not done: <b>1 item left</b>, <b>3 items left</b>."
+            },
+            {
+              "id": "TOD-LGXT",
+              "text": "With no todos, the list and footer are replaced by <b>Nothing to do</b> and a hint to add one."
+            },
+            {
+              "id": "TOD-LMBL",
+              "text": "Todos are still there after the app is closed and reopened."
+            },
+            {
+              "id": "TOD-BTPW",
+              "text": "A todo can be dragged by a long press to a new place in the list, and keeps that place.",
+              "today": "Todos always stay in the order they were added.",
+              "change": "change"
+            },
+            {
+              "id": "TOD-LAX6",
+              "text": "Each todo shows the date it was added under its title.",
+              "change": "remove",
+              "reason": "Nobody reads it, and it crowds the list."
+            }
+          ],
+          "frames": [
+            {
+              "id": "todos-list-1",
+              "role": "user",
+              "caption": "Todos",
+              "mockup": "mockups/todos-list-1.html"
+            },
+            {
+              "id": "todos-list-2",
+              "role": "user",
+              "caption": "No todos yet",
+              "mockup": "mockups/todos-list-2.html"
+            }
+          ],
+          "stage": "drafting"
+        },
+        {
+          "id": "add",
+          "title": "Adding a todo",
+          "intro": "One field, always at the top.",
+          "requirements": [
+            {
+              "id": "TOD-J9Y8",
+              "text": "The field at the top reads <b>What needs to be done?</b> until the user types."
+            },
+            {
+              "id": "TOD-F8PW",
+              "text": "Pressing Return adds the todo to the end of the list and clears the field."
+            },
+            {
+              "id": "TOD-49WL",
+              "text": "Spaces at either end are trimmed, and a blank todo is never added."
+            }
+          ],
+          "frames": [
+            {
+              "id": "todos-add-1",
+              "role": "user",
+              "caption": "Typing a new todo",
+              "mockup": "mockups/todos-add-1.html"
+            }
+          ],
+          "stage": "built"
+        },
+        {
+          "id": "complete",
+          "title": "Completing todos",
+          "intro": "Tap the check to mark a todo done; tap again to undo.",
+          "requirements": [
+            {
+              "id": "TOD-ENN8",
+              "text": "Tapping a todo's check marks it done: the check fills green and the title is grayed and struck through."
+            },
+            {
+              "id": "TOD-TZA2",
+              "text": "Tapping a done todo's check marks it not done again."
+            },
+            {
+              "id": "TOD-GFP8",
+              "text": "The arrow beside the field marks every todo done, or, when all are done, marks every todo not done."
+            },
+            {
+              "id": "TOD-WX2R",
+              "text": "<b>Clear completed</b> shows in the footer while any todo is done, and removes every done todo."
+            }
+          ],
+          "frames": [
+            {
+              "id": "todos-complete-1",
+              "role": "user",
+              "caption": "All marked done",
+              "mockup": "mockups/todos-complete-1.html"
+            }
+          ],
+          "stage": "built"
+        },
+        {
+          "id": "edit",
+          "title": "Editing and deleting",
+          "intro": "Change a todo where it is, or swipe it away.",
+          "requirements": [
+            {
+              "id": "TOD-N4P3",
+              "text": "Tapping a todo's title edits it in place; Return saves and tapping elsewhere also saves."
+            },
+            {
+              "id": "TOD-X24M",
+              "text": "Saving an empty title deletes the todo."
+            },
+            {
+              "id": "TOD-RW3L",
+              "text": "Swiping a todo left shows <b>Delete</b>, which removes it."
+            }
+          ],
+          "frames": [
+            {
+              "id": "todos-edit-1",
+              "role": "user",
+              "caption": "Editing a title",
+              "mockup": "mockups/todos-edit-1.html"
+            },
+            {
+              "id": "todos-edit-2",
+              "role": "user",
+              "caption": "Swiped to delete",
+              "mockup": "mockups/todos-edit-2.html"
+            }
+          ],
+          "stage": "built"
+        }
+      ]
+    },
+    {
+      "id": "filters",
+      "prefix": "FLT",
+      "title": "Filters",
+      "intro": "Show only what is left, or only what is done.",
+      "sections": [
+        {
+          "id": "bar",
+          "title": "The filter bar",
+          "intro": "Three choices under the field.",
+          "requirements": [
+            {
+              "id": "FLT-36VG",
+              "text": "Under the field, <b>All</b>, <b>Active</b> and <b>Completed</b> filter the list; <b>All</b> is chosen at first.",
+              "change": "add"
+            },
+            {
+              "id": "FLT-4QLH",
+              "text": "The footer count always counts every todo that is not done, whatever the filter.",
+              "change": "add"
+            },
+            {
+              "id": "FLT-YXRD",
+              "text": "The chosen filter is remembered when the app is reopened.",
+              "change": "add"
+            }
+          ],
+          "frames": [
+            {
+              "id": "filters-bar-1",
+              "role": "user",
+              "caption": "Active only",
+              "mockup": "mockups/filters-bar-1.html"
+            }
+          ],
+          "stage": "drafting"
+        }
+      ]
+    },
+    {
+      "id": "later",
+      "prefix": "LAT",
+      "title": "Later",
+      "intro": "Not designed yet; listed so nothing built now gets in their way.",
+      "sections": [
+        {
+          "id": "due",
+          "title": "Due dates and reminders",
+          "intro": "When a todo should be done, and a nudge before then.",
+          "requirements": [
+            {
+              "id": "LAT-EMZA",
+              "text": "A todo can have a due date, shown under its title.",
+              "change": "add"
+            },
+            {
+              "id": "LAT-EDBR",
+              "text": "A todo with a due date can remind the user with a notification.",
+              "change": "add"
+            }
+          ],
+          "frames": [],
+          "stage": "drafting",
+          "label": "Phase 2"
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "id": "DEC-2DWF",
+      "title": "One screen, no tabs",
+      "body": "Everything happens on the list: adding, editing and deleting are in place. Rejected a separate edit screen, since a todo has only a title.",
+      "kind": "decision",
+      "by": "user",
+      "about": [],
+      "date": "2026-11-12"
+    },
+    {
+      "id": "DEC-BYGF",
+      "date": "2026-11-12",
+      "about": [],
+      "by": "user",
+      "title": "Todos stay on the device: no accounts, no sync",
+      "body": "Todos are kept only on the device: no accounts, no sync. Revisit if the user wants todos on more than one device.",
+      "kind": "decision"
+    }
+  ],
+  "usedIds": [
+    "BK-SYY4",
+    "DEC-2DWF",
+    "DEC-BYGF",
+    "FLT-36VG",
+    "FLT-4QLH",
+    "FLT-YXRD",
+    "LAT-EDBR",
+    "LAT-EMZA",
+    "TOD-49WL",
+    "TOD-BTPW",
+    "TOD-ENN8",
+    "TOD-F8PW",
+    "TOD-FXDW",
+    "TOD-GFP8",
+    "TOD-J9Y8",
+    "TOD-LAX6",
+    "TOD-LGXT",
+    "TOD-LMBL",
+    "TOD-N4P3",
+    "TOD-RW3L",
+    "TOD-TZA2",
+    "TOD-VWFF",
+    "TOD-WX2R",
+    "TOD-X24M"
+  ]
+}
