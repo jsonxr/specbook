@@ -1934,6 +1934,32 @@ try {
     }
   });
 
+  await check('the Screens list draws every state of each screen under its name, screenshot-sized, and a click on one opens it', async () => {
+    await page.goto(`${URL}#screens`);
+    await page.waitForSelector('.sv-list .sv-strip figure.state', { timeout: 5000 });
+    const seen = await page.evaluate(() => [...document.querySelectorAll('.sv-row')].map(r => [r.querySelector('a.sv-name')?.textContent,
+      [...r.querySelectorAll('.sv-strip figure.state')].filter(f => f.querySelector('.mock')?.shadowRoot?.querySelector('*')).length,
+      (r.querySelector('.sv-strip')?.compareDocumentPosition(r.querySelector('.sv-row-head')) & Node.DOCUMENT_POSITION_PRECEDING) !== 0]));
+    if (JSON.stringify(seen) !== JSON.stringify([['TodosScreen', 7, true], ['FiltersBar', 2, true]])) {
+      throw new Error(`the Screens list: ${JSON.stringify(seen)}`);
+    }
+    // As wide as the book's screenshot column (settings.screenshotWidth, 100px by default).
+    await page.waitForFunction(() => [...document.querySelectorAll('.sv-strip .mock')].every(m => m.style.zoom), null, { timeout: 5000 });
+    const widths = await page.evaluate(() => [...document.querySelectorAll('.sv-strip .mock')].map(m => Math.round(m.getBoundingClientRect().width)));
+    if (widths.some(w => Math.abs(w - 100) > 2)) { throw new Error(`list pictures are ${JSON.stringify(widths)}px wide, not 100`); }
+    await page.locator(`.sv-strip figure.state[data-go="${TODOS}.empty"]`).click();
+    await page.waitForFunction(t => location.hash === `#screen/${t}.empty` && document.querySelector('figure.state.sv-target'), TODOS, { timeout: 5000 });
+  });
+
+  await check('outside comment mode a click on a picture in the book opens its state in the Screens view', async () => {
+    await page.goto(`${URL}#todos-list`);
+    const fig = page.locator(`#todos-list figure.state[data-key="${TODOS}.empty"]`);
+    await fig.waitFor({ timeout: 5000 });
+    await fig.locator('.mock').click();
+    await page.waitForFunction(t => location.hash === `#screen/${t}.empty` && document.querySelector(`figure.state.sv-target[data-key="${t}.empty"]`), TODOS, { timeout: 5000 });
+    await page.goto(`${URL}#todos-list`);
+  });
+
   await check('a component\'s page shows its states and Used on: a thumbnail of each placing state, the component outlined', async () => {
     await page.goto(`${URL}#screen/${BAR}`);
     await page.waitForSelector('.sv-page');

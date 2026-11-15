@@ -979,6 +979,9 @@
     var label = screenLabel(key);
     var fig = stateFigureFor(key, label, sh.highlight, s);
     tgtAttrs(fig, key, num + ' ' + s.title + ' · screen “' + label + '”', 'Screen: ' + label, key);
+    // Outside comment mode a click on the picture opens the screen's page at this state.
+    fig.dataset.go = key;
+    fig.title = 'Open ' + label + ' in Screens';
     return fig;
   }
   // The figure of a state, captioned with `label`, without its note target (the chapter view and the Screens view
@@ -990,7 +993,15 @@
     var cap = '';
     if (hit) {
       var role = hit.state.when && hit.state.when.role;
-      if (role) { cap += '<span class="role" style="background:' + esc(roleInfo(role).color) + '">' + esc(roleInfo(role).label) + '</span> '; }
+      var name = hit.state.name || hit.state.id;
+      if (role) {
+        var rl = roleInfo(role).label;
+        cap += '<span class="role" style="background:' + esc(roleInfo(role).color) + '" title="Who sees it: ' + esc(rl) + '">' + esc(rl) + '</span> ';
+        // A state named after its role ("Signed out" for the signed-out view) says it once, in the role's pill.
+        if (String(name).trim().toLowerCase() === String(rl).trim().toLowerCase()) {
+          label = label === name ? '' : label.slice(-(' · ' + name).length) === ' · ' + name ? label.slice(0, -(' · ' + name).length) : label;
+        }
+      }
       cap += esc(label);
       if (hit.state.sameAs) { cap += ' <span class="fstate">Same as ' + esc(drawn ? drawn.state.name : hit.state.sameAs) + '</span>'; }
       var m = hit.state.change;
@@ -1116,15 +1127,56 @@
         g.ids.forEach(function (id) {
           var sc = ix.screens[id];
           var states = (sc.states || []).length;
-          ul.appendChild(el('li', { class: 'sv-row' }, '<a class="sv-name" href="#screen/' + esc(id) + '">' + esc(sc.name || id) + '</a>' + openCount(rv, id) +
+          var li = el('li', { class: 'sv-row' });
+          li.appendChild(el('div', { class: 'sv-row-head' }, '<a class="sv-name" href="#screen/' + esc(id) + '">' + esc(sc.name || id) + '</a>' + openCount(rv, id) +
             ' <span class="sv-meta">' + plural(states, 'state', 'states') + '</span> ' + fileHtml(sc)));
+          // Every state drawn as in the book; a click opens the screen's page at that state.
+          var strip = el('div', { class: 'states sv-strip' });
+          window.SpecModel.byRole(state.book, sc.states).forEach(function (st) {
+            var key = window.SpecModel.stateKey(id, st.id);
+            var fig = stateFigureFor(key, st.name || st.id, null, null);
+            fig.dataset.go = key;
+            fig.title = 'Open ' + screenLabel(key);
+            var wrap = el('div', { class: 'state-item' });
+            wrap.appendChild(fig);
+            strip.appendChild(wrap);
+          });
+          if (states) { li.appendChild(strip); }
+          ul.appendChild(li);
         });
         sec.appendChild(ul);
         main.appendChild(sec);
       });
+      fitStrips();
       return;
     }
     main.appendChild(screenPage(route, rv));
+  }
+  // The Screens list draws its pictures as wide as the book's screenshot column (settings.screenshotWidth): each
+  // mockup is scaled down from its own drawn width, once it is laid out.
+  // A screen's picture is also cut to one height for the whole list (the usual phone's, the median shape), so every
+  // phone lines up with its neighbors; a taller drawing loses its bottom here, never on the screen's own page.
+  function fitStrips() {
+    window.requestAnimationFrame(function () {
+      var w = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--shot-w')) || 100;
+      var phones = [];
+      main.querySelectorAll('.sv-strip .mock').forEach(function (m) {
+        m.style.zoom = '';
+        m.style.height = '';
+        var box = m.getBoundingClientRect();
+        if (box.width <= 0) { return; }
+        var z = Math.min(1, w / box.width);
+        m.style.zoom = String(z);
+        if (m.closest('.sv-list[data-kind="screen"]')) { phones.push({ m: m, z: z, ratio: box.height / box.width }); }
+      });
+      if (!phones.length) { return; }
+      var ratios = phones.map(function (p) { return p.ratio; }).sort(function (a, b) { return a - b; });
+      var ratio = ratios[Math.floor(ratios.length / 2)];
+      phones.forEach(function (p) {
+        p.m.style.height = (w * ratio / p.z) + 'px';
+        p.m.style.overflow = 'hidden';
+      });
+    });
   }
   // The reviews of a screen's states that are gone from the book, by their keys.
   function removedStates(rv, id) {
@@ -2746,7 +2798,13 @@
       act.blur();
       return;
     }
-    if (!commenting || !book) { return; }
+    if (!commenting) {
+      // A picture of a state, in the book or the Screens list, opens that state on its screen's page.
+      var go = book && t && t.closest ? t.closest('[data-go]') : null;
+      if (go && !t.closest('a, button, input, textarea, video')) { e.preventDefault(); location.hash = 'screen/' + go.dataset.go; }
+      return;
+    }
+    if (!book) { return; }
     e.preventDefault(); e.stopPropagation();
     var tg = targetAt(e.clientX, e.clientY);
     if (!tg) { return; }

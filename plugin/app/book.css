@@ -672,8 +672,23 @@ main code { overflow-wrap: anywhere; }
 .sv-list h2 { font-size: 22px; margin: 0 0 10px; }
 .sv-n { font: 600 15px var(--mono); color: var(--muted); }
 .sv-rows { list-style: none; margin: 0; padding: 6px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
-.sv-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.sv-row { padding: 14px 0 22px; border-bottom: 1px solid var(--line); }
 .sv-row:last-child { border-bottom: 0; }
+/* The list's pictures are screenshot-sized (the book's --shot-w); a click opens the state. */
+.sv-strip { gap: 18px 16px; }
+.sv-strip .state-item { min-width: 0; width: auto; }
+/* Captions and pane labels go under the pictures, so a long caption never pushes its picture out of line. */
+.sv-strip figure.state, .sv-strip .state-pane { display: flex; flex-direction: column; }
+.sv-strip figure.state figcaption { order: 2; font-size: 11px; max-width: calc(var(--shot-w, 100px) + 40px); margin: 6px 0 0; }
+.sv-strip .state-pane-label { order: 2; margin-top: 4px; }
+.sv-strip figure.state figcaption .role { font-size: 10px; }
+.sv-strip .state-body, .sv-strip .state-change { gap: 8px; }
+.sv-strip .shot { width: var(--shot-w, 100px); border-width: 3px; border-radius: 12px; }
+.sv-strip .state-pane-label { font-size: 10px; }
+.sv-strip .state-absent, .sv-strip .noshot { width: var(--shot-w, 100px); min-height: 60px; padding: 8px; border-radius: 10px; font-size: 11px; }
+.sv-row-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 14px; }
+body:not(.commenting) [data-go] { cursor: pointer; }
+body:not(.commenting) [data-go]:hover figcaption { color: var(--accent); }
 .sv-name { font-weight: 600; text-decoration: none; }
 .sv-meta, .sv-nofile { color: var(--muted); font-size: 13px; }
 .sv-file { overflow-wrap: anywhere; min-width: 0; }
@@ -690,8 +705,10 @@ figure.state.sv-target { outline: 2px solid var(--note); outline-offset: 6px; bo
 .sv-hint { color: var(--muted); font-size: 13px; font-style: italic; margin: 14px 0 0; }
 .sv-none { color: var(--muted); font-size: 14px; margin: 0; }
 /* A component's own picture has no phone around it: it is drawn on a phone's width and background. */
-.sv-comp .sv-states .mock { width: 270px; max-width: 100%; background: #fff; color: #111; border-radius: 12px; padding: 8px 0;
-  font: 12.5px -apple-system, system-ui, sans-serif; }
+.sv-comp .sv-states .mock, .sv-list[data-kind="component"] .mock { width: 270px; max-width: 100%; background: #fff; color: #111; border-radius: 12px; padding: 8px 0;
+  font: 12.5px -apple-system, system-ui, sans-serif;
+  /* A piece drawn to sit at a phone's edge (a tab bar) stays inside its own box, not the reader's window. */
+  position: relative; contain: paint; min-height: 64px; }
 .sv-reqs { display: grid; gap: 14px; max-width: 900px; }
 .sv-where { margin: 0 0 6px; font: 600 13px var(--mono); }
 .sv-where a { color: var(--muted); text-decoration: none; }
