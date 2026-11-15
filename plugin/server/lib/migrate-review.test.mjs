@@ -50,7 +50,7 @@ test('no baseline: everything is accepted from the current book', () => {
   assert.equal(migrateReview(data, NOW), 'from-book');
   const review = readReview(data);
   assert.deepEqual(review.accepted.R1, { text: 'now' });
-  assert.deepEqual(review.accepted['SCR-S.a'], { name: 'cap now', mockup: '<now>', today: null });
+  assert.deepEqual(review.accepted['SCR-S.a'], { name: 'cap now', mockup: '<now>' });
   assert.deepEqual(review.accepted['c-s'], { title: 'S', intro: 'intro now', shows: [{ state: 'SCR-S.a' }] });
   assert.deepEqual(review.accepted.c, { title: 'C', intro: '' });
   assert.equal(open(data).count, 0);
@@ -64,7 +64,7 @@ test('baseline: accepted holds the old values, so changes become reviews stamped
   assert.equal(migrateReview(data, NOW), 'from-baseline');
   const review = readReview(data);
   assert.deepEqual(review.accepted.R1, { text: 'old' });
-  assert.deepEqual(review.accepted['SCR-S.a'], { name: 'cap old', mockup: '<old>', today: null });
+  assert.deepEqual(review.accepted['SCR-S.a'], { name: 'cap old', mockup: '<old>' });
   assert.deepEqual(review.accepted['c-s'], { title: 'S', intro: 'intro old', shows: [{ state: 'SCR-S.a' }] });
   assert.deepEqual(Object.keys(open(data).byKey).sort(), ['R1', 'SCR-S.a', 'c-s']);
   assert.equal(review.opened.R1, NOW);
@@ -90,7 +90,7 @@ test('old accepted entries are mapped to the new keys; :stage dropped; state str
   const review = readReview(data);
   assert.deepEqual(review.accepted.R1, { text: 'now' });
   assert.deepEqual(review.accepted['c-s'], { title: 'S', intro: 'intro now' });
-  assert.deepEqual(review.accepted['SCR-S.a'], { name: 'cap now', mockup: '<now>', today: null });
+  assert.deepEqual(review.accepted['SCR-S.a'], { name: 'cap now', mockup: '<now>' });
   assert.equal('c-s:sec' in review.accepted, false);
   assert.equal('c-s:stage' in review.accepted, false);
   assert.equal('R2' in review.accepted, false);

@@ -32,7 +32,7 @@ function setup(book, review) {
 }
 
 const writeBook = (data, book) => writeFileSync(join(data, 'book.json'), JSON.stringify(book));
-const stateValue = { name: 'cap', mockup: '<a>', today: null };
+const stateValue = { name: 'cap', mockup: '<a>' };
 const base = (extra = {}) => ({ rev: 3, accepted: { c: { title: 'C', intro: '' }, 'c-s': { title: 'S', intro: '', shows: [{ state: 'SCR-S.a' }] }, 'SCR-S': { name: 'S', kind: 'screen' }, 'SCR-S.a': stateValue }, notes: {}, tries: {}, opened: {}, where: {}, ...extra });
 
 test('readReview defaults when missing or corrupt', () => {

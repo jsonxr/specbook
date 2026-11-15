@@ -54,7 +54,7 @@
   // ---- Items and reviews ----------------------------------------------------------------------------------------
   // A reviewable item has a key and a value: a requirement (its id; text, change, today, reason, screens), a screen
   // (its id; name, kind, file, intro), a state (its key "<screen id>.<state id>"; name, when, sameAs, absent, change,
-  // reason, and the text of its mockup and today files), a section heading ("<chapter>-<section>"; title, intro, shows)
+  // reason, and the text of its mockup and today files, each only when the state has that path), a section heading ("<chapter>-<section>"; title, intro, shows)
   // and a chapter heading (the chapter id; title, intro). Screens and states belong to no section or chapter; the
   // sections that show them count their reviews. Stage, label and decisions are not reviewed.
   var REQ_FIELDS = ['text', 'change', 'today', 'reason', 'screens'];
@@ -95,8 +95,9 @@
         var text = function (path) {
           return typeof path === 'string' && has(texts, path) && texts[path] !== undefined ? texts[path] : null;
         };
-        v.mockup = text(st.mockup);
-        v.today = text(st.today);
+        // A picture field is there only when the state has that path (a path whose file is missing reads as null).
+        if (st.mockup !== undefined) { v.mockup = text(st.mockup); }
+        if (st.today !== undefined) { v.today = text(st.today); }
         items[stateKey(sc.id, st.id)] = { kind: 'state', value: v, section: null, chapter: null, screen: sc.id };
       });
     });
@@ -229,12 +230,12 @@
         return;
       }
       // A removed item is no longer in the book; where it lived comes from review.where when the server wrote it.
-      // Without review.where the kind is guessed from the accepted value's shape: a chapter and a section share
-      // {title, intro}, so a removed chapter guesses 'section'.
+      // Without review.where the kind is guessed: a key with a dot is a state; otherwise from the accepted value's
+      // shape, where a chapter and a section share {title, intro}, so a removed chapter guesses 'section'.
       var place = item || (has(where, key) && where[key] ? where[key] : null);
       out.byKey[key] = {
         key: key,
-        kind: place && place.kind ? place.kind : (was && was.title !== undefined ? 'section' : was && was.mockup !== undefined ? 'state' : 'req'),
+        kind: place && place.kind ? place.kind : (key.indexOf('.') >= 0 ? 'state' : was && was.title !== undefined ? 'section' : was && was.mockup !== undefined ? 'state' : 'req'),
         status: status,
         accepted: was,
         current: current,

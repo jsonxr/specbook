@@ -7,7 +7,7 @@ import { readJson, writeJsonAtomic } from './json-file.mjs';
 import { startBuild, latestBuild, stopBuild, recordTask, recordRequirement, recordCall, beat, finishBuild, reviewCall } from './builds.mjs';
 import { createRequire } from 'node:module';
 import { currentSnapshot, readHistory, readReview } from './review.mjs';
-import { acceptAll, startAccepted, startKeepingReview } from './accept-all.testkit.mjs';
+import { acceptAll, assertNothingReopens, startAccepted, startKeepingReview } from './accept-all.testkit.mjs';
 import { findRequirement } from './book-model.mjs';
 import { fileBuildRequests, fileRequest, listPending, writeRequest } from './requests.mjs';
 
@@ -190,6 +190,7 @@ test('finishBuild applies proven changes, removes removals, and marks built', ()
   assert.ok(latest.finishedAt);
   assert.equal(latest.requirements.R1.status, 'proven');
   assert.equal(latest.requirements.R3.status, 'proven');
+  assertNothingReopens(data, out.built);
   assert.throws(() => finishBuild(data, p.id), { code: 'not-running' });
 });
 
@@ -230,6 +231,7 @@ test('finishBuild with no removals needs only its changes proven', () => {
   const p = startAccepted(data);
   writeEvidence({ R1: { unit: [{ status: 'passed' }] } });
   assert.deepEqual(finishBuild(data, p.id), { built: ['c-r'], drafting: [] });
+  assertNothingReopens(data, ['c-r']);
 });
 
 test('recordRequirement rejects an unknown status', () => {
@@ -247,7 +249,7 @@ function seedReview() {
   const call = recordCall(data, p.id, { about: ['R1'], section: 'c-r', title: 't', body: 'b', before: 'before text', after: 'after text' });
   const removed = recordCall(data, p.id, { about: ['R3'], section: 'c-r', title: 'gone', body: 'rb', before: 'x', after: 'y' });
   writeEvidence({ R0: { unit: [{ status: 'passed' }] }, R1: { unit: [{ status: 'passed' }] }, R2: { e2e: [{ status: 'passed' }] } });
-  finishBuild(data, p.id);
+  assertNothingReopens(data, finishBuild(data, p.id).built);
   return { id: p.id, callId: call.id, removedCallId: removed.id };
 }
 
@@ -315,12 +317,18 @@ test('finishBuild drops the markers into the accepted copy, records built histor
   seedFinishBook();
   writeJsonAtomic(join(data, 'review.json'), {
     rev: 4,
-    accepted: { R0: { text: 'a' }, R2: { text: 'c', change: 'change', today: 'old c' }, R3: { text: '<p>d</p>', change: 'remove', reason: 'gone' } },
+    accepted: {
+      c: { title: '', intro: '' },
+      'c-r': { title: '', intro: '' },
+      R0: { text: 'a' },
+      R2: { text: 'c', change: 'change', today: 'old c' },
+      R3: { text: '<p>d</p>', change: 'remove', reason: 'gone' },
+    },
     notes: {}, tries: {}, opened: {}, where: {},
   });
   const p = startKeepingReview(data);
   allProven();
-  finishBuild(data, p.id, Date.parse('2026-11-14T10:00:00Z'), { summary: 'People can filter.' });
+  assertNothingReopens(data, finishBuild(data, p.id, Date.parse('2026-11-14T10:00:00Z'), { summary: 'People can filter.' }).built);
   const review = readReview(data);
   assert.deepEqual(review.accepted.R1, { text: 'b' });
   assert.deepEqual(review.accepted.R2, { text: 'c' });
@@ -366,11 +374,11 @@ test('a build that also reworded text leaves the item under review against the o
 
 test('finishBuild lists the build commits and does not add a second changelog entry for the same build', () => {
   seedFinishBook();
-  const p = startKeepingReview(data);
+  const p = startAccepted(data);
   const progress = readJson(join(data, 'builds', p.id, 'progress.json'), null);
   writeJsonAtomic(join(data, 'builds', p.id, 'progress.json'), { ...progress, commits: ['abc1234'] });
   allProven();
-  finishBuild(data, p.id, Date.now(), { summary: 's' });
+  assertNothingReopens(data, finishBuild(data, p.id, Date.now(), { summary: 's' }).built);
   assert.deepEqual(readHistory(data).changelog[0].commits, ['abc1234']);
   // Crash-then-retry: the build is running again, the book still carries its markers.
   const done = readJson(join(data, 'builds', p.id, 'progress.json'), null);
@@ -379,7 +387,7 @@ test('finishBuild lists the build commits and does not add a second changelog en
   finishBuild(data, p.id, Date.now(), { summary: 's' });
   const history = readHistory(data);
   assert.equal(history.changelog.length, 1);
-  assert.equal(history.items.R1.length, 1);
+  assert.equal(history.items.R1.filter(e => e.kind === 'built').length, 1);
 });
 
 test('a build with nothing proven adds a changelog entry with no landed items and leaves review.json alone', () => {
@@ -435,6 +443,7 @@ test('a built section lands the changes of the states it shows', () => {
   const p = startAccepted(data);
   const out = finishBuild(data, p.id, Date.parse('2026-11-12T23:30:00Z'));
   assert.deepEqual(out, { built: ['c-r'], drafting: [] });
+  assertNothingReopens(data, out.built);
   const book = readBook();
   assert.equal(stateOf('admin').change, undefined);
   assert.equal(stateOf('new').change, undefined);
@@ -506,7 +515,7 @@ test('removing a state repairs what named it, accepted copies included, and the 
   writeJsonAtomic(join(data, 'book.json'), book);
   const p = startAccepted(data);
   writeEvidence({ R1: { unit: [{ status: 'passed' }] } });
-  finishBuild(data, p.id);
+  assertNothingReopens(data, finishBuild(data, p.id).built);
   assert.equal(problemOf(), null);
   const after = readBook().chapters[0].sections[0];
   assert.deepEqual(after.shows.map(s => s.state), ['SCR-HOME.admin', 'SCR-HOME.new', 'SCR-HOME.admin']);
@@ -523,7 +532,7 @@ test('a removal something still depends on is held back and named in the summary
   book.screens[0].states.push({ id: 'same', name: 'Same', when: { role: 'x' }, sameAs: 'old' });
   writeJsonAtomic(join(data, 'book.json'), book);
   const p = startAccepted(data);
-  finishBuild(data, p.id);
+  assertNothingReopens(data, finishBuild(data, p.id).built);
   assert.equal(stateOf('old').change, 'remove');
   assert.equal(existsSync(join(data, 'mockups/home-old.html')), true);
   assert.deepEqual(readBook().decisions ?? [], []);

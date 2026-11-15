@@ -36,7 +36,7 @@ test('itemsOf lists chapters, sections, requirements, screens and states by key'
   assert.deepEqual(items['c-s'], { kind: 'section', value: { title: 'S', intro: '', shows: [{ state: 'SCR-X.a' }] }, section: 'c-s', chapter: 'c' });
   assert.deepEqual(items.R1, { kind: 'req', value: { text: 'one', change: 'change', today: 'was' }, section: 'c-s', chapter: 'c' });
   assert.deepEqual(items['SCR-X'], { kind: 'screen', value: { name: 'X', kind: 'screen', intro: 'xi' }, section: null, chapter: null, screen: 'SCR-X' });
-  assert.deepEqual(items['SCR-X.a'], { kind: 'state', value: { name: 'A', when: { role: 'admin' }, mockup: '<a>', today: null }, section: null, chapter: null, screen: 'SCR-X' });
+  assert.deepEqual(items['SCR-X.a'], { kind: 'state', value: { name: 'A', when: { role: 'admin' }, mockup: '<a>' }, section: null, chapter: null, screen: 'SCR-X' });
   assert.equal(items['SCR-X.b'].value.mockup, null);
 });
 test('sameValue ignores undefined fields and compares the rest', () => {
@@ -135,7 +135,7 @@ test('reviews: no reversal on a notes-only review whose value equals the accepte
 test('reviews: bySection/byChapter/count', () => {
   const acc = accepted();
   acc.R2 = { text: 'old' }; // requirement changed -> section c-s
-  acc['SCR-X.a'] = { name: 'A', mockup: '<z>', today: null }; // state changed -> section c-s, which shows it
+  acc['SCR-X.a'] = { name: 'A', mockup: '<z>' }; // state changed -> section c-s, which shows it
   acc['c-s'] = { title: 'old', intro: '' }; // section heading -> itself
   acc.c = { title: 'old', intro: 'ci' }; // chapter heading -> chapter
   const r = M.reviews(book(), MOCK, { accepted: acc }, {});
@@ -228,7 +228,7 @@ test('itemsOf: one screen item per screen, one state item per state, no frames',
   assert.equal(items['SCR-HOME'].screen, 'SCR-HOME');
   assert.equal(items['SCR-HOME.admin'].value.mockup, '<p>admin</p>');
   assert.equal(items['SCR-HOME.admin'].value.today, '<p>admin old</p>');
-  assert.deepEqual(items['SCR-HOME.visitor'].value, { name: 'Visitor', when: { role: 'visitor' }, sameAs: 'member', mockup: null, today: null });
+  assert.deepEqual(items['SCR-HOME.visitor'].value, { name: 'Visitor', when: { role: 'visitor' }, sameAs: 'member' });
   assert.equal(items['SCR-HOME.admin'].section, null);
   assert.equal(items['SCR-HOME.admin'].chapter, null);
   assert.deepEqual(items.R1.value.screens, [{ screen: 'SCR-CARD' }]);
@@ -260,7 +260,7 @@ test('reviews: a changed screen counts toward every section that shows one of it
 test('reviews: a state shown nowhere is under review without touching any section', () => {
   const b = screensBook();
   const acc = acceptedOf(b, screenTexts());
-  acc['SCR-CARD.waiting'] = { name: 'old', mockup: '<b>3</b>', today: null };
+  acc['SCR-CARD.waiting'] = { name: 'old', mockup: '<b>3</b>' };
   const r = M.reviews(b, screenTexts(), { accepted: acc }, {});
   assert.equal(r.count, 1);
   assert.deepEqual(r.bySection, {});
@@ -285,4 +285,29 @@ test('reviews: a removed item whose accepted value has a mockup is guessed to be
   assert.equal(r.byKey['SCR-GONE.x'].kind, 'state');
   assert.equal(r.byKey['SCR-GONE.x'].status, 'removed');
   assert.equal(r.byScreen['SCR-GONE'], 1);
+});
+
+test('reviews: a removed sameAs or absent state (no mockup in its accepted copy) is guessed to be a state by its key', () => {
+  const acc = acceptedOf(screensBook(), screenTexts());
+  acc['SCR-GONE.same'] = { name: 'same', sameAs: 'x' };
+  const r = M.reviews(screensBook(), screenTexts(), { accepted: acc }, {});
+  assert.equal(r.byKey['SCR-GONE.same'].kind, 'state');
+  assert.equal(r.byScreen['SCR-GONE'], 1);
+});
+
+test('itemsOf: a state value has mockup and today only when the state has that path; a missing file reads as null', () => {
+  const book = { screens: [{ id: 'SCR-X', name: 'X', kind: 'screen', states: [
+    { id: 'a', name: 'A', mockup: 'mockups/a.html' },
+    { id: 'b', name: 'B', mockup: 'mockups/b.html', today: 'mockups/gone.html', change: 'change' },
+    { id: 'c', name: 'C', absent: true }
+  ] }], chapters: [] };
+  const items = M.itemsOf(book, { 'mockups/a.html': '<a>', 'mockups/b.html': '<b>' });
+  assert.deepEqual(items['SCR-X.a'].value, { name: 'A', mockup: '<a>' });
+  assert.deepEqual(items['SCR-X.b'].value, { name: 'B', change: 'change', mockup: '<b>', today: null });
+  assert.deepEqual(items['SCR-X.c'].value, { name: 'C', absent: true });
+  // A landed state (marker and today dropped) equals its accepted copy with the same fields dropped.
+  const landed = { name: 'B', mockup: '<b>' };
+  delete book.screens[0].states[1].change;
+  delete book.screens[0].states[1].today;
+  assert.ok(M.sameValue(M.itemsOf(book, { 'mockups/b.html': '<b>' })['SCR-X.b'].value, landed));
 });

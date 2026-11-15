@@ -1,8 +1,12 @@
 // Test helpers: accept the whole book as it stands, so a Ready section may build (only accepted work is built).
+import assert from 'node:assert/strict';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import { acceptItem, currentItems } from './review.mjs';
+import { acceptItem, currentItems, currentSnapshot, readHistory, readReview, sectionsUnderReview } from './review.mjs';
 import { startBuild } from './builds.mjs';
+
+const SpecModel = createRequire(import.meta.url)('../../app/model.js');
 
 export function acceptAll(data) {
   for (const key of Object.keys(currentItems(data))) {
@@ -30,4 +34,23 @@ export function startKeepingReview(data, now) {
   const progress = startAccepted(data, now);
   files.forEach((f, i) => (saved[i] === null ? rmSync(f, { force: true }) : writeFileSync(f, saved[i])));
   return progress;
+}
+
+// Asserts that a finished build reopened nothing in the sections it built: no review on their headings, their
+// requirements or anything their Accept gate covers, and none of them still under review.
+export function assertNothingReopens(data, built) {
+  const { book, mockups } = currentSnapshot(data);
+  const rv = SpecModel.reviews(book, mockups, readReview(data), readHistory(data));
+  const keys = [];
+  for (const ch of book.chapters ?? []) {
+    for (const s of ch.sections ?? []) {
+      const fullId = `${ch.id}-${s.id}`;
+      if (!built.includes(fullId)) {
+        continue;
+      }
+      keys.push(fullId, ...(s.requirements ?? []).map(r => r?.id).filter(Boolean), ...SpecModel.gateKeys(book, mockups, fullId));
+    }
+  }
+  assert.deepEqual(keys.filter(k => rv.byKey[k]).map(k => `${k} (${rv.byKey[k].status})`), [], 'nothing reopens after a build');
+  assert.deepEqual(sectionsUnderReview(data, built), [], 'no built section is under review');
 }
