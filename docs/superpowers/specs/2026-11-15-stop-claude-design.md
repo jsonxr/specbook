@@ -37,3 +37,18 @@ skill ever finding out.
 **Builder's calls.** Endpoint `POST /api/claude/stop` (owner only), answering `{ stopped: 'revise' | 'build', count }`,
 409 `idle` when nothing is running. `claudeState` gains `sent: { kind, at, count }` for the running row's text. Phone
 targets 44 points; Esc closes the question like the menu.
+
+## Revision, same day: stop at the next write, never half a section
+
+Decided after review: the book still unlocks at once, and Claude must stop right before it writes or commits.
+
+- **The hook.** A reader cannot press Esc in the terminal, so the plugin ships a PreToolUse hook
+  (`plugin/hooks/hooks.json`, `server/stop-hook.mjs`). Stop raises `requests/stop.flag`; while it is up (an hour at most,
+  or until the skill's `--check` acknowledges it, or a new request), the hook refuses Claude's edits to the book, its
+  mockups and the working copy, and any `git commit`. `review.mjs link` and `reply` refuse too.
+- **Whole sections only.** Revise edits a working copy (`review.mjs work`) and lands each reviewed section in one step
+  (`review.mjs land`), which checks the request is still pending and the working book valid (parses, unique ids, every
+  frame's mockup exists). A Stop never leaves half a section in the book.
+- **The menu stays accurate.** A build not yet started says "requested at" and its question says its sections stay
+  Ready; a build running with no request still shows its sections. Notes back to drafts lose Claude's reply and links.
+  Stop and Claude's own filing race safely: moving the request file is the claim, and the loser changes nothing.

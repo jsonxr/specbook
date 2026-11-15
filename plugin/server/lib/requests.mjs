@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { readJson, writeJsonAtomic } from './json-file.mjs';
-import { setNotesStatus, unsendNotes } from './review.mjs';
+import { readReview, setNotesStatus, unsendNotes } from './review.mjs';
 import { latestBuild, stopBuild } from './builds.mjs';
 
 // Pending requests, oldest first, as { file: <name inside requests/>, request }. Unreadable files are skipped.
@@ -20,39 +20,65 @@ export function listPending(data) {
   return out;
 }
 
+// The flag a Stop leaves for the plugin's hook (server/stop-hook.mjs), which refuses Claude's edits to the book and
+// its commits while it is up: { request, kind, at }, or null. A new request, or the skill's --check, takes it down.
+const flagFile = data => join(data, 'requests', 'stop.flag');
+export function stopFlag(data) {
+  return readJson(flagFile(data), null);
+}
+export function clearStopFlag(data) {
+  rmSync(flagFile(data), { force: true });
+}
+
 // Writes the request to requests/<stamp>.json and returns that data-relative path.
 export function writeRequest(data, request) {
+  clearStopFlag(data);
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const rel = `requests/${stamp}.json`;
   writeJsonAtomic(join(data, rel), request);
   return rel;
 }
 
-// Files a request: marks it handled and moves it to requests/done/. A revise marks the notes it was sent as answered.
-// Returns false when the request is already in requests/done/ (the reader filed it), and throws when it is in neither.
+// Files a request: marks it handled and moves it to requests/done/. A revise marks the notes it was sent (those still
+// `sent`) as answered. Moving the file comes first and is the claim: when Stop got there first, or the reader filed it
+// already, it returns false and changes nothing. It throws when the request is in neither place.
 export function fileRequest(data, file, now = Date.now()) {
   const dir = join(data, 'requests');
   const name = basename(file);
   const src = join(dir, name);
-  if (!existsSync(src) && existsSync(join(dir, 'done', name))) {
+  const dest = join(dir, 'done', name);
+  if (!existsSync(src) && existsSync(dest)) {
     return false;
   }
-  const request = readJson(src, null);
-  if (!request) {
+  if (!readJson(src, null)) {
     throw new Error(`Cannot read ${src}`);
   }
+  if (!claim(src, dest)) {
+    return false;
+  }
+  const request = readJson(dest, null);
   if (request.status === 'stopped') {
     return false;
   }
   if (request.kind === undefined || request.kind === 'revise') {
-    setNotesStatus(data, request.noteIds ?? [], 'answered');
+    const review = readReview(data);
+    setNotesStatus(data, (request.noteIds ?? []).filter(id => review.notes[id]?.status === 'sent'), 'answered');
   }
   request.status = 'handled';
   request.handledAt = new Date(now).toISOString();
-  writeJsonAtomic(src, request);
-  mkdirSync(join(dir, 'done'), { recursive: true });
-  renameSync(src, join(dir, 'done', name));
+  writeJsonAtomic(dest, request);
   return true;
+}
+
+// Moves a pending request into requests/done/; false when something else moved it first.
+function claim(src, dest) {
+  mkdirSync(dirname(dest), { recursive: true });
+  try {
+    renameSync(src, dest);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Files every pending build request, which unlocks the book; returns their file names.
@@ -67,19 +93,21 @@ export function fileBuildRequests(data, now = Date.now()) {
   return filed;
 }
 
-// Moves a request to requests/done/ as withdrawn by the reader's Stop.
+// Withdraws a request for the reader's Stop: moved to requests/done/ (the claim), then marked stopped. False when
+// Claude filed it first.
 function withdraw(data, file, now) {
   const dir = join(data, 'requests');
-  const src = join(dir, file);
-  const request = readJson(src, null);
-  if (!request) {
-    return;
+  const dest = join(dir, 'done', file);
+  if (!claim(join(dir, file), dest)) {
+    return false;
   }
-  request.status = 'stopped';
-  request.stoppedAt = new Date(now).toISOString();
-  writeJsonAtomic(src, request);
-  mkdirSync(join(dir, 'done'), { recursive: true });
-  renameSync(src, join(dir, 'done', file));
+  const request = readJson(dest, null) ?? {};
+  writeJsonAtomic(dest, { ...request, status: 'stopped', stoppedAt: new Date(now).toISOString() });
+  return true;
+}
+
+function raiseFlag(data, file, kind, now) {
+  writeJsonAtomic(flagFile(data), { request: file, kind, at: new Date(now).toISOString() });
 }
 
 // The reader's Stop: withdraws what Claude is working on, the oldest pending request. A Revise's notes go back to
@@ -94,25 +122,32 @@ export function stopRequest(data, now = Date.now()) {
     const running = latestBuild(data);
     if (running?.progress?.state === 'running') {
       stopBuild(data, running.id, 'Stopped in the reader', now);
+      raiseFlag(data, null, 'build', now);
       return { stopped: 'build', count: (running.progress.sections ?? []).length };
     }
     return null;
   }
   if ((oldest.request.kind ?? 'revise') === 'revise') {
-    const count = unsendNotes(data, oldest.request.noteIds ?? []);
-    withdraw(data, oldest.file, now);
-    return { stopped: 'revise', count };
+    if (!withdraw(data, oldest.file, now)) {
+      return null;
+    }
+    raiseFlag(data, oldest.file, 'revise', now);
+    return { stopped: 'revise', count: unsendNotes(data, oldest.request.noteIds ?? []) };
+  }
+  let count = 0;
+  let any = false;
+  for (const { file, request } of pending) {
+    if (request.kind === 'build' && withdraw(data, file, now)) {
+      count = Math.max(count, (request.sections ?? []).length);
+      any = true;
+      raiseFlag(data, file, 'build', now);
+    }
   }
   const running = latestBuild(data);
   if (running?.progress?.state === 'running') {
     stopBuild(data, running.id, 'Stopped in the reader', now);
+    count = count || (running.progress.sections ?? []).length;
+    any = true;
   }
-  let count = 0;
-  for (const { file, request } of pending) {
-    if (request.kind === 'build') {
-      count = Math.max(count, (request.sections ?? []).length);
-      withdraw(data, file, now);
-    }
-  }
-  return { stopped: 'build', count };
+  return any ? { stopped: 'build', count } : null;
 }

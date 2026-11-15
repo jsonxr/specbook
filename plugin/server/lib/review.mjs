@@ -378,7 +378,9 @@ export function unsendNotes(data, ids) {
   const back = new Set();
   for (const id of ids) {
     if (Object.hasOwn(notes, id) && notes[id].status === 'sent') {
-      notes[id] = { ...notes[id], status: 'draft' };
+      // A reply or links Claude wrote before the Stop belong to the withdrawn request, not to the draft.
+      const { reply, causes, ...rest } = notes[id];
+      notes[id] = { ...rest, status: 'draft' };
       back.add(id);
     }
   }

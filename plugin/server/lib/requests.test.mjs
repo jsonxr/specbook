@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readJson, writeJsonAtomic } from './json-file.mjs';
-import { fileRequest, listPending, stopRequest, writeRequest } from './requests.mjs';
+import { fileRequest, listPending, stopFlag, stopRequest, writeRequest } from './requests.mjs';
 import { readReview, sendNotes, setNotesStatus } from './review.mjs';
 import { latestBuild, startBuild } from './builds.mjs';
 
@@ -109,3 +109,38 @@ test('--check says missing for a path that is not a request, and handled for one
   fileRequest(data, file);
   assert.deepEqual(run(join(data, file)), { out: 'handled', code: 0 });
 });
+
+test('a Stop leaves a flag for the hook; a new request or --check clears it', () => {
+  const file = revise(['a']);
+  stopRequest(data, Date.parse('2026-11-15T18:00:00Z'));
+  assert.deepEqual(stopFlag(data), { request: file.replace('requests/', ''), kind: 'revise', at: '2026-11-15T18:00:00.000Z' });
+  writeRequest(data, { kind: 'build', status: 'pending', createdAt: new Date().toISOString(), sections: [] });
+  assert.equal(stopFlag(data), null);
+  stopRequest(data);
+  assert.ok(stopFlag(data));
+  execFileSync(process.execPath, [NEXT, '--data', data, '--check', join(data, file)], { encoding: 'utf8' });
+  assert.equal(stopFlag(data), null);
+});
+
+test('notes back to drafts lose the replies and links Claude wrote before the Stop', () => {
+  revise(['a']);
+  const review = readReview(data);
+  review.notes.a = { ...review.notes.a, reply: 'half an answer', causes: ['R1'] };
+  writeJsonAtomic(join(data, 'review.json'), { ...review, rev: review.rev + 1 });
+  stopRequest(data);
+  const a = readReview(data).notes.a;
+  assert.deepEqual([a.status, 'reply' in a, 'causes' in a], ['draft', false, false]);
+});
+
+test('Stop and filing race: whichever moves the request first wins, and the other changes nothing', () => {
+  const file = revise(['a', 'b']);
+  assert.equal(fileRequest(data, file), true);
+  assert.equal(stopRequest(data), null);
+  assert.deepEqual(['a', 'b'].map(id => readReview(data).notes[id].status), ['answered', 'answered']);
+  const second = writeRequest(data, { kind: 'revise', status: 'pending', createdAt: new Date().toISOString(), items: [{}], noteIds: ['c'] });
+  sendNotes(data, ['c'], new Date().toISOString());
+  stopRequest(data);
+  assert.equal(fileRequest(data, second), false);
+  assert.equal(readReview(data).notes.c.status, 'draft');
+});
+

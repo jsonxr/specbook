@@ -18,6 +18,22 @@ function requestTime(data, { file, request }) {
   }
 }
 
+// What is running, for the reader's Claude menu: its kind, when it was sent (or, for a build under way, when it
+// started), how many notes or sections, and whether a build has started. A build can run with no request left.
+function sentOf(oldest, running) {
+  const kind = oldest ? oldest.request.kind ?? 'revise' : running ? 'build' : null;
+  if (kind === 'revise') {
+    return { kind, at: oldest.request.createdAt ?? null, count: (oldest.request.items ?? []).length };
+  }
+  if (kind !== 'build') {
+    return null;
+  }
+  if (running) {
+    return { kind, at: running.startedAt ?? null, count: (running.sections ?? oldest?.request.sections ?? []).length, started: true };
+  }
+  return { kind, at: oldest.request.createdAt ?? null, count: (oldest.request.sections ?? []).length, started: false };
+}
+
 // What Claude is doing now: idle, revising or building, plus any calls still waiting for the user's review.
 // A build is stale when its heartbeat is over 10 minutes old, and so is a pending build request with no running
 // build and nothing written for it (the request, or the last heartbeat of a build started since) for 10 minutes.
@@ -60,7 +76,7 @@ export function claudeState(data, now = Date.now()) {
     state,
     request: oldest ? oldest.file : null,
     // What was sent, for the reader's running row: its kind, when, and how many notes or sections.
-    sent: oldest ? { kind: oldest.request.kind ?? 'revise', at: oldest.request.createdAt ?? null, count: (oldest.request.kind === 'build' ? oldest.request.sections : oldest.request.items)?.length ?? 0 } : null,
+    sent: sentOf(oldest, running),
     build,
     stale,
     review: builds.length > 0 ? { builds, pending: builds.reduce((n, b) => n + b.pending, 0) } : null,

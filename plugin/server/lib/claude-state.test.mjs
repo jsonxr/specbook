@@ -117,3 +117,15 @@ test('after a stop, filing the build requests leaves Claude idle', () => {
   assert.equal(claudeState(data).state, 'idle');
   assert.deepEqual(listPending(data), []);
 });
+
+test('claudeState: sent says what is running, and whether a build has started', () => {
+  writeRequest(data, { kind: 'build', status: 'pending', createdAt: '2026-11-15T18:00:00.000Z', sections: ['c-r'] });
+  assert.deepEqual(claudeState(data).sent, { kind: 'build', at: '2026-11-15T18:00:00.000Z', count: 1, started: false });
+  const p = startBuild(data, Date.parse('2026-11-15T18:01:00Z'));
+  assert.deepEqual(claudeState(data).sent, { kind: 'build', at: '2026-11-15T18:01:00.000Z', count: 1, started: true });
+  fileBuildRequests(data);
+  // A build running with no request left still says what it is building.
+  assert.deepEqual(claudeState(data).sent, { kind: 'build', at: '2026-11-15T18:01:00.000Z', count: 1, started: true });
+  stopBuild(data, p.id, 'x');
+  assert.equal(claudeState(data).sent, null);
+});

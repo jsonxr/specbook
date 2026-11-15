@@ -7,7 +7,7 @@
 //                                                                       handled, or missing (exit 1)
 import { basename, join, resolve } from 'node:path';
 import { readJson } from './lib/json-file.mjs';
-import { fileRequest, listPending } from './lib/requests.mjs';
+import { clearStopFlag, fileRequest, listPending } from './lib/requests.mjs';
 
 function arg(name) {
   const i = process.argv.indexOf(`--${name}`);
@@ -35,6 +35,10 @@ if (check && check !== true) {
   }
   const filed = readJson(join(dir, 'done', name), null);
   if (filed) {
+    // Claude has now heard the Stop: the hook's flag comes down.
+    if (filed.status === 'stopped') {
+      clearStopFlag(resolve(data));
+    }
     console.log(filed.status === 'stopped' ? 'stopped' : 'handled');
     process.exit(0);
   }
