@@ -131,7 +131,7 @@
       }
     });
     var scripts = Array.prototype.map.call(doc.querySelectorAll('script[src]'), function (s) { return s.getAttribute('src'); })
-      .filter(function (src) { return /^\/app\//.test(src) && !/\/(host|guest|relay)\.js$/.test(src); });
+      .filter(function (src) { return /^\/app\//.test(src) && !/\/(host|owner|guest|relay)\.js$/.test(src); });
     Array.prototype.forEach.call(doc.querySelectorAll('script'), function (s) { s.remove(); });
     return Promise.all(styles).then(function (els) {
       els.forEach(function (el) { document.head.appendChild(el); });

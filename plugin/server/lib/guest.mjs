@@ -1,5 +1,6 @@
-// Guests: people reading a shared book through its host tab. They may read it and keep their own draft notes; nothing
-// else. The host tab (app/host.js) checks every call with guestMay before forwarding it, and serve.mjs checks it again.
+// Guests: people reading a shared book through the book server's share. They may read it and keep their own draft
+// notes; nothing else. The host (lib/host.mjs) checks every call (channel.mjs mayCall) before forwarding it, and
+// serve.mjs checks it again with guestMay.
 
 export const GUEST_HEADER = 'x-specbook-guest';
 

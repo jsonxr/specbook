@@ -206,8 +206,8 @@ The reader itself reaches the guest from your tab, so a new reader needs no new 
 - The pill's ▾ holds the link and **Copy**, who is here and what each is doing, **New link** (the old link stops
   working) and **Stop sharing** (until the book is reopened). Guests get only the link.
 - A guest may add, edit, move and delete **their own** notes, and nothing else: no Revise, Build, Accept, stages or
-  requirement edits. To ask for new wording, they drop a note saying what it should say; you act on it. Your tab
-  (`app/host.js`) and the server both refuse everything else (403 `guest`).
+  requirement edits. To ask for new wording, they drop a note saying what it should say; you act on it. The share's
+  host (`server/lib/host.mjs`) and the server both refuse everything else (403 `guest`).
 - You may still edit or delete any note. A Revise carries a collaborator's notes with `by: <name>`.
 - **The link stays the same until you ask for a new one**, across reloads, server restarts and days: the server keeps
   the room in `.share.json` in the data folder (git-ignored; it holds the link's key), and your tab renews it at the

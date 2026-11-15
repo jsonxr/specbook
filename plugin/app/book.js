@@ -1315,7 +1315,7 @@
   var notesDirty = false;
   var synced = {}; // id -> the note as the server last had it (JSON), to tell which notes were changed here
   function notesLocked() { return state.claude.state === 'revising'; }
-  // Who is reading: the owner at their desk, or a guest of a shared book (see host.js and guest.js).
+  // Who is reading: the owner at their desk, or a guest of a shared book (see owner.js and guest.js).
   function viewer() { return state.viewer || { guest: false }; }
   // Everyone in the book edits every note (they are collaborating); notes lock only while Claude is revising them.
   function noteLocked() { return notesLocked(); }

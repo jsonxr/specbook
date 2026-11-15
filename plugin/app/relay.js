@@ -1,4 +1,4 @@
-// Rules for live sharing that the owner's tab (host.js) and live.js share, kept apart so node:test can run them.
+// Rules for live sharing that the book server's host (server/lib/host.mjs) and live.js share, kept apart so node:test can run them.
 // A live message is presence, a draft, or following (see live.js); the host passes each guest's on to the others.
 (function () {
   'use strict';

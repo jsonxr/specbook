@@ -36,7 +36,55 @@ cpSync(join(PLUGIN, 'starter'), data, { recursive: true });
   writeFileSync(bookFile, JSON.stringify(b, null, 2));
 }
 
-const server = spawn(process.execPath, [join(PLUGIN, 'server', 'serve.mjs'), '--data', data, '--port', String(PORT)], { stdio: 'ignore' });
+// The server hosts through a fake host (SPECBOOK_TEST_HOST, a test-only seam in serve.mjs): no WebRTC and no share
+// server. Started, it opens a made-up room and a reader, Ana, says hello; it logs what the owner's tab sends to
+// live.log in the book folder. SPECBOOK_DEPS is an empty folder, so the real ~/.claude/specbook/deps is never read.
+const fixtures = mkdtempSync(join(tmpdir(), 'specbook-smoke-fixtures-'));
+const fakeHost = join(fixtures, 'fake-host.cjs');
+writeFileSync(fakeHost, `
+const { appendFileSync } = require('node:fs');
+const { join } = require('node:path');
+const { randomInt } = require('node:crypto');
+const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+const newId = () => Array.from({ length: 22 }, () => A[randomInt(62)]).join('');
+const dir = process.argv[process.argv.indexOf('--data') + 1];
+exports.createHost = ({ broker, saved, onState }) => {
+  let pin = saved && saved.pin ? saved.pin : newId();
+  let kept = saved && saved.room ? { room: saved.room, hostToken: saved.hostToken, expiresAt: saved.expiresAt || null } : null;
+  let state = 'off';
+  const listeners = [];
+  const guests = () => (state === 'live' ? ['Ana'] : []);
+  const view = () => ({ state, room: kept ? kept.room : null, hostToken: kept ? kept.hostToken : null, pin, expiresAt: kept ? kept.expiresAt : null, guests: guests(), error: null });
+  const report = () => onState(view());
+  return {
+    async start() {
+      if (state !== 'live') {
+        kept = kept || { room: newId(), hostToken: newId(), expiresAt: '2099-01-01T00:00:00.000Z' };
+        state = 'live';
+        report();
+        for (const fn of listeners) { fn({ t: 'live', kind: 'hello', from: 'ana-device', name: 'Ana', color: '#f27aa0', role: 'guest' }); }
+      }
+      report();
+    },
+    async stop({ end = false } = {}) {
+      if (end) { kept = null; }
+      state = 'off';
+      report();
+    },
+    newPin() { pin = newId(); report(); },
+    state: () => state,
+    links: () => (state === 'live' ? { url: broker + '/s/' + kept.room, pinUrl: broker + '/s/' + kept.room + '#pin=' + pin } : null),
+    people: () => [],
+    sendLive(msg) { if (state === 'live') { appendFileSync(join(dir, 'live.log'), JSON.stringify(msg) + '\\n'); } },
+    changed() {},
+    onLive(fn) { listeners.push(fn); },
+  };
+};
+`);
+const server = spawn(process.execPath, [join(PLUGIN, 'server', 'serve.mjs'), '--data', data, '--port', String(PORT)], {
+  stdio: 'ignore',
+  env: { ...process.env, SPECBOOK_TEST_HOST: fakeHost, SPECBOOK_DEPS: join(fixtures, 'no-deps') },
+});
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -634,6 +682,48 @@ try {
     await page.keyboard.press('Escape');
   });
 
+  await check('the share pill follows the server\'s share: Share, the link without its pin, Copy pin link, New pin, Stop', async () => {
+    await open();
+    // The book does not share itself (settings.share: false): the pill offers to.
+    await page.waitForSelector('.share-pill .share-start', { timeout: 3000 });
+    if (await page.evaluate(() => window.SpecHost.link() !== null || window.SpecHost.pinLink() !== null)) {
+      throw new Error('an unshared book has a link');
+    }
+    await page.locator('.share-pill .share-start').click();
+    await page.waitForSelector('.share-pill .share-copy', { timeout: 3000 });
+    // Ana, reading on the link, has a face beside the owner's.
+    await page.waitForFunction(() => document.querySelectorAll('.share-pill .face').length === 2, null, { timeout: 3000 });
+    const links = await page.evaluate(() => ({ link: window.SpecHost.link(), pin: window.SpecHost.pinLink() }));
+    if (!/\/s\/[A-Za-z0-9]{22}$/.test(links.link || '') || links.pin !== null && !links.pin.startsWith(links.link + '#pin=')) {
+      throw new Error(`the links are wrong: ${JSON.stringify(links)}`);
+    }
+    // The owner's tab said hello, as the owner, through the server.
+    await waitFor(() => existsSync(join(data, 'live.log')) && readFileSync(join(data, 'live.log'), 'utf8').split('\n').some(l => l && JSON.parse(l).kind === 'hello' && JSON.parse(l).role === 'owner'), 3000, 'the owner\'s hello to reach the host');
+    await page.locator('.share-pill .share-more').click();
+    const menu = await page.evaluate(() => ({
+      input: document.querySelector('.share-menu .share-link')?.value,
+      pin: !!document.querySelector('.share-menu .share-pin-copy'),
+      newPin: document.querySelector('.share-menu .share-new-pin')?.textContent,
+      people: [...document.querySelectorAll('.share-menu .share-people li')].map(li => li.textContent),
+    }));
+    if (menu.input !== links.link || !menu.pin || menu.newPin !== 'New pin' || !menu.people.some(t => t.startsWith('Ana'))) {
+      throw new Error(`the share menu is wrong: ${JSON.stringify(menu)}`);
+    }
+    if ((await page.locator('.share-menu .share-pin-copy').textContent()) !== 'Copy pin link') {
+      throw new Error('the pin link button does not read "Copy pin link"');
+    }
+    await page.locator('.share-menu .share-new-pin').click();
+    await page.waitForFunction(was => window.SpecHost.pinLink() && window.SpecHost.pinLink() !== was, links.pin, { timeout: 3000 });
+    if ((await page.evaluate(() => window.SpecHost.link())) !== links.link) {
+      throw new Error('New pin changed the link');
+    }
+    await page.locator('.share-menu .share-stop').click();
+    await page.waitForSelector('.share-pill .share-start', { timeout: 3000 });
+    if (await page.evaluate(() => window.SpecHost.link() !== null || document.querySelectorAll('.share-pill .face').length)) {
+      throw new Error('Stop sharing left a link or faces');
+    }
+  });
+
   await check('the down arrow goes on to the next change each time it is pressed', async () => {
     await open();
     await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
@@ -860,6 +950,7 @@ try {
   }
   server.kill();
   rmSync(data, { recursive: true, force: true });
+  rmSync(fixtures, { recursive: true, force: true });
 }
 
 process.exit(failures ? 1 : 0);
