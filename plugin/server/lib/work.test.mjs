@@ -15,8 +15,9 @@ beforeEach(() => {
   data = mkdtempSync(join(tmpdir(), 'specbook-work-'));
   writeJsonAtomic(join(data, 'book.json'), {
     chapters: [{ id: 'c', title: 'C', sections: [
-      { id: 's', title: 'S', stage: 'drafting', frames: [{ id: 'c-s-1', mockup: 'mockups/a.html' }], requirements: [{ id: 'R0', text: 'a' }] },
+      { id: 's', title: 'S', stage: 'drafting', shows: [{ state: 'SCR-S.a' }], requirements: [{ id: 'R0', text: 'a' }] },
     ] }],
+    screens: [{ id: 'SCR-S', name: 'S', kind: 'screen', states: [{ id: 'a', name: 'A', mockup: 'mockups/a.html' }] }],
     usedIds: ['R0'],
   });
   mkdirSync(join(data, 'mockups'));
@@ -40,7 +41,7 @@ test('landWork writes the working book and mockups in one go while the request i
   const work = startWork(data, file);
   const b = readJson(join(work, 'book.json'), null);
   b.chapters[0].sections[0].requirements[0].text = 'reworded';
-  b.chapters[0].sections[0].frames.push({ id: 'c-s-2', mockup: 'mockups/b.html' });
+  b.screens[0].states.push({ id: 'b', name: 'B', mockup: 'mockups/b.html' });
   writeJsonAtomic(join(work, 'book.json'), b);
   writeFileSync(join(work, 'mockups', 'b.html'), '<p>b</p>');
   rmSync(join(work, 'mockups', 'gone.html'));
@@ -64,7 +65,8 @@ test('landWork refuses a working book that is not valid', () => {
   const work = startWork(data, file);
   const cases = [
     b => { b.chapters[0].sections[0].requirements.push({ id: 'R0', text: 'twice' }); },
-    b => { b.chapters[0].sections[0].frames.push({ id: 'c-s-9', mockup: 'mockups/missing.html' }); },
+    b => { b.screens[0].states.push({ id: 'b', name: 'B', mockup: 'mockups/missing.html' }); },
+    b => { b.chapters[0].sections[0].requirements[0].screens = [{ screen: 'SCR-S', state: 'nope' }]; },
     b => { b.chapters = 'x'; },
   ];
   for (const change of cases) {
@@ -73,6 +75,11 @@ test('landWork refuses a working book that is not valid', () => {
     writeJsonAtomic(join(work, 'book.json'), b);
     assert.throws(() => landWork(data, file), { code: 'invalid' });
   }
+  // The message is screenProblem's.
+  const b = structuredClone(book());
+  b.chapters[0].sections[0].requirements[0].screens = [{ screen: 'SCR-S', state: 'nope' }];
+  writeJsonAtomic(join(work, 'book.json'), b);
+  assert.throws(() => landWork(data, file), { code: 'invalid', message: /Requirement R0 names SCR-S\.nope, which is not a state/ });
   writeFileSync(join(work, 'book.json'), '{ not json');
   assert.throws(() => landWork(data, file), { code: 'invalid' });
   assert.equal(book().chapters[0].sections[0].requirements.length, 1);

@@ -1,8 +1,11 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { createRequire } from 'node:module';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { basename, join, resolve, sep } from 'node:path';
 import { readJson, writeJsonAtomic } from './json-file.mjs';
 import { listPending } from './requests.mjs';
 import { listSections } from './book-model.mjs';
+
+const SpecModel = createRequire(import.meta.url)('../../app/model.js');
 
 // A Revise edits a working copy of the book (book.json and mockups/, under requests/work/<request>/, which git
 // ignores) and lands each section on the real book in one step, only while its request is still pending. A Stop
@@ -30,7 +33,7 @@ export function startWork(data, file) {
   return work;
 }
 
-// Why the working book cannot land, or null: it must parse, ids must be unique, and every frame's mockup must exist.
+// Why the working book cannot land, or null: it must parse, ids must be unique, and the screens must be valid (screenProblem).
 function problem(work) {
   let book;
   try {
@@ -42,7 +45,7 @@ function problem(work) {
     return 'book.json has no chapters';
   }
   const seen = new Set();
-  for (const { section, fullId } of listSections(book)) {
+  for (const { section } of listSections(book)) {
     for (const req of section.requirements ?? []) {
       if (req && typeof req === 'object' && req.id) {
         if (seen.has(req.id)) {
@@ -51,13 +54,18 @@ function problem(work) {
         seen.add(req.id);
       }
     }
-    for (const frame of section.frames ?? []) {
-      if (frame && typeof frame.mockup === 'string' && !existsSync(join(work, frame.mockup))) {
-        return `${fullId}: frame ${frame.id} has no ${frame.mockup}`;
-      }
+  }
+  const mockups = {};
+  const exists = (rel) => {
+    const file = resolve(work, rel);
+    return file.startsWith(resolve(work) + sep) && existsSync(file) && statSync(file).isFile();
+  };
+  for (const rel of SpecModel.mockupPaths(book)) {
+    if (exists(rel)) {
+      mockups[rel] = readFileSync(resolve(work, rel), 'utf8');
     }
   }
-  return null;
+  return SpecModel.screenProblem(book, exists, mockups);
 }
 
 // Lands the working copy on the book: mockups first (new and changed ones written, removed ones deleted), then

@@ -8,7 +8,7 @@ function collect(used, item) {
   }
 }
 
-// Every id on requirements, calls and decisions, plus the ids already retired in usedIds.
+// Every id on requirements, screens, calls and decisions, plus the ids already retired in usedIds.
 export function collectIds(book) {
   const used = new Set(book.usedIds ?? []);
   for (const ch of book.chapters ?? []) {
@@ -16,6 +16,7 @@ export function collectIds(book) {
       (s.requirements ?? []).forEach(r => collect(used, r));
     }
   }
+  (book.screens ?? []).forEach(sc => collect(used, sc));
   (book.calls ?? []).forEach(c => collect(used, c));
   (book.decisions ?? []).forEach(d => collect(used, d));
   return used;

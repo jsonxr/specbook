@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import {
   acceptItem, appendBuiltHistory, appendChangelog, changeItem, currentItems, currentSnapshot, linkNote, readHistory, readReview,
-  replyNote, stampOpened, writeReviewNotes
+  replyNote, sectionsUnderReview, stampOpened, writeReviewNotes
 } from './review.mjs';
 
 const Model = createRequire(import.meta.url)('../../app/model.js');
@@ -248,4 +248,46 @@ test('stampOpened does not overwrite a write made after it read the review', () 
   // The next call, with nothing racing, stamps.
   assert.equal(stampOpened(data, NOW), true);
   assert.deepEqual(readReview(data).notes.n1.causes, ['c-s']);
+});
+
+test('sectionsUnderReview follows sameAs and placed components, not only the states a section shows', () => {
+  const book = {
+    roles: [{ id: 'member' }, { id: 'admin' }, { id: 'visitor' }],
+    screens: [
+      { id: 'SCR-HOME', name: 'HomeScreen', kind: 'screen', states: [
+        { id: 'member', name: 'Member', when: { role: 'member' }, mockup: 'mockups/home-member.html' },
+        { id: 'admin', name: 'Admin', when: { role: 'admin' }, mockup: 'mockups/home-admin.html' },
+        { id: 'visitor', name: 'Visitor', when: { role: 'visitor' }, sameAs: 'member' }
+      ] },
+      { id: 'SCR-CARD', name: 'VisitorsCard', kind: 'component', states: [
+        { id: 'waiting', name: '3 waiting', when: { also: 'visitors waiting' }, mockup: 'mockups/card-waiting.html' }
+      ] }
+    ],
+    chapters: [{ id: 'c', title: 'C', intro: '', sections: [
+      { id: 'a', title: 'A', shows: [{ state: 'SCR-HOME.admin', highlight: 'SCR-CARD' }] },
+      { id: 'b', title: 'B', shows: [{ state: 'SCR-HOME.visitor' }] }
+    ] }]
+  };
+  const data = mkdtempSync(join(tmpdir(), 'review-'));
+  mkdirSync(join(data, 'mockups'));
+  const files = {
+    'home-member.html': '<p>member home</p>',
+    'home-admin.html': '<main><sb-component id="SCR-CARD" state="waiting"></sb-component></main>',
+    'card-waiting.html': '<b>3 waiting</b>'
+  };
+  const put = (name, text) => writeFileSync(join(data, 'mockups', name), text);
+  for (const [name, text] of Object.entries(files)) {
+    put(name, text);
+  }
+  writeBook(data, book);
+  for (const key of Object.keys(currentItems(data))) {
+    acceptItem(data, key, NOW);
+  }
+  assert.deepEqual(sectionsUnderReview(data, ['c-a', 'c-b']), []);
+  put('card-waiting.html', '<b>4 waiting</b>');
+  assert.deepEqual(sectionsUnderReview(data, ['c-a', 'c-b']), ['c-a']);
+  acceptItem(data, 'SCR-CARD.waiting', NOW);
+  put('home-member.html', '<p>edited member home</p>');
+  assert.deepEqual(sectionsUnderReview(data, ['c-a', 'c-b']), ['c-b']);
+  rmSync(data, { recursive: true });
 });

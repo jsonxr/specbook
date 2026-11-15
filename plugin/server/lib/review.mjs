@@ -460,11 +460,12 @@ export function knownItem(data, key) {
 }
 
 // The sections, of those named by `<chapter-id>-<section-id>`, that still have something under review: their heading,
-// a requirement or a state they show, or a removed item that lived there. Only accepted work is built, so Ready and
+// a requirement, a state they show (or reach through sameAs or a placed component), or a removed item that lived there. Only accepted work is built, so Ready and
 // Build both refuse these.
 export function sectionsUnderReview(data, sectionIds) {
   const snap = snapshot(data);
   const review = readReview(data);
-  const { bySection } = reviewsOf(snap, review, readHistory(data));
-  return sectionIds.filter((id) => (bySection[id] ?? 0) > 0);
+  const { bySection, byKey } = reviewsOf(snap, review, readHistory(data));
+  // bySection counts what a section shows directly; the gate also reaches states through sameAs and nested components.
+  return sectionIds.filter((id) => (bySection[id] ?? 0) > 0 || SpecModel.gateKeys(snap.book, snap.mockups, id).some((key) => byKey[key]));
 }

@@ -3,7 +3,7 @@
 //   node assign-ids.mjs --data <dir>
 // An item that is still a plain string becomes { "id": "...", "text": "..." }. Items that already have an id
 // are never touched, so ids survive reordering, inserting and deleting. Ids are <prefix>-<4 chars>: the
-// chapter's "prefix" (or its id's first three letters, upper-cased) for requirements, CALL for calls, DEC for
+// chapter's "prefix" (or its id's first three letters, upper-cased) for requirements, SCR for screens, CALL for calls, DEC for
 // decisions. An id is never reused: every id ever minted is kept in book.json's "usedIds".
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -37,6 +37,9 @@ for (const ch of book.chapters ?? []) {
   for (const s of ch.sections ?? []) {
     s.requirements = (s.requirements ?? []).map(r => ensure(r, prefix));
   }
+}
+if (book.screens) {
+  book.screens = book.screens.map(sc => ensure(sc, 'SCR'));
 }
 if (book.calls) {
   book.calls = book.calls.map(c => ensure(c, 'CALL'));

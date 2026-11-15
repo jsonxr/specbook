@@ -652,6 +652,20 @@ test('Revise only sends draft notes to sent; finishing the request answers them'
   assert.equal(readReview(data).notes.a.status, 'sent');
 });
 
+test('Build refuses a Ready section when a component placed in a state it shows is edited', async () => {
+  const b = freshBook();
+  b.screens.push({ id: 'SCR-C', name: 'C', kind: 'component', states: [{ id: 'on', name: 'On', mockup: 'mockups/c.html' }] });
+  writeFileSync(join(data, 'book.json'), JSON.stringify(b));
+  writeFileSync(join(data, 'mockups', 'd.html'), '<main><sb-component id="SCR-C" state="on"></sb-component></main>');
+  writeFileSync(join(data, 'mockups', 'c.html'), '<b>on</b>');
+  acceptAll();
+  assert.equal((await api('POST', '/api/stage', { section: 'c-d', stage: 'ready' })).status, 200);
+  writeFileSync(join(data, 'mockups', 'c.html'), '<b>edited</b>');
+  assert.deepEqual(await api('POST', '/api/build'), { status: 409, body: { error: 'unreviewed', sections: ['c-d'] } });
+  acceptAll();
+  assert.equal((await api('POST', '/api/build')).status, 201);
+});
+
 test('Mark ready is refused with 409 unreviewed while the section, a requirement or a state it shows is under review', async () => {
   acceptAll();
   assert.equal((await api('POST', '/api/stage', { section: 'c-d', stage: 'ready' })).status, 200);

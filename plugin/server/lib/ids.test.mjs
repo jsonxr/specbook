@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { collectIds, createMinter } from './ids.mjs';
+
+const ASSIGN = join(import.meta.dirname, '..', 'assign-ids.mjs');
 
 test('collectIds gathers requirements, calls, decisions and usedIds', () => {
   const book = {
@@ -30,4 +36,19 @@ test('mint keeps usedIds sorted and creates it when absent', () => {
   }
   assert.equal(book.usedIds.length, 20);
   assert.deepEqual(book.usedIds, [...book.usedIds].sort());
+});
+
+test('collectIds includes screen ids', () => {
+  assert.deepEqual([...collectIds({ screens: [{ id: 'SCR-A' }, { name: 'no id' }] })], ['SCR-A']);
+});
+
+test('assign-ids mints SCR ids for screens without one and keeps existing ones', () => {
+  const data = mkdtempSync(join(tmpdir(), 'ids-'));
+  writeFileSync(join(data, 'book.json'), JSON.stringify({ chapters: [], screens: [{ id: 'SCR-KEEP', name: 'A' }, { name: 'B' }] }));
+  execFileSync(process.execPath, [ASSIGN, '--data', data], { stdio: 'ignore' });
+  const book = JSON.parse(readFileSync(join(data, 'book.json'), 'utf8'));
+  assert.equal(book.screens[0].id, 'SCR-KEEP');
+  assert.match(book.screens[1].id, /^SCR-[2-9A-HJ-NP-Z]{4}$/);
+  assert.equal(book.screens[1].name, 'B');
+  assert.ok(book.usedIds.includes(book.screens[1].id));
 });
