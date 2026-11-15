@@ -42,5 +42,11 @@ test('the starter book has screens, no frames, and valid screens', () => {
   const M = createRequire(import.meta.url)('../app/model.js');
   assert.equal(M.screenProblem(book, exists, mockups), null);
   const bar = book.screens.find(s => s.name === 'FiltersBar');
-  assert.ok(Object.values(mockups).some(t => t.includes(`<sb-component id="${bar.id}" state="active">`)));
+  const todos = book.screens.find(s => s.name === 'TodosScreen');
+  const list = todos.states.find(s => s.id === 'list');
+  assert.equal(list.change, 'change');
+  assert.ok(list.today);
+  const tag = `<sb-component id="${bar.id}"`;
+  assert.ok(mockups[list.mockup].includes(tag));
+  assert.ok(mockups[todos.states.find(s => s.id === 'activeonly').mockup].includes(tag));
 });

@@ -295,7 +295,9 @@
           "when": {
             "role": "user"
           },
-          "mockup": "mockups/screens/SCR-3WRX/list.html"
+          "mockup": "mockups/screens/SCR-3WRX/list.html",
+          "change": "change",
+          "today": "mockups/screens/SCR-3WRX/list.today.html"
         },
         {
           "id": "empty",
