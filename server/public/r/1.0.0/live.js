@@ -197,7 +197,12 @@
     var m = /^\/s\/([A-Za-z0-9_-]+)/.exec(location.pathname);
     return m ? location.origin + '/s/' + m[1] : null;
   }
-  function pinLink() { return !guest && Host.pinLink ? Host.pinLink() : null; }
+  function pinLink() {
+    if (guest) { return window.SpecShare.pinLink ? window.SpecShare.pinLink() : null; }
+    return Host.pinLink ? Host.pinLink() : null;
+  }
+  // The owner: the localhost tab, or a reader on the link who opened it with the pin.
+  function owner() { return !guest || window.SpecShare.role === 'owner'; }
   function whereLabel(p) {
     var key = p.where && p.where.anchor && p.where.anchor.key;
     if (!key) { return ''; }
@@ -304,7 +309,7 @@
     m.addEventListener('click', function (e) { e.stopPropagation(); });
     var h = document.createElement('p');
     h.className = 'share-menu-head';
-    h.textContent = guest ? 'Anyone with this link can read and leave notes.' : 'Shared while the book is served. Anyone with the link can read and leave notes.';
+    h.textContent = owner() ? 'Shared while the book is served. Anyone with the link can read and leave notes.' : 'Anyone with this link can read and leave notes.';
     m.appendChild(h);
     var row = document.createElement('div');
     row.className = 'share-link-row';
@@ -326,7 +331,26 @@
       fpActs.appendChild(fp);
       m.appendChild(fpActs);
     }
-    if (!guest) {
+    // A guest who has the owner's pin types it here (the pin link does the same).
+    if (guest && !owner() && window.SpecShare.usePin) {
+      var pf = document.createElement('form');
+      pf.className = 'share-link-row share-pin-entry';
+      var pi = document.createElement('input');
+      pi.type = 'text'; pi.inputMode = 'numeric'; pi.maxLength = 6; pi.autocomplete = 'off'; pi.className = 'share-link';
+      pi.placeholder = 'Owner’s pin'; pi.setAttribute('aria-label', 'The owner’s 6-digit pin');
+      var pb = document.createElement('button');
+      pb.type = 'submit'; pb.className = 'bar-btn'; pb.textContent = 'Use pin';
+      var pe = document.createElement('p');
+      pe.className = 'share-pin-error'; pe.hidden = true; pe.textContent = 'A pin is 6 digits.';
+      pf.addEventListener('submit', function (e) {
+        e.preventDefault();
+        pe.hidden = window.SpecShare.usePin(pi.value);
+      });
+      pf.appendChild(pi); pf.appendChild(pb);
+      m.appendChild(pf);
+      m.appendChild(pe);
+    }
+    if (owner()) {
       var ul = document.createElement('ul');
       ul.className = 'share-people';
       list.forEach(function (p) {
@@ -342,10 +366,12 @@
       nl.type = 'button'; nl.className = 'bar-btn'; nl.textContent = 'New link';
       nl.title = 'Make a new link; the old one stops working';
       nl.addEventListener('click', function () { menuOpen = false; Host.newLink(); render(); });
+      // On the link, Stop sharing also closes this page's own connection: it says the book is not open.
+      var sharer = guest ? window.SpecShare : Host;
       var stop = document.createElement('button');
       stop.type = 'button'; stop.className = 'bar-btn share-stop'; stop.textContent = 'Stop sharing';
       stop.title = 'Stop sharing until you reopen the book';
-      stop.addEventListener('click', function () { menuOpen = false; Host.stopSharing(); render(); });
+      stop.addEventListener('click', function () { menuOpen = false; sharer.stopSharing(); render(); });
       var acts = document.createElement('div'); acts.className = 'share-acts';
       // The pin link opens the book as its owner, on another device of theirs.
       if (pinLink()) {
@@ -358,9 +384,11 @@
       var np = document.createElement('button');
       np.type = 'button'; np.className = 'bar-btn share-new-pin'; np.textContent = 'New pin';
       np.title = 'Make a new pin; the old pin link stops working, the plain link keeps working';
-      np.addEventListener('click', function () { Host.newPin().then(render, render); });
+      np.addEventListener('click', function () { sharer.newPin().then(render, render); });
       acts.appendChild(np);
-      acts.appendChild(nl); acts.appendChild(stop);
+      // New link ends this room, and with it a link page's own connection: it is made on localhost.
+      if (!guest) { acts.appendChild(nl); }
+      acts.appendChild(stop);
       m.appendChild(acts);
     }
     return m;

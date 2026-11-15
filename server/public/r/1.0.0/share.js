@@ -25,7 +25,7 @@
     try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { location.hash = ''; }
   }
   var m = /^\/s\/([A-Za-z0-9_-]+)\/?$/.exec(location.pathname);
-  var PIN_OK = /^[A-Za-z0-9]{22}$/;
+  var PIN_OK = /^\d{6}$/;
   var PIN_KEY = m ? 'specbook-pin:' + m[1] : '';
   var pin = '';
   if (given && m && PIN_OK.test(given[1])) {
@@ -278,6 +278,7 @@
   // The first frames on a new channel: hello (with the pin, when this browser has one), then the host's welcome, which
   // says this reader's role. A wrong pin is forgotten here, and the host welcomes the reader as a guest.
   var pinBad = false;
+  var pinWait = 0;
   function greet(ch) {
     return new Promise(function (resolve, reject) {
       var t = setTimeout(function () { reject(fail('The book’s host did not answer.')); }, 15000);
@@ -287,6 +288,8 @@
         try { f = JSON.parse(e.data); } catch (err) { return; }
         if (!f || typeof f !== 'object') { return; }
         if (f.t === 'pin-bad') { pinBad = true; forgetPin(); return; }
+        // Too many wrong pins were tried: the pin is kept, and this page is a guest until the wait is over.
+        if (f.t === 'pin-wait') { pinWait = Math.max(1, Math.min(3600, Number(f.seconds) || 60)); return; }
         if (f.t !== 'welcome') { return; }
         clearTimeout(t);
         // A host on another protocol welcomes without a role; one on another version serves another reader.
@@ -400,6 +403,7 @@
       peerState('live');
       if (loaded) { each(changedHandlers); } else { loaded = true; markReady(); }
       if (pinBad) { pinBad = false; pinGone(); }
+      if (pinWait) { var held = pinWait; pinWait = 0; pinHeld(held); }
     }, function (err) {
       if (pending) { try { pending.pc.close(); } catch (e) { /* closed */ } }
       status(err.message, true);
@@ -427,6 +431,13 @@
     if (askedAfterPin) { return; }
     askedAfterPin = true;
     askName(PIN_BAD, identity().name).then(function () { location.reload(); });
+  }
+
+  // The pin was held back (too many wrong pins were tried): this page says so and opens again once the wait is over.
+  function pinHeld(seconds) {
+    var when = seconds < 60 ? seconds + ' s' : Math.ceil(seconds / 60) + ' min';
+    status('Too many wrong pins were tried. Your pin works again in ' + when + '; this page will reload then.', true);
+    setTimeout(function () { location.reload(); }, seconds * 1000 + 500);
   }
 
   // A live frame for the host to pass on; dropped while not connected, as live state is.
@@ -547,6 +558,26 @@
     status: status,
     showError: showError,
     forgetPin: forgetPin,
+    // A pin typed on this page: saved for this room, and the page opens again with it. False when it is not 6 digits.
+    usePin: function (code) {
+      var c = String(code || '').replace(/\s+/g, '');
+      if (!PIN_OK.test(c)) { return false; }
+      try { localStorage.setItem(PIN_KEY, c); } catch (e) { return false; }
+      location.reload();
+      return true;
+    },
+    // For a reader who opened the book with the pin: the pin link, a new pin, and Stop sharing.
+    pinLink: function () { return role === 'owner' && pin ? location.origin + '/s/' + ROOM + '#pin=' + pin : null; },
+    newPin: function () {
+      return request('POST', '/api/share/new-pin', new TextEncoder().encode('{}')).then(function (r) {
+        var got = r.status === 200 ? JSON.parse(new TextDecoder().decode(r.bytes)) : null;
+        if (!got || !PIN_OK.test(got.pin)) { throw new Error('The book did not make a new pin.'); }
+        pin = got.pin;
+        try { localStorage.setItem(PIN_KEY, pin); } catch (e) { /* only this tab has it */ }
+        return pin;
+      });
+    },
+    stopSharing: function () { return request('POST', '/api/share/stop', new TextEncoder().encode('{}')).catch(function () {}); },
   };
 
   function start() {
