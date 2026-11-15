@@ -424,7 +424,8 @@
         (r.reversal.decisions.length ? '<ul>' + r.reversal.decisions.map(decisionRef).join('') + '</ul>' : '') + '</div>';
     }
     var tries = r.tries || [];
-    // Each older version as it was; a state also says when its pictures differ from the version after it.
+    // Each older version as it was; a state also says when its pictures differ from the version after it, and a
+    // section or requirement what its shows or screens are now.
     var newer = r.current;
     var oldHtml = function (v) {
       var mock = kind === 'state' ? mockupChanged(v, newer) : listsChanged(kind, v, newer);
