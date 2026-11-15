@@ -167,7 +167,7 @@ try {
   const started = await serve('--port', String(PORT), '--detach');
   let { url: link, pinUrl } = linksOf(started);
   await waitFor(() => up(`${OWNER}api/health`), 5000, 'the book server');
-  if (!link.startsWith(`${BROKER}/s/`) || pinUrl !== `${link}#pin=${pinUrl.split('#pin=')[1]}` || !/^[A-Za-z0-9]{22}$/.test(pinUrl.split('#pin=')[1])) {
+  if (!link.startsWith(`${BROKER}/s/`) || pinUrl !== `${link}#pin=${pinUrl.split('#pin=')[1]}` || !/^\d{6}$/.test(pinUrl.split('#pin=')[1])) {
     throw new Error(`unexpected links: ${link} ${pinUrl}`);
   }
 
@@ -628,6 +628,23 @@ try {
     }
     if (await phone.evaluate(() => fetch('/api/requests', { method: 'POST' }).then(r => r.status)) !== 403) {
       throw new Error('a reader who forgot the pin may still call owner routes');
+    }
+  });
+
+  await check('a guest who types the pin in the menu gets the owner\'s powers', async () => {
+    await phone.click('.share-pill .share-more');
+    await phone.waitForSelector('.share-menu .share-pin-entry input', { timeout: 3000 });
+    await phone.fill('.share-menu .share-pin-entry input', '12345');
+    await phone.click('.share-menu .share-pin-entry button');
+    if (await phone.locator('.share-menu .share-pin-error').isHidden()) {
+      throw new Error('a 5-digit pin was not refused');
+    }
+    await phone.fill('.share-menu .share-pin-entry input', pinUrl.split('#pin=')[1]);
+    await Promise.all([phone.waitForNavigation(), phone.click('.share-menu .share-pin-entry button')]);
+    await phone.waitForSelector('#todos-list', { timeout: 20000 });
+    await phone.waitForFunction(() => window.SpecShare.role === 'owner', null, { timeout: 8000 });
+    if (!(await isOwnerPage(phone))) {
+      throw new Error('the typed pin did not give the owner\'s powers');
     }
   });
 

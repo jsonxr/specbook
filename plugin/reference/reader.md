@@ -195,14 +195,18 @@ book names its own in `settings.shareBroker`, passes the handshake and serves th
   the book's media show only on localhost, not on the link** (a security choice: an SVG is a document that can hold
   script). A reader left open while you update the plugin says "This book was updated. Reload this page."; a share
   server that does not have your version yet says "This book needs a newer share server. Ask its owner to deploy it."
-- **The pin gives your powers on the link.** Without it a reader is a guest. Your pin link is the link with
-  `#pin=<pin>` after it: `/specbook:open` prints it on its own line, and **Copy pin link** in the bar's ▾ copies it. **Never send it to anyone.** Opened, the page saves the pin in that browser
+- **The pin gives your powers on the link.** Without it a reader is a guest. The pin is a 6-digit number. A guest's ▾
+  has a box for it (**Use pin**); your pin link is the link with `#pin=<pin>` after it, and does the same without
+  typing: `/specbook:open` prints it on its own line, and **Copy pin link** in the bar's ▾ copies it. **Never send it to anyone.** Opened, the page saves the pin in that browser
   (`localStorage`, which never leaves it) and takes it out of the address at once, so the address bar is again the
   plain link; from then on that browser opens the plain link with your powers, and no name is asked. A reader with the
   pin is you: their notes are yours and their face carries your name. On the website the ▾ then has **Forget pin on
   this device**, which removes it from that browser and reloads the page as a guest. **New pin** (in the ▾) makes a new pin and keeps the link: guests keep reading, and every saved pin stops working; a browser
   that had the old one says "This pin no longer works." and goes on as a guest (the page you pressed it on keeps the new
-  one). `localhost` needs no pin.
+  one). `localhost` needs no pin. **Guessing is slow:** after two wrong pins in a row, every pin, the right one too, waits
+  2 seconds, then 4, doubling up to an hour, so trying a million pins takes years; a page that has the right pin
+  during a wait says "Too many wrong pins were tried. Your pin works again in …" and opens again by itself. **New pin**
+  ends the wait. Only someone with the link can try a pin at all.
 - A guest names themself once; the page remembers the name, and an id for the device, in that browser. The name shows
   on their face in the share pill; notes carry no names.
 - **Everyone edits every note.** A guest can write, edit, move and delete any draft note, yours included, as you can

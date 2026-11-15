@@ -26,3 +26,24 @@ export function sameSecret(a, b) {
   if (x.length !== y.length) return false;
   return timingSafeEqual(x, y);
 }
+
+// The owner's pin: 6 digits, typed or carried by the pin link.
+export const PIN = /^\d{6}$/;
+
+// A new pin, without bias: a 32-bit draw at or past the last whole million (4,294,000,000) is drawn again.
+export function newPin(bytes = a => randomFillSync(a)) {
+  for (;;) {
+    const buf = new Uint8Array(4);
+    const got = bytes(buf) ?? buf;
+    const n = new DataView(got.buffer, got.byteOffset, 4).getUint32(0);
+    if (n < 4294000000) {
+      return String(n % 1000000).padStart(6, '0');
+    }
+  }
+}
+
+// How long every pin waits after `wrong` wrong pins in a row: two are free (typos), then 2 s, doubling, at most an
+// hour. With a million pins, guessing then takes years.
+export function pinWaitMs(wrong) {
+  return wrong < 3 ? 0 : Math.min(2 ** (wrong - 2) * 1000, 3600000);
+}

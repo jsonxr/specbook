@@ -188,13 +188,13 @@ test('start() with nothing saved opens a protocol 3 room and gives a plain link 
   const m = /#pin=(.*)$/.exec(pinUrl);
   assert.ok(m);
   assert.equal(pinUrl, `${url}#pin=${m[1]}`);
-  assert.match(m[1], /^[A-Za-z0-9]{22}$/);
+  assert.match(m[1], /^\d{6}$/);
   FakeSocket.all.at(-1).open();
   assert.equal(host.state(), 'live');
 });
 
 test('start() with a saved room renews that room and keeps its link and pin', async t => {
-  const saved = { room: 'SavedRoom0000000000001', hostToken: 'H'.repeat(32), pin: 'p'.repeat(22), expiresAt: '2026-11-15T00:00:00.000Z' };
+  const saved = { room: 'SavedRoom0000000000001', hostToken: 'H'.repeat(32), pin: '424242', expiresAt: '2026-11-15T00:00:00.000Z' };
   const { host, broker, brokerUrl } = await setup(t, { saved });
   await host.start();
   assert.equal(broker.posts[0].room, saved.room);
@@ -207,7 +207,7 @@ test('start() with a saved room renews that room and keeps its link and pin', as
 });
 
 test('start() with a saved room taken under another token opens a new room with a new pin', async t => {
-  const saved = { room: 'SavedRoom0000000000003', hostToken: 'H'.repeat(32), pin: 'p'.repeat(22), expiresAt: null };
+  const saved = { room: 'SavedRoom0000000000003', hostToken: 'H'.repeat(32), pin: '424242', expiresAt: null };
   const views = [];
   const { host, broker, brokerUrl } = await setup(t, { saved, onState: v => views.push(v) });
   broker.taken.add(saved.room);
@@ -218,12 +218,12 @@ test('start() with a saved room taken under another token opens a new room with 
   assert.equal(url, `${brokerUrl}/s/Room000000000000000001`);
   const pin = /#pin=(.*)$/.exec(pinUrl)[1];
   assert.notEqual(pin, saved.pin);
-  assert.match(pin, /^[A-Za-z0-9]{22}$/);
+  assert.match(pin, /^\d{6}$/);
   assert.equal(views.at(-1).pin, pin);
 });
 
 test('a room taken while it is being reopened is let go, and the next start has a new pin', async t => {
-  const saved = { room: 'SavedRoom0000000000004', hostToken: 'H'.repeat(32), pin: 'p'.repeat(22), expiresAt: null };
+  const saved = { room: 'SavedRoom0000000000004', hostToken: 'H'.repeat(32), pin: '424242', expiresAt: null };
   const views = [];
   const { host, broker } = await setup(t, { saved, onState: v => views.push(v) });
   await host.start();
@@ -252,7 +252,7 @@ test('newPin() changes the pin, keeps the room, and reports the new pin', async 
   assert.equal(after.url, before.url);
   assert.notEqual(after.pinUrl, before.pinUrl);
   const pin = after.pinUrl.split('#pin=')[1];
-  assert.match(pin, /^[A-Za-z0-9]{22}$/);
+  assert.match(pin, /^\d{6}$/);
   assert.equal(views.at(-1).pin, pin);
   assert.equal(views.at(-1).room, before.url.split('/s/')[1]);
 });
@@ -306,12 +306,58 @@ test('a wrong pin gets pin-bad and guest rights', async t => {
   const { host, book } = await setup(t);
   await host.start();
   const ch = await connect(host);
-  ch.frame({ t: 'hello', protocol: 3, version: '1.0.0', pin: 'x'.repeat(22) });
+  ch.frame({ t: 'hello', protocol: 3, version: '1.0.0', pin: '000000' });
   await until(() => ch.sent.find(f => f.t === 'welcome'), 'welcome');
   assert.equal(ch.sent[0].t, 'pin-bad');
   assert.equal(ch.sent.find(f => f.t === 'welcome').role, 'guest');
   assert.equal(await call(ch, 1, 'POST', '/api/requests', '{}'), 403);
   assert.equal(book.calls.length, 0);
+});
+
+test('a saved pin of the old 22-character kind is replaced by a 6-digit one', async t => {
+  const saved = { room: 'SavedRoom0000000000005', hostToken: 'H'.repeat(32), pin: 'p'.repeat(22), expiresAt: null };
+  const { host } = await setup(t, { saved });
+  await host.start();
+  assert.match(host.links().pinUrl.split('#pin=')[1], /^\d{6}$/);
+});
+
+// A pin that is not the host's, never 000000 by chance.
+const wrongPin = host => (host.links().pinUrl.endsWith('#pin=000000') ? '000001' : '000000');
+async function hello(host, pin) {
+  const ch = await connect(host);
+  ch.frame({ t: 'hello', protocol: 3, version: '1.0.0', pin });
+  await until(() => ch.sent.find(f => f.t === 'welcome'), 'welcome');
+  return ch;
+}
+
+test('wrong pins: after two, every pin waits, the right one too, and the reader keeps its pin (pin-wait)', async t => {
+  const { host } = await setup(t);
+  await host.start();
+  const right = host.links().pinUrl.split('#pin=')[1];
+  for (let i = 0; i < 3; i++) {
+    const ch = await hello(host, wrongPin(host));
+    assert.equal(ch.sent[0].t, 'pin-bad');
+  }
+  // The third wrong pin set a wait of 2 s: now even the right pin is held back, as a guest, and told how long.
+  const held = await hello(host, right);
+  const wait = held.sent.find(f => f.t === 'pin-wait');
+  assert.ok(wait && wait.seconds >= 1 && wait.seconds <= 2, JSON.stringify(held.sent));
+  assert.ok(!held.sent.some(f => f.t === 'pin-bad'));
+  assert.equal(held.sent.find(f => f.t === 'welcome').role, 'guest');
+  // Once the wait is over the right pin works, and the count starts again.
+  await new Promise(r => setTimeout(r, 2100));
+  assert.equal((await hello(host, right)).sent.find(f => f.t === 'welcome').role, 'owner');
+  assert.equal((await hello(host, wrongPin(host))).sent[0].t, 'pin-bad');
+  assert.equal((await hello(host, right)).sent.find(f => f.t === 'welcome').role, 'owner');
+});
+
+test('New pin clears the wait', async t => {
+  const { host } = await setup(t);
+  await host.start();
+  for (let i = 0; i < 3; i++) await hello(host, wrongPin(host));
+  host.newPin();
+  const right = host.links().pinUrl.split('#pin=')[1];
+  assert.equal((await hello(host, right)).sent.find(f => f.t === 'welcome').role, 'owner');
 });
 
 test('a reader of another protocol hears only the protocol and version', async t => {
@@ -371,7 +417,7 @@ test('stop({ end: true }) ends the room at the share server', async t => {
 });
 
 test('stop({ end: true }) ends a remembered room it is not hosting, and a later start opens a new one', async t => {
-  const saved = { room: 'SavedRoom0000000000002', hostToken: 'H'.repeat(32), pin: 'p'.repeat(22), expiresAt: null };
+  const saved = { room: 'SavedRoom0000000000002', hostToken: 'H'.repeat(32), pin: '424242', expiresAt: null };
   const { host, broker } = await setup(t, { saved });
   await host.stop({ end: true });
   assert.deepEqual(broker.posts.at(-1), { end: `/api/rooms/${saved.room}/end`, token: saved.hostToken });
@@ -415,7 +461,7 @@ test('New pin over the link: the caller hears the new pin and stays connected; o
   const me = await ownerChannel(host);
   assert.equal(await call(me, 1, 'POST', '/api/share/new-pin', '{}'), 200);
   const { pin } = bodyOf(me, 1);
-  assert.match(pin, /^[A-Za-z0-9]{22}$/);
+  assert.match(pin, /^\d{6}$/);
   assert.notEqual(pin, old);
   assert.equal(host.links().pinUrl.split('#pin=')[1], pin);
   assert.equal(states.at(-1).pin, pin);

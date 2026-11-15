@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { assembler, framesOf, mayCall, rightsOf } from './channel.mjs';
 import { cleanName, encodeGuest, GUEST_HEADER } from './guest.mjs';
-import { newId } from './secret.mjs';
+import { newPin as makePin, PIN, pinWaitMs } from './secret.mjs';
 
 export const PROTOCOL = 3;
 const MAX_GUESTS = 20;
@@ -73,7 +73,11 @@ export function createHost({ broker, port, version, ownerName, saved = null, rtc
   broker = String(broker || '').replace(/\/+$/, '');
   const origin = `http://127.0.0.1:${port}`;
   const nameOfOwner = () => (typeof ownerName === 'function' ? ownerName() : ownerName) || 'Owner';
-  let pin = typeof saved?.pin === 'string' && saved.pin ? saved.pin : newId();
+  // A saved pin of the old 22-character kind is replaced: pins are 6 digits.
+  let pin = typeof saved?.pin === 'string' && PIN.test(saved.pin) ? saved.pin : makePin();
+  // Wrong pins in a row, and until when every pin waits (pinWaitMs): a guess at the pin is slow.
+  let wrongPins = 0;
+  let pinsWaitUntil = 0;
   // The room this host keeps, while it lasts: { room, hostToken, expiresAt }.
   let kept = saved && ROOM_ID.test(saved.room ?? '') && typeof saved.hostToken === 'string' ? { room: saved.room, hostToken: saved.hostToken, expiresAt: saved.expiresAt ?? null } : null;
   let share = null; // the share being hosted: { room, token, expiresAt, keeps, ws, peers, claims, live, ice }
@@ -302,9 +306,21 @@ export function createHost({ broker, port, version, ownerName, saved = null, rtc
       send(peer, { t: 'welcome', protocol: PROTOCOL, version });
       return;
     }
-    peer.rights = rightsOf(f, pin);
-    if (typeof f.pin === 'string' && f.pin && peer.rights !== 'owner') {
-      send(peer, { t: 'pin-bad' });
+    const tried = typeof f.pin === 'string' && f.pin !== '';
+    const wait = pinsWaitUntil - Date.now();
+    if (tried && wait > 0) {
+      // Too many wrong pins were tried: this one is not even looked at. The reader keeps it and is a guest for now.
+      peer.rights = 'guest';
+      send(peer, { t: 'pin-wait', seconds: Math.ceil(wait / 1000) });
+    } else {
+      peer.rights = rightsOf(f, pin);
+      if (tried && peer.rights !== 'owner') {
+        wrongPins++;
+        pinsWaitUntil = Date.now() + pinWaitMs(wrongPins);
+        send(peer, { t: 'pin-bad' });
+      } else if (tried) {
+        wrongPins = 0;
+      }
     }
     send(peer, { t: 'welcome', role: peer.rights, protocol: PROTOCOL, version, you: peer.id, ownerName: nameOfOwner() });
     // The same person in another tab (or device) of theirs stays: both tabs are live, as one face.
@@ -743,7 +759,9 @@ export function createHost({ broker, port, version, ownerName, saved = null, rtc
   // A new pin: the room stays, every saved pin stops working, and readers connected with the old one are let go
   // (they connect again, and hear pin-bad). `keep`, the reader who asked for it over the link, stays: it hears the pin.
   function newPin(keep = null) {
-    pin = newId();
+    pin = makePin();
+    wrongPins = 0;
+    pinsWaitUntil = 0;
     for (const p of share ? Object.values(share.peers) : []) {
       if (p.rights === 'owner' && p !== keep) {
         try {
@@ -760,7 +778,7 @@ export function createHost({ broker, port, version, ownerName, saved = null, rtc
   // The kept room is held at the share server under another token: whoever holds it may have heard the pin from a
   // reader, so the pin is not carried to the new room.
   function forgetPin() {
-    pin = newId();
+    pin = makePin();
     report();
   }
 

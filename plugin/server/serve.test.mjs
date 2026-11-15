@@ -29,9 +29,10 @@ const { join } = require('node:path');
 const { randomInt } = require('node:crypto');
 const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 const newId = () => Array.from({ length: 22 }, () => A[randomInt(62)]).join('');
+const newPin = () => String(randomInt(1000000)).padStart(6, '0');
 const dir = process.argv[process.argv.indexOf('--data') + 1];
 exports.createHost = ({ broker, saved, onState }) => {
-  let pin = saved && saved.pin ? saved.pin : newId();
+  let pin = saved && saved.pin ? saved.pin : newPin();
   let kept = saved && saved.room ? { room: saved.room, hostToken: saved.hostToken, expiresAt: saved.expiresAt || null } : null;
   let state = 'off';
   const listeners = [];
@@ -51,7 +52,7 @@ exports.createHost = ({ broker, saved, onState }) => {
       state = 'off';
       report();
     },
-    newPin() { pin = newId(); report(); },
+    newPin() { pin = newPin(); report(); },
     state: () => state,
     links: () => (state === 'live' ? { url: broker + '/s/' + kept.room, pinUrl: broker + '/s/' + kept.room + '#pin=' + pin } : null),
     people: () => [{ id: 'host', name: 'Owner', color: '#3ecf8e', role: 'owner' }].concat(state === 'live' ? [{ id: 'ana-device', name: 'Ana', color: '#f27aa0', role: 'guest' }] : []),
@@ -932,7 +933,7 @@ function sharedBook(settings) {
   book.settings = { shareBroker: 'https://share.example', ...settings };
   writeFileSync(join(data, 'book.json'), JSON.stringify(book));
 }
-const PIN = /^[A-Za-z0-9]{22}$/;
+const PIN = /^\d{6}$/;
 const LINK = /^https:\/\/[^/]+\/s\/[A-Za-z0-9]{22}$/;
 
 // A book server of its own on a folder of its own, with the fake host.
@@ -1158,7 +1159,7 @@ test('--detach with the share library in place prints the link and the pin link'
     });
     const link = /^Share link: (https:\/\/share\.example\/s\/[A-Za-z0-9]{22})$/m.exec(out);
     assert.ok(link, out);
-    assert.match(out, new RegExp(`^Your pin link \\(opens with your powers; never send it to anyone\\): ${link[1]}#pin=[A-Za-z0-9]{22}$`, 'm'));
+    assert.match(out, new RegExp(`^Your pin link \\(opens with your powers; never send it to anyone\\): ${link[1]}#pin=\\d{6}$`, 'm'));
   } finally {
     try {
       process.kill(JSON.parse(readFileSync(join(dir, '.server.json'), 'utf8')).pid);

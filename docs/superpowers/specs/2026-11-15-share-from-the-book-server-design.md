@@ -32,7 +32,6 @@ The owner wants to copy the address bar of any reader's browser, owner or guest,
 ## Non-goals
 
 - Accounts, logins or passwords.
-- A short typed PIN code. The pin is a long random key that arrives by link.
 - Changing what guests can do without the pin.
 
 ## Anti-goals
@@ -68,8 +67,12 @@ The owner wants to copy the address bar of any reader's browser, owner or guest,
 
 ### The pin
 
-- The pin is 22 random base-62 characters, like the room id (my call), made when the room is first opened and kept in `.share.json` (git-ignored,
-  never served).
+- The pin is a 6-digit number, drawn without bias, made when the room is first opened and kept in `.share.json`
+  (git-ignored, never served). It can be typed (a guest's share menu has a box for it) or carried by the pin link.
+  (Changed 2026-11-15 at the owner's request: it was 22 base-62 characters, arriving by link only.)
+- **Guessing is slow.** Only a reader who has the link can try a pin. After two wrong pins in a row, every pin
+  attempt, the right one included, waits: 2 s, doubling, at most an hour. A pin held back gets `pin-wait` (the page
+  keeps it and opens again when the wait ends), not `pin-bad`. A right pin or New pin resets the count.
 - **The pin link** is `https://specbook.jasonrowland.com/s/<room>#pin=<pin>`. The page reads the pin, saves it in the
   browser for that room, and removes it from the address with `history.replaceState`, with no reload. From then on
   that browser opens the plain link with the owner's powers.

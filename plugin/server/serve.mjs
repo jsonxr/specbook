@@ -31,7 +31,7 @@ import { readJson, writeJsonAtomic } from './lib/json-file.mjs';
 import { shareBrokerOf } from './lib/broker.mjs';
 import { ensureDeps, loadRtc } from './lib/deps.mjs';
 import { createHost } from './lib/host.mjs';
-import { newId } from './lib/secret.mjs';
+import { newPin, PIN } from './lib/secret.mjs';
 import { SERVER_FIELDS, applyNoteChanges, checkGuestNotes, guestMay, guestOf, mergeGuestNotes, reviewForGuest } from './lib/guest.mjs';
 
 const SpecModel = createRequire(import.meta.url)('../app/model.js');
@@ -586,7 +586,7 @@ function mergeNotes(stored, sent) {
 // the share on /api/share/events and pass their live messages to the readers through /api/live.
 const SHAREFILE = join(DATA, '.share.json');
 const ROOM_ID = /^[A-Za-z0-9_-]{16,64}$/;
-const PIN = /^[A-Za-z0-9]{22}$/;
+
 const SHARE_TAB = /^[A-Za-z0-9_-]{8,64}$/;
 
 // What .share.json remembers: { room, hostToken, pin, expiresAt, stopped }. An older file (with the link key `secret`
@@ -597,7 +597,7 @@ function readSavedShare() {
   return {
     room: ok ? r.room : null,
     hostToken: ok ? r.hostToken : null,
-    pin: isPlain(r) && PIN.test(r.pin ?? '') ? r.pin : newId(),
+    pin: isPlain(r) && PIN.test(r.pin ?? '') ? r.pin : newPin(),
     expiresAt: ok && typeof r.expiresAt === 'string' ? r.expiresAt : null,
     stopped: isPlain(r) && r.stopped === true,
   };

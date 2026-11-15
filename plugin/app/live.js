@@ -331,6 +331,25 @@
       fpActs.appendChild(fp);
       m.appendChild(fpActs);
     }
+    // A guest who has the owner's pin types it here (the pin link does the same).
+    if (guest && !owner() && window.SpecShare.usePin) {
+      var pf = document.createElement('form');
+      pf.className = 'share-link-row share-pin-entry';
+      var pi = document.createElement('input');
+      pi.type = 'text'; pi.inputMode = 'numeric'; pi.maxLength = 6; pi.autocomplete = 'off'; pi.className = 'share-link';
+      pi.placeholder = 'Owner’s pin'; pi.setAttribute('aria-label', 'The owner’s 6-digit pin');
+      var pb = document.createElement('button');
+      pb.type = 'submit'; pb.className = 'bar-btn'; pb.textContent = 'Use pin';
+      var pe = document.createElement('p');
+      pe.className = 'share-pin-error'; pe.hidden = true; pe.textContent = 'A pin is 6 digits.';
+      pf.addEventListener('submit', function (e) {
+        e.preventDefault();
+        pe.hidden = window.SpecShare.usePin(pi.value);
+      });
+      pf.appendChild(pi); pf.appendChild(pb);
+      m.appendChild(pf);
+      m.appendChild(pe);
+    }
     if (owner()) {
       var ul = document.createElement('ul');
       ul.className = 'share-people';

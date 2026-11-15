@@ -34,6 +34,7 @@ docs README it points to) put it elsewhere. `${CLAUDE_PLUGIN_ROOT}` is this plug
    `Your pin link (opens with your powers; never send it to anyone): <pinUrl>`, the owner's own link for another
    device of theirs. The user sees only your message, never the command's output, so write both links out in it. Say
    plainly, with the pin link, that it must never be sent to anyone: whoever opens it gets the
-   owner's powers (Revise, Build, Accept), until **New pin** in the bar's ▾ replaces it. If it printed
+   owner's powers (Revise, Build, Accept), until **New pin** in the bar's ▾ replaces it. Give the 6-digit pin (after
+   `#pin=`) on its own too: on another device it can be typed into **Use pin** in the bar's ▾. If it printed
    `Sharing is starting; …` or `Sharing could not start: …` (or that the share library could not be installed) instead,
    pass that line on; **Copy link** and **Copy pin link** in the bar give the links once the share is live.

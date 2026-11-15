@@ -47,9 +47,10 @@ const { join } = require('node:path');
 const { randomInt } = require('node:crypto');
 const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 const newId = () => Array.from({ length: 22 }, () => A[randomInt(62)]).join('');
+const newPin = () => String(randomInt(1000000)).padStart(6, '0');
 const dir = process.argv[process.argv.indexOf('--data') + 1];
 exports.createHost = ({ broker, saved, onState }) => {
-  let pin = saved && saved.pin ? saved.pin : newId();
+  let pin = saved && saved.pin ? saved.pin : newPin();
   let kept = saved && saved.room ? { room: saved.room, hostToken: saved.hostToken, expiresAt: saved.expiresAt || null } : null;
   let state = 'off';
   const listeners = [];
@@ -71,7 +72,7 @@ exports.createHost = ({ broker, saved, onState }) => {
       state = 'off';
       report();
     },
-    newPin() { pin = newId(); report(); },
+    newPin() { pin = newPin(); report(); },
     state: () => state,
     links: () => (state === 'live' ? { url: broker + '/s/' + kept.room, pinUrl: broker + '/s/' + kept.room + '#pin=' + pin } : null),
     people: () => [{ id: 'host', name: 'Owner', color: '#3ecf8e', role: 'owner' }].concat(state === 'live' ? [{ id: 'ana-device', name: 'Ana', color: '#f27aa0', role: 'guest' }] : []),
