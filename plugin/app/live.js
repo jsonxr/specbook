@@ -451,7 +451,7 @@
     }
     hello();
   } else {
-    Host.onChange(function () {
+    var fromHost = function () {
       // Guests who left without a word (their connection dropped) are gone from the host's list.
       var ids = {};
       Host.people().forEach(function (p) {
@@ -463,7 +463,10 @@
       Object.keys(people).forEach(function (id) { if (!ids[id]) { delete people[id]; } });
       if (follow.leader && !people[follow.leader]) { setFollow({ type: 'leader-left' }); }
       render();
-    });
+    };
+    Host.onChange(fromHost);
+    // Who is reading may have come (the roster, sent as the tab connects) before this script ran.
+    fromHost();
   }
   window.addEventListener('pagehide', function () { send({ kind: 'bye' }); });
   render();

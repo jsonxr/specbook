@@ -1483,6 +1483,16 @@ try {
       await page.waitForSelector('.share-menu .share-copy-link:not([disabled])', { timeout: 5000 });
       const live = await inside('.share-menu');
       if (live) { bad.push(`while sharing: ${live}`); }
+      // While sharing, with a reader's face in the pill, the bar itself (the Book · Screens switch too) still fits.
+      await page.waitForFunction(() => document.querySelectorAll('.share-pill .face').length === 2, null, { timeout: 3000 });
+      const bar = await page.evaluate(() => {
+        const cw = document.documentElement.clientWidth;
+        const out = [...document.querySelector('.bar').children, ...document.querySelectorAll('.view-switch button')]
+          .filter(e => e.getClientRects().length && e.getBoundingClientRect().width)
+          .filter(e => e.getBoundingClientRect().left < 0 || Math.ceil(e.getBoundingClientRect().right) > cw).map(e => e.id || e.className);
+        return { out, title: Math.round(document.getElementById('book-title').getBoundingClientRect().width) };
+      });
+      if (bar.out.length || bar.title < 40) { bad.push(`the bar while sharing: ${JSON.stringify(bar)}`); }
       await page.click('.share-menu .share-stop');
       await page.waitForSelector('.share-pill .share-start', { timeout: 5000 });
     } finally {
@@ -1889,6 +1899,206 @@ try {
     } finally {
       await page.setViewportSize({ width: 1400, height: 900 });
     }
+  });
+
+  // The Screens view: the bar's Book · Screens switch, a list of screens then components, and a page per screen with
+  // its states, its requirements and, for a component, where it is used.
+  const TODOS = 'SCR-3WRX';
+  const screensOpen = () => page.waitForSelector('.sv-list, .sv-page', { timeout: 5000 });
+  await check('the bar\'s Book · Screens switch opens a list of the screens, then the components', async () => {
+    await open();
+    await page.locator('#to-screens').click();
+    await page.waitForSelector('.sv-list', { timeout: 5000 });
+    const seen = await page.evaluate(() => ({
+      hash: location.hash,
+      pressed: [document.getElementById('to-book').getAttribute('aria-pressed'), document.getElementById('to-screens').getAttribute('aria-pressed')],
+      heads: [...document.querySelectorAll('.sv-list h2')].map(h => h.textContent.replace(/\s+/g, ' ').trim()),
+      rows: [...document.querySelectorAll('.sv-list')].map(l => [...l.querySelectorAll('.sv-row')].map(r => [r.querySelector('a.sv-name')?.textContent, r.querySelector('a.sv-name')?.getAttribute('href'), r.querySelector('.sv-file')?.textContent])),
+      book: !!document.querySelector('#todos-list'),
+    }));
+    const want = { hash: '#screens', pressed: ['false', 'true'], heads: ['Screens 1', 'Components 1'],
+      rows: [[['TodosScreen', `#screen/${TODOS}`, 'No file yet']], [['FiltersBar', `#screen/${BAR}`, 'No file yet']]], book: false };
+    if (JSON.stringify(seen) !== JSON.stringify(want)) {
+      throw new Error(`the Screens view: ${JSON.stringify(seen)}`);
+    }
+    await page.locator('#to-book').click();
+    await page.waitForSelector('#todos-list > h3', { timeout: 5000 });
+    if (await page.evaluate(() => location.hash.startsWith('#screen') || document.getElementById('to-book').getAttribute('aria-pressed') !== 'true')) {
+      throw new Error('Book did not go back to the book');
+    }
+  });
+
+  await check('a component\'s page shows its states and Used on: a thumbnail of each placing state, the component outlined', async () => {
+    await page.goto(`${URL}#screen/${BAR}`);
+    await page.waitForSelector('.sv-page');
+    const seen = await page.evaluate(bar => ({
+      name: document.querySelector('.sv-page h2')?.textContent || '',
+      states: [...document.querySelectorAll('.sv-page figure.state')].map(f => f.dataset.key),
+      used: [...document.querySelectorAll('.sv-used a.sv-thumb')].map(a => [a.getAttribute('href'), a.textContent.trim(),
+        !!a.querySelector('.mock')?.shadowRoot?.querySelector(`.sb-component.sb-hl[data-key^="${bar}."]`)]),
+      thumbTgt: document.querySelectorAll('.sv-used .tgt, .sv-used .has-rv').length,
+      reqs: [...document.querySelectorAll('.sv-reqs li[data-req]')].map(li => li.dataset.req),
+      hints: document.querySelectorAll('.sv-hint').length,
+    }), BAR);
+    const want = { states: [`${BAR}.all`, `${BAR}.active`],
+      used: [[`#screen/${TODOS}.list`, 'TodosScreen · List', true], [`#screen/${TODOS}.activeonly`, 'TodosScreen · Active only', true]], thumbTgt: 0, reqs: ['FLT-36VG'], hints: 0 };
+    if (!seen.name.includes('FiltersBar') || JSON.stringify({ states: seen.states, used: seen.used, thumbTgt: seen.thumbTgt, reqs: seen.reqs, hints: seen.hints }) !== JSON.stringify(want)) {
+      throw new Error(`the FiltersBar page: ${JSON.stringify(seen)}`);
+    }
+  });
+
+  await check('a screen\'s page: a state\'s link scrolls to it and outlines it; requirements by chapter and section, with the state or the component', async () => {
+    await page.goto(`${URL}#screen/${TODOS}.empty`);
+    await page.waitForSelector('.sv-page');
+    await page.waitForTimeout(200);
+    const seen = await page.evaluate(key => {
+      const fig = document.getElementById(`screen/${key}`);
+      const top = fig ? Math.round(fig.getBoundingClientRect().top) : null;
+      return {
+        target: [...document.querySelectorAll('figure.state.sv-target')].map(f => f.dataset.key),
+        inView: top !== null && top >= 0 && top < innerHeight / 2,
+        groups: [...document.querySelectorAll('.sv-reqs .sv-group')].map(g => [g.querySelector('.sv-where').textContent.replace(/\s+/g, ' ').trim(),
+          [...g.querySelectorAll('li[data-req]')].map(li => [li.dataset.req, li.querySelector('.sv-narrow')?.textContent || ''])]),
+        reqLink: document.querySelector('.sv-reqs li[data-req="TOD-LGXT"] a.sv-rid')?.getAttribute('href'),
+      };
+    }, `${TODOS}.empty`);
+    const want = { target: [`${TODOS}.empty`], inView: true,
+      groups: [['Todos › The todo list', [['TOD-LGXT', 'Empty']]], ['Filters › The filter bar', [['FLT-36VG', 'via FiltersBar']]]], reqLink: '#TOD-LGXT' };
+    if (JSON.stringify(seen) !== JSON.stringify(want)) {
+      throw new Error(`the TodosScreen page: ${JSON.stringify(seen)}`);
+    }
+    // A requirement's id goes back to it in the book.
+    await page.locator('.sv-reqs li[data-req="TOD-LGXT"] a.sv-rid').click();
+    await page.waitForSelector('#todos-list > h3', { timeout: 5000 });
+    if (await page.locator('.sv-page').count()) {
+      throw new Error('the requirement link did not go back to the book');
+    }
+  });
+
+  // In its own page, with a second role in the book that no state of TodosScreen covers.
+  await check('a screen with no state for a role says so, quietly; a component never does', async () => {
+    const ctx = await browser.newContext({ reducedMotion: 'reduce', viewport: { width: 1400, height: 900 } });
+    try {
+      const p = await ctx.newPage();
+      await p.route('**/api/book', async route => {
+        const r = await route.fetch();
+        const j = await r.json();
+        j.book.roles = [...j.book.roles, { id: 'admin', label: 'Admin', color: '#f2b45a' }];
+        await route.fulfill({ response: r, json: j });
+      });
+      await p.goto(`${URL}#screen/${TODOS}`);
+      await p.waitForSelector('.sv-page');
+      const screenHints = await p.evaluate(() => [...document.querySelectorAll('.sv-hint')].map(e => e.textContent));
+      await p.goto(`${URL}#screen/${BAR}`);
+      await p.waitForSelector('.sv-page h2');
+      const compHints = await p.evaluate(() => document.querySelectorAll('.sv-hint').length);
+      await p.goto(`${URL}#screen/SCR-ZZZZ`);
+      await p.waitForSelector('.sv-page');
+      const missing = await p.evaluate(() => document.querySelector('.sv-page').textContent);
+      if (JSON.stringify(screenHints) !== JSON.stringify(['No state for Admin: same as another, or doesn\'t see it?']) || compHints !== 0 || !missing.includes('SCR-ZZZZ')) {
+        throw new Error(`hints ${JSON.stringify(screenHints)}, on the component ${compHints}; a missing screen reads ${JSON.stringify(missing)}`);
+      }
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  // A review the chapter view cannot draw (a component state placed only inside a picture) counts toward the section
+  // that places it, which links to the screen page holding it; ✓ Accept there takes it off.
+  await check('a changed component picture: the section that places it links to it, and ✓ Accept in the Screens view clears it', async () => {
+    await idle();
+    const keep = readNotesFile().notes;
+    const count = () => page.evaluate(() => Number(document.querySelector('#toc a[href="#todos-list"] .sb-chg')?.textContent || 0));
+    const elsewhere = () => page.evaluate(() => [...document.querySelectorAll('#todos-list .sec-elsewhere a')].map(a => [a.textContent, a.getAttribute('href')]));
+    await open();
+    const before = await count();
+    const file = join(data, 'mockups', 'screens', BAR, 'all.html');
+    writeFileSync(file, readFileSync(file, 'utf8').replace('Completed', 'Done'));
+    await open();
+    const after = await count();
+    const links = await elsewhere();
+    if (after !== before + 1 || JSON.stringify(links) !== JSON.stringify([['FiltersBar · All', `#screen/${BAR}.all`]])) {
+      throw new Error(`the section counts ${before} -> ${after} and links ${JSON.stringify(links)}`);
+    }
+    await page.locator('#todos-list .sec-elsewhere a').click();
+    await page.waitForSelector(`.sv-page figure.state.sv-target[data-key="${BAR}.all"]`, { timeout: 5000 });
+    // A note can be dropped here too: it goes on the state, and the Revise screen lists it.
+    await dropNoteOn(`figure.state[data-key="${BAR}.all"] figcaption`, 'Keep the word Completed');
+    const note = Object.values(readNotesFile().notes).find(n => n.text === 'Keep the word Completed');
+    if (note.item !== `${BAR}.all` || note.target !== `${BAR}.all`) {
+      throw new Error(`the note is on ${JSON.stringify(note)}`);
+    }
+    await openConfirm('revise');
+    const listed = await page.evaluate(() => document.querySelector('#claude-confirm .cc-list').textContent);
+    await page.keyboard.press('Escape');
+    await confirmShut();
+    if (!listed.includes('Keep the word Completed')) {
+      throw new Error(`the Revise screen lists ${JSON.stringify(listed)}`);
+    }
+    writeNotes(keep);
+    await page.reload();
+    await page.waitForSelector(`.sv-page figure.state.sv-target[data-key="${BAR}.all"]`, { timeout: 5000 });
+    if (!(await page.evaluate(() => document.body.classList.contains('diff-on')))) {
+      await page.locator('#changes-btn').click();
+    }
+    await page.locator(`.rv-acts[data-key="${BAR}.all"] .rv-accept`).click();
+    await page.waitForFunction(k => !document.querySelector(`.rv-stack[data-key="${k}"]`), `${BAR}.all`, { timeout: 5000 });
+    if (!(await page.evaluate(k => location.hash === `#screen/${k}` && !!document.querySelector('.sv-page'), `${BAR}.all`))) {
+      throw new Error('Accept left the Screens view');
+    }
+    if (!readReviewFile().accepted[`${BAR}.all`]) {
+      throw new Error('review.json holds no accepted copy of the component state');
+    }
+    await page.locator('#to-book').click();
+    await page.waitForSelector('#todos-list > h3', { timeout: 5000 });
+    const last = await count();
+    const gone = await elsewhere();
+    await filterOff();
+    if (last !== before || gone.length) {
+      throw new Error(`after Accept the section counts ${last} (was ${before}) and links ${JSON.stringify(gone)}`);
+    }
+  });
+
+  await check('on a phone the bar\'s switch, the Screens view, a screen\'s page and Used on fit the screen', async () => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const bad = [];
+    const fits = async what => {
+      const w = await page.evaluate(() => {
+        const cw = document.documentElement.clientWidth;
+        const bar = document.querySelector('.bar');
+        // Every control in the bar, the switch's two buttons included, on the screen; the book's title keeps some room.
+        const out = [...bar.children, ...document.querySelectorAll('.view-switch button')].filter(e => e.getClientRects().length && e.getBoundingClientRect().width)
+          .filter(e => e.getBoundingClientRect().left < 0 || Math.ceil(e.getBoundingClientRect().right) > cw).map(e => e.id || e.className);
+        const title = Math.round(document.getElementById('book-title').getBoundingClientRect().width);
+        const wide = [...document.querySelectorAll('main figure.state, main .sv-thumb, main .sv-row, main .sv-reqs')].filter(e => e.getClientRects().length)
+          .filter(e => Math.ceil(e.getBoundingClientRect().right) > cw).map(e => e.dataset.key || e.className);
+        return { cw, out, title, main: Math.ceil(document.querySelector('main').getBoundingClientRect().right), wide };
+      });
+      if (w.out.length || w.title < 40 || w.main > w.cw || w.wide.length) { bad.push(`${what}: ${JSON.stringify(w)}`); }
+    };
+    try {
+      await open();
+      await fits('the book');
+      await page.locator('#to-screens').click();
+      await page.waitForSelector('.sv-list');
+      await fits('the Screens view');
+      await page.goto(`${URL}#screen/${TODOS}`);
+      await screensOpen();
+      await page.waitForTimeout(200);
+      await fits('TodosScreen');
+      const stacked = await page.evaluate(() => {
+        const r = [...document.querySelectorAll('.sv-page .sv-states > .state-item')].map(e => e.getBoundingClientRect());
+        return r.length > 1 && r.every((b, i) => i === 0 || b.top >= r[i - 1].bottom);
+      });
+      if (!stacked) { bad.push('the states are not one above the other'); }
+      await page.goto(`${URL}#screen/${BAR}`);
+      await screensOpen();
+      await page.waitForTimeout(200);
+      await fits('FiltersBar and Used on');
+    } finally {
+      await page.setViewportSize({ width: 1400, height: 900 });
+    }
+    if (bad.length) { throw new Error(bad.join('; ')); }
   });
 
   // On the website (window.SpecShare set by share.js) the book's HTML is someone else's: book.js cleans it before it is

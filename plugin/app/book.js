@@ -10,8 +10,11 @@
     review: null, reviews: null, items: {}, history: { items: {} }, historyCounts: {}, changelog: [], diff: false };
   var main = document.getElementById('main');
   if ('scrollRestoration' in history) { history.scrollRestoration = 'manual'; }
+  // The hash says which view is drawn (see routeOf): a change of view or of screen page draws the page again; any
+  // other change only scrolls to its target.
   window.addEventListener('hashchange', function () {
-    var t = document.getElementById(location.hash.slice(1));
+    if (state.book && routeName(routeOf(location.hash)) !== drawnRoute) { showRoute(); return; }
+    var t = hashTarget();
     if (t) { t.scrollIntoView({ behavior: 'instant', block: 'start' }); }
   });
 
@@ -155,7 +158,8 @@
   // Ready is gated on review: the server refuses it (409 unreviewed) while the section, any of its requirements or any
   // of the states it shows is under review. The reason shows under the section's heading, next to the button.
   var READY_GATE = 'Accept this section\'s changes before marking it ready.';
-  function stageMessage(btn, text) {
+  // `more`, when given, is a node put after the text (the links to the changes that are in the Screens view).
+  function stageMessage(btn, text, more) {
     var h = btn.closest('h3');
     if (!h) { msgEl.textContent = text; return; }
     var next = h.nextElementSibling;
@@ -166,7 +170,10 @@
       h.parentNode.insertBefore(p, h.nextSibling);
     }
     p.textContent = '';
-    setTimeout(function () { p.textContent = text; }, 50);
+    setTimeout(function () {
+      p.textContent = text;
+      if (more) { p.appendChild(document.createTextNode(' ')); p.appendChild(more); }
+    }, 50);
   }
   // While Claude is idle, a drafting section can be marked ready and a ready one sent back to drafting.
   function stageButton(fullId, stage) {
@@ -182,7 +189,9 @@
         .then(function (res) {
           if (!res.ok) {
             if (res.j.error === 'unreviewed') {
-              stageMessage(btn, READY_GATE);
+              var s0 = findSection(fullId);
+              var off = s0 ? offPageReviews(s0, fullId).keys : [];
+              stageMessage(btn, READY_GATE, off.length ? elsewhereLinks(off) : null);
             } else {
               msgEl.textContent = res.j.error === 'locked' ? 'Claude is busy; the book is locked until it is done.' :
                 res.j.error === 'nothing-to-build' ? 'Nothing to build: no requirement in this section has a change.' : 'Could not change the stage: ' + (res.j.error || 'failed') + '.';
@@ -934,10 +943,17 @@
   // drawn as another, and the state's marker (New, Change, Removed). Notes dropped on it go on the state.
   function stateFigure(sh, num, s) {
     var key = sh.state;
+    var label = screenLabel(key);
+    var fig = stateFigureFor(key, label, sh.highlight, s);
+    tgtAttrs(fig, key, num + ' ' + s.title + ' · screen “' + label + '”', 'Screen: ' + label, key);
+    return fig;
+  }
+  // The figure of a state, captioned with `label`, without its note target (the chapter view and the Screens view
+  // name it differently).
+  function stateFigureFor(key, label, highlight, section) {
     var ix = screens();
     var hit = hasOwn(ix.states, key) ? ix.states[key] : null;
     var drawn = window.SpecModel.drawnState(state.book, key);
-    var label = screenLabel(key);
     var cap = '';
     if (hit) {
       var role = hit.state.when && hit.state.when.role;
@@ -954,11 +970,10 @@
     var fig = el('figure', { class: 'state' });
     markReview(fig, key);
     fig.appendChild(el('figcaption', {}, cap));
-    fig.appendChild(renderStateBody(key, hit, drawn, sh.highlight, s));
+    fig.appendChild(renderStateBody(key, hit, drawn, highlight, section));
     if (hit && hit.state.change === 'remove' && hit.state.reason) {
       fig.appendChild(el('p', { class: 'today why' }, '<span>Why:</span> ' + esc(hit.state.reason)));
     }
-    tgtAttrs(fig, key, num + ' ' + s.title + ' · screen “' + label + '”', 'Screen: ' + label, key);
     return fig;
   }
   // The chips under a requirement for the screens it is about, "<name>" or "<name> · <state name>", each linking to
@@ -978,6 +993,265 @@
       var text = !sc ? String(sid) + ' · missing' : found ? screenLabel(key) : sc.name + ' · ' + e.state + ' · missing';
       return '<a class="screen-chip' + (found ? '' : ' missing') + '" href="#screen/' + esc(key) + '">' + esc(text) + '</a>';
     }).join('') + '</div>';
+  }
+
+  // Screens view --------------------------------------------------------------------------------------
+  // The bar's Book · Screens switch. The Screens view is #screens (every screen, then every component) and
+  // #screen/<id> (a screen's page) or #screen/<state key> (that page, scrolled to the state and outlining it); any
+  // other hash is the book. Its headings and states are note targets with review stacks, as in the chapter view.
+  var drawnRoute = 'book';
+  var bookPlace = null; // where the reader was in the book when they left it for the Screens view
+  function routeOf(hash) {
+    var h = String(hash || '');
+    if (h === '#screens') { return { page: 'list', hash: h }; }
+    if (h.indexOf('#screen/') !== 0) { return null; }
+    var key = h.slice(8);
+    try { key = decodeURIComponent(key); } catch (e) { /* kept as written */ }
+    var dot = key.indexOf('.');
+    return { page: 'screen', hash: h, id: dot < 0 ? key : key.slice(0, dot), key: dot < 0 ? null : key };
+  }
+  function routeName(route) { return route ? route.hash : 'book'; }
+  function hashTarget() {
+    if (!location.hash) { return null; }
+    var id = location.hash.slice(1);
+    try { id = decodeURIComponent(id); } catch (e) { /* kept as written */ }
+    return document.getElementById(id);
+  }
+  // Draws the view the hash names. Back in the book, a hash with no target returns the reader to where they were.
+  function showRoute() {
+    var fromBook = drawnRoute === 'book';
+    var route = routeOf(location.hash);
+    if (fromBook && route) { bookPlace = readingAnchor(); }
+    render();
+    if (hashTarget()) { return; }
+    if (!route && !fromBook && bookPlace) { keepPlace(bookPlace); } else if (route || !fromBook) { window.scrollTo(0, 0); }
+  }
+  var toBook = document.getElementById('to-book');
+  var toScreens = document.getElementById('to-screens');
+  function syncSwitch(route) {
+    toBook.setAttribute('aria-pressed', String(!route));
+    toScreens.setAttribute('aria-pressed', String(!!route));
+  }
+  toScreens.addEventListener('click', function () { if (location.hash !== '#screens') { location.hash = 'screens'; } });
+  toBook.addEventListener('click', function () {
+    if (!routeOf(location.hash)) { return; }
+    history.pushState(null, '', location.pathname + location.search);
+    showRoute();
+  });
+  // Links to reviews a section's gate covers that are drawn only in the Screens view: "Under review in Screens: …".
+  function elsewhereLinks(keys) {
+    var span = el('span', { class: 'elsewhere' });
+    span.appendChild(document.createTextNode('Under review in Screens: '));
+    keys.forEach(function (k, i) {
+      if (i) { span.appendChild(document.createTextNode(', ')); }
+      span.appendChild(el('a', { href: '#screen/' + k })).textContent = screenLabel(k);
+    });
+    return span;
+  }
+  // Reviews a section's Accept gate covers (SpecModel.gateKeys) that its chapter view has no stack for: the screen
+  // headings of the states it shows, states drawn through sameAs, and component states placed in its pictures.
+  // `uncounted` is how many of them reviews().bySection leaves out: it counts the states a section shows and their
+  // screens' headings, not what those pictures place.
+  function offPageReviews(s, fullId) {
+    var shown = {}, shownScreens = {};
+    (s.shows || []).forEach(function (sh) {
+      if (sh && typeof sh.state === 'string') { shown[sh.state] = true; shownScreens[sh.state.split('.')[0]] = true; }
+    });
+    var keys = window.SpecModel.gateKeys(state.book, state.mockups, fullId).filter(function (k) { return !hasOwn(shown, k) && !!reviewOf(k); });
+    var uncounted = keys.filter(function (k) { return k.indexOf('.') >= 0 || !hasOwn(shownScreens, k); }).length;
+    return { keys: keys, uncounted: uncounted };
+  }
+  // Screen ids in book order of first appearance (what the sections show, then what those pictures place, then what
+  // their requirements name), then any the book never reaches, in catalog order.
+  function screenOrder() {
+    var ix = screens();
+    var out = [];
+    var add = function (id) { if (hasOwn(ix.screens, id) && out.indexOf(id) < 0) { out.push(id); } };
+    (state.book.chapters || []).forEach(function (ch) {
+      (ch.sections || []).forEach(function (s) {
+        window.SpecModel.gateKeys(state.book, state.mockups, ch.id + '-' + s.id).forEach(function (k) { add(k.split('.')[0]); });
+        (s.requirements || []).forEach(function (r) {
+          (r && Array.isArray(r.screens) ? r.screens : []).forEach(function (e) { if (e && typeof e.screen === 'string') { add(e.screen); } });
+        });
+      });
+    });
+    (state.book.screens || []).forEach(function (sc) { if (sc && sc.id) { add(sc.id); } });
+    return out;
+  }
+  function isComponent(sc) { return sc.kind === 'component'; }
+  function fileHtml(sc) {
+    return sc.file ? '<code class="sv-file">' + esc(sc.file) + '</code>' : '<span class="sv-file sv-nofile">No file yet</span>';
+  }
+  function openCount(rv, id) {
+    var n = rv.byScreen[id] || 0;
+    return n ? ' <span class="sb-chg sv-open" title="Open reviews">' + n + '</span>' : '';
+  }
+  function renderScreens(route, rv, toc) {
+    var ix = screens();
+    var order = screenOrder();
+    var groups = [['screen', 'Screens'], ['component', 'Components']].map(function (g) {
+      return { kind: g[0], title: g[1], ids: order.filter(function (id) { return isComponent(ix.screens[id]) === (g[0] === 'component'); }) };
+    });
+    toc.appendChild(el('div', { class: 'sb-ch' }, '<a class="sb-chl" href="#top"><span class="sb-n">‹</span>The book</a>'));
+    groups.forEach(function (g) {
+      var tocCh = el('div', { class: 'sb-ch' }, '<a class="sb-chl" href="#screens"><span class="sb-n">' + g.ids.length + '</span>' + g.title + '</a>');
+      var tocSecs = el('div', { class: 'sb-secs' });
+      g.ids.forEach(function (id) {
+        tocSecs.appendChild(el('a', { href: '#screen/' + id, class: rv.byScreen[id] ? 'has-chg' : 'no-chg' }, esc(ix.screens[id].name || id) + openCount(rv, id)));
+      });
+      tocCh.appendChild(tocSecs);
+      toc.appendChild(tocCh);
+    });
+    if (route.page === 'list') {
+      main.appendChild(el('header', { class: 'cover sv-cover', id: 'screens' }, '<p class="eyebrow">Screens</p><h1>Screens and components</h1>' +
+        '<p>Every screen of the app, then every component placed in them: each with its states, the requirements about it, and where a component is used.</p>'));
+      groups.forEach(function (g) {
+        var sec = el('section', { class: 'sv-list', 'data-kind': g.kind });
+        sec.appendChild(el('h2', {}, g.title + ' <span class="sv-n">' + g.ids.length + '</span>'));
+        if (!g.ids.length) { sec.appendChild(el('p', { class: 'sv-none' }, 'None yet.')); }
+        var ul = el('ul', { class: 'sv-rows' });
+        g.ids.forEach(function (id) {
+          var sc = ix.screens[id];
+          var states = (sc.states || []).length;
+          ul.appendChild(el('li', { class: 'sv-row' }, '<a class="sv-name" href="#screen/' + esc(id) + '">' + esc(sc.name || id) + '</a>' + openCount(rv, id) +
+            ' <span class="sv-meta">' + plural(states, 'state', 'states') + '</span> ' + fileHtml(sc)));
+        });
+        sec.appendChild(ul);
+        main.appendChild(sec);
+      });
+      return;
+    }
+    main.appendChild(screenPage(route, rv));
+  }
+  // The reviews of a screen's states that are gone from the book, by their keys.
+  function removedStates(rv, id) {
+    var ix = screens();
+    return Object.keys(rv.byKey).filter(function (k) {
+      var r = rv.byKey[k];
+      return r.status === 'removed' && !r.orphan && (k === id || k.indexOf(id + '.') === 0) && !hasOwn(ix.states, k) && !hasOwn(ix.screens, k);
+    });
+  }
+  // States by role, in the book's order of roles; those with no role keep their place after them.
+  function byRole(states) {
+    var roles = (state.book.roles || []).map(function (r) { return r.id; });
+    var rank = function (st) {
+      var r = st.when && st.when.role;
+      if (!r) { return roles.length + 1; }
+      return r === 'anyone' ? -1 : roles.indexOf(r) < 0 ? roles.length : roles.indexOf(r);
+    };
+    return states.map(function (st, i) { return { st: st, i: i }; })
+      .sort(function (a, b) { return rank(a.st) - rank(b.st) || a.i - b.i; })
+      .map(function (x) { return x.st; });
+  }
+  function screenPage(route, rv) {
+    var ix = screens();
+    var id = route.id;
+    var sc = hasOwn(ix.screens, id) ? ix.screens[id] : null;
+    var page = el('article', { class: 'sv-page' + (sc && isComponent(sc) ? ' sv-comp' : ''), id: 'screen/' + id });
+    page.appendChild(el('p', { class: 'sv-back' }, '<a href="#screens">‹ All screens</a>'));
+    var gone = removedStates(rv, id);
+    if (!sc) {
+      page.appendChild(el('p', { class: 'state-missing' }, 'There is no screen ' + esc(id) + ' in the book.'));
+      if (gone.length) { page.appendChild(removedList(gone)); }
+      return page;
+    }
+    var comp = isComponent(sc);
+    var word = comp ? 'component' : 'screen';
+    page.appendChild(el('p', { class: 'eyebrow' }, comp ? 'Component' : 'Screen'));
+    var h = el('h2', { class: 'sv-title' }, esc(sc.name || id) + ' <span class="sid">' + esc(id) + '</span>');
+    markReview(h, id);
+    tgtAttrs(h, id, 'The ' + word + ' “' + (sc.name || id) + '” (whole ' + word + ')', '', id);
+    page.appendChild(h);
+    page.appendChild(itemRow('div', id));
+    page.appendChild(el('p', { class: 'sv-filepath' }, fileHtml(sc)));
+    if (sc.intro) { page.appendChild(el('p', { class: 'lede' }, sc.intro)); }
+
+    page.appendChild(el('h3', { class: 'sv-h' }, 'States'));
+    var row = el('div', { class: 'states sv-states' });
+    byRole(sc.states || []).forEach(function (st) {
+      var key = window.SpecModel.stateKey(id, st.id);
+      var wrap = el('div', { class: 'state-item' });
+      var fig = stateFigureFor(key, st.name || st.id, null, null);
+      fig.id = 'screen/' + key;
+      if (route.key === key) { fig.classList.add('sv-target'); }
+      if (st.when && st.when.also) { fig.querySelector('figcaption').appendChild(el('span', { class: 'sv-also' }, ' · ' + esc(st.when.also))); }
+      tgtAttrs(fig, key, 'Screens · ' + screenLabel(key), 'Screen: ' + screenLabel(key), key);
+      wrap.appendChild(fig);
+      wrap.appendChild(itemRow('div', key));
+      row.appendChild(wrap);
+    });
+    if (!(sc.states || []).length) { row.appendChild(el('p', { class: 'sv-none' }, 'No states yet.')); }
+    page.appendChild(row);
+    window.SpecModel.missingRoles(state.book, id).forEach(function (r) {
+      page.appendChild(el('p', { class: 'sv-hint' }, esc('No state for ' + roleInfo(r).label + ': same as another, or doesn\'t see it?')));
+    });
+    if (gone.length) { page.appendChild(removedList(gone)); }
+
+    page.appendChild(el('h3', { class: 'sv-h' }, 'Requirements'));
+    page.appendChild(screenRequirements(id, word));
+    if (comp) {
+      page.appendChild(el('h3', { class: 'sv-h' }, 'Used on'));
+      page.appendChild(usedOnRow(id));
+    }
+    return page;
+  }
+  // The requirements about a screen, grouped by section in book order ("<chapter> › <section>"), each with the state it
+  // narrows to or the component it reaches the screen through.
+  function screenRequirements(id, word) {
+    var ix = screens();
+    var box = el('div', { class: 'sv-reqs' });
+    var seen = {};
+    var groups = [];
+    window.SpecModel.requirementsFor(state.book, state.mockups, id).forEach(function (x) {
+      var sig = x.req.id + '|' + x.state + '|' + x.via;
+      if (hasOwn(seen, sig)) { return; }
+      seen[sig] = true;
+      var last = groups[groups.length - 1];
+      if (!last || last.fullId !== x.fullId) { last = { fullId: x.fullId, chapterId: x.chapterId, list: [] }; groups.push(last); }
+      last.list.push(x);
+    });
+    if (!groups.length) { box.appendChild(el('p', { class: 'sv-none' }, 'No requirement names this ' + word + ' yet.')); }
+    groups.forEach(function (g) {
+      var ch = (state.book.chapters || []).filter(function (c) { return c.id === g.chapterId; })[0];
+      var s = findSection(g.fullId);
+      var div = el('div', { class: 'sv-group' });
+      div.appendChild(el('p', { class: 'sv-where' }, '<a href="#' + esc(g.fullId) + '">' + esc(ch ? ch.title : g.chapterId) + ' › ' + esc(s ? s.title : g.fullId) + '</a>'));
+      var ul = el('ul', { class: 'sv-req-list' });
+      g.list.forEach(function (x) {
+        var sk = x.state ? window.SpecModel.stateKey(x.via || id, x.state) : '';
+        var narrow = x.state ? (hasOwn(ix.states, sk) ? ix.states[sk].state.name : x.state) + (x.via ? ' · via ' + (hasOwn(ix.screens, x.via) ? ix.screens[x.via].name : x.via) : '') :
+          x.via ? 'via ' + (hasOwn(ix.screens, x.via) ? ix.screens[x.via].name : x.via) : '';
+        var li = el('li', { 'data-req': x.req.id || '' }, '<a class="sv-rid" href="#' + esc(x.req.id || g.fullId) + '">' + esc(x.req.id || '') + '</a> ' +
+          '<span class="sv-text">' + (x.req.text || '') + '</span>' + (narrow ? ' <span class="sv-narrow">' + esc(narrow) + '</span>' : ''));
+        ul.appendChild(li);
+      });
+      div.appendChild(ul);
+      box.appendChild(div);
+    });
+    return box;
+  }
+  // Where a component is placed: a small picture of each state that places it, the component outlined, linking to it.
+  function usedOnRow(id) {
+    var ix = screens();
+    var row = el('div', { class: 'sv-used' });
+    var keys = window.SpecModel.usedOn(state.book, state.mockups)[id] || [];
+    keys.forEach(function (key) {
+      var hit = hasOwn(ix.states, key) ? ix.states[key] : null;
+      if (!hit) { return; }
+      // The picture that has the tag: a changing state may place it only in its proposed picture, or only today.
+      var path = [hit.state.mockup, hit.state.today].filter(function (p) {
+        return p && window.SpecModel.componentsIn(state.mockups[p]).some(function (c) { return c.id === id; });
+      })[0];
+      if (!path) { return; }
+      var a = el('a', { class: 'sv-thumb', href: '#screen/' + key });
+      a.appendChild(el('span', { class: 'sv-thumb-cap' }, esc(screenLabel(key))));
+      var host = el('div', { class: 'mock' });
+      a.appendChild(host);
+      mountMockup(host, path, id);
+      row.appendChild(a);
+    });
+    if (!row.childNodes.length) { row.appendChild(el('p', { class: 'sv-none' }, 'Not placed on any screen yet.')); }
+    return row;
   }
 
   // Evidence ------------------------------------------------------------------------------------------
@@ -1207,6 +1481,26 @@
     var editing = act && /^(TEXTAREA|INPUT|SELECT)$/.test(act.tagName) && act.closest && act.closest('.inline-editor[data-key]');
     var focusKey = editing ? editing.dataset.key : null;
     var focusName = editing ? act.name : '';
+    // What every view ends with: the media count, the notes and their pins, the cursor back in its editor, and the
+    // hash's target scrolled to.
+    var finish = function () {
+      var shots = state.media.filter(function (m) { return m.indexOf('media/screens/') === 0; }).length;
+      var vids = state.media.filter(function (m) { return m.indexOf('media/videos/') === 0; }).length;
+      document.getElementById('media-count').textContent = shots + ' screenshot' + (shots === 1 ? '' : 's') + ', ' + vids + ' recording' + (vids === 1 ? '' : 's') + ' in media/.';
+      renderNotes();
+      drawSentPins();
+      if (focusKey) {
+        var sel = '.inline-editor[data-key="' + focusKey.replace(/["\\]/g, '\\$&') + '"] ';
+        var back = (focusName ? main.querySelector(sel + '[name="' + focusName + '"]') : null) || main.querySelector(sel + 'textarea');
+        if (back && back.getClientRects().length) {
+          if (back.tagName === 'TEXTAREA') { grow(back); }
+          back.focus({ preventScroll: true });
+          if (back.tagName !== 'SELECT') { back.setSelectionRange(back.value.length, back.value.length); }
+        }
+      }
+      var target = hashTarget();
+      if (target) { target.scrollIntoView({ behavior: 'instant', block: 'start' }); }
+    };
     var b = state.book;
     state.items = window.SpecModel.itemsOf(b, state.mockups);
     var rv = computeReviews();
@@ -1224,6 +1518,15 @@
     main.innerHTML = '';
     var toc = document.getElementById('toc');
     toc.innerHTML = '';
+    var route = routeOf(location.hash);
+    drawnRoute = routeName(route);
+    syncSwitch(route);
+    if (route) {
+      updateChangesBar();
+      renderScreens(route, rv, toc);
+      finish();
+      return;
+    }
 
     var cover = el('header', { class: 'cover', id: 'top' });
     setHtml(cover, '<p class="eyebrow">' + esc(b.eyebrow || 'Spec book') + '</p><h1>' + esc(b.title) + '</h1>' +
@@ -1235,10 +1538,15 @@
     main.appendChild(diffSummary(rv, removed['']));
     updateChangesBar();
 
+    // Reviews a section's Accept gate covers that its chapter view cannot draw: linked to the Screens view, and counted.
+    var offPage = {};
+    (b.chapters || []).forEach(function (ch) {
+      (ch.sections || []).forEach(function (s) { offPage[ch.id + '-' + s.id] = offPageReviews(s, ch.id + '-' + s.id); });
+    });
     (b.chapters || []).forEach(function (ch, ci) {
       var n = ci + 1;
       var nn = n < 10 ? '0' + n : String(n);
-      var chChanged = !!rv.byChapter[ch.id];
+      var chChanged = !!rv.byChapter[ch.id] || (ch.sections || []).some(function (s) { return offPage[ch.id + '-' + s.id].keys.length > 0; });
       var sec = el('section', { class: 'chapter ' + (chChanged ? 'has-chg' : 'no-chg'), id: ch.id });
       sec.appendChild(el('p', { class: 'eyebrow' }, 'Chapter ' + nn));
       var chStage = window.SpecModel.chapterStage(ch);
@@ -1257,7 +1565,8 @@
       (ch.sections || []).forEach(function (s, si) {
         var num = '§' + n + '.' + (si + 1);
         var fullId = ch.id + '-' + s.id;
-        var nChg = rv.bySection[fullId] || 0;
+        var off = offPage[fullId];
+        var nChg = (rv.bySection[fullId] || 0) + off.uncounted;
         var box = el('div', { class: 'bk-sec ' + (nChg ? 'has-chg' : 'no-chg'), id: fullId });
         var stage = window.SpecModel.sectionStage(s);
         var sp = window.SpecModel.stagePill(s);
@@ -1275,6 +1584,7 @@
         tgtAttrs(h, fullId, num + ' ' + s.title + ' (whole section)', '');
         box.appendChild(h);
         box.appendChild(itemRow('div', fullId));
+        if (off.keys.length) { box.appendChild(el('p', { class: 'sec-elsewhere' })).appendChild(elsewhereLinks(off.keys)); }
         if (s.intro) { box.appendChild(el('p', { class: 'bk-intro' }, s.intro)); }
         var mixed = false;
         if (s.requirements && s.requirements.length) {
@@ -1391,24 +1701,7 @@
       toc.appendChild(el('div', { class: 'sb-ch' }, '<a class="sb-chl" href="#changelog"><span class="sb-n">—</span>Changelog</a>'));
     }
 
-    var shots = state.media.filter(function (m) { return m.indexOf('media/screens/') === 0; }).length;
-    var vids = state.media.filter(function (m) { return m.indexOf('media/videos/') === 0; }).length;
-    document.getElementById('media-count').textContent = shots + ' screenshot' + (shots === 1 ? '' : 's') + ', ' + vids + ' recording' + (vids === 1 ? '' : 's') + ' in media/.';
-    renderNotes();
-    drawSentPins();
-    if (focusKey) {
-      var sel = '.inline-editor[data-key="' + focusKey.replace(/["\\]/g, '\\$&') + '"] ';
-      var back = (focusName ? main.querySelector(sel + '[name="' + focusName + '"]') : null) || main.querySelector(sel + 'textarea');
-      if (back && back.getClientRects().length) {
-        if (back.tagName === 'TEXTAREA') { grow(back); }
-        back.focus({ preventScroll: true });
-        if (back.tagName !== 'SELECT') { back.setSelectionRange(back.value.length, back.value.length); }
-      }
-    }
-    if (location.hash) {
-      var target = document.getElementById(location.hash.slice(1));
-      if (target) { target.scrollIntoView({ behavior: 'instant', block: 'start' }); }
-    }
+    finish();
   }
 
   // Notes ---------------------------------------------------------------------------------------------
@@ -3164,7 +3457,6 @@
   barHeight();
   document.getElementById('toc').addEventListener('click', function () { setTimeout(barHeight, 0); });
 
-  // Screens view --------------------------------------------------------------------------------------
   // View: Mockups and Screenshots (both is "both"; one always stays checked), Recordings, Coverage.
   var viewMock = document.getElementById('view-mock');
   var viewShot = document.getElementById('view-shot');
