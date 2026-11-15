@@ -7,6 +7,7 @@ The page `serve` opens, in detail. The `specbook` skill points here.
   - **View**: checkboxes for **Mockups**, **Screenshots** (both checked shows both; one always stays checked),
     **Recordings**, **Coverage** (when there is evidence) and, with the filter on, **Show sent notes**, plus the media
     count;
+  - **Book · Screens**, a switch: the book, or the Screens view (see "The Screens view");
   - the share pill (see "Sharing a book");
   - **✦ Claude**, a menu holding **Revise** and **Build**, each saying what Claude will do (see "The Claude group"),
     with a badge counting the draft notes. While Claude works, the button reads "✦ Claude · Building…".
@@ -23,27 +24,35 @@ The page `serve` opens, in detail. The `specbook` skill points here.
   the section in view. Tapping an entry jumps there and closes the sheet; the backdrop, Esc or a swipe down closes it
   too.
 - **The book**: a cover, then chapters. A chapter has an eyebrow ("Chapter 03"), a title, a status pill and an
-  intro. Each section has a § number, title, a stage pill, intro, a list of requirements, then every screen
-  ("frame") it describes side by side, each captioned with a colored role tag. Recordings play under their
-  section. At the end: **Decisions and what was rejected**, the full list.
+  intro. Each section has a § number, title, a stage pill, intro, a list of requirements, then the screen
+  states it shows (`shows`) side by side, each captioned "<screen name> · <state name>" with a colored role tag.
+  Every picture is the one drawing of that state, so it reads the same wherever it is shown. A state drawn as
+  another (`sameAs`) says "Same as <state name>" and a role that never sees the screen (`absent`) shows its words
+  where the picture would be. A component named by `highlight` is outlined in its picture; a component placed in a
+  picture is drawn in place, or as a red placeholder naming it when it, its state or its picture is missing.
+  Recordings play under their section. At the end: **Decisions and what was rejected**, the full list.
 - **Stages.** Each section's pill says Drafting, Ready, Building or Built, plus its `label` after a dot
   ("Drafting · Phase 2"). A Built section with changes shows `Built · 1 change drafting` or
   `Built · 3 changes drafting`. A chapter's pill is derived from its sections. While Claude is idle, a Drafting
   section has a **Mark ready** button and a Ready one has **Back to drafting**; Building and Built sections have no
   control. A section none of whose requirements has a `change` cannot be marked Ready (400 `nothing-to-build`), and one with an
-  open review (on the section, any of its requirements or frames, or an item removed from it) cannot either (409
+  open review (on the section, any of its requirements, the states it shows or what they place, or an item removed from it) cannot either (409
   `unreviewed`): the page says "Accept this section's changes before marking it ready." under the heading and in the
   button's tooltip. The controls are hidden while Claude is busy, and a refused change says "Claude is busy; the book is
   locked until it is done."
 - **Pending changes.** A section with some changed requirements shows **What the app does today**, then its own
   **Changes** list. Each change is tagged: `add` is **New**; `change` shows the target with **Today:** what happens
   now under it; `remove` is struck through, tagged **Removed**, with **Why:** and its reason. Numbering runs on across
-  both lists. A frame that draws a changed screen carries a "shows proposed change" tag. A section that has never
+  both lists. A shown state with a `change` carries a tag (**New**, **Change**, **Removed**, with **Why:** for a removal),
+  and a changed one draws two panes, **Today** (today's picture, with its screenshot if there is one) and
+  **Proposed** (the new picture, no screenshot: the app does not look like it yet). A section that has never
   been built is all Changes.
-- **Decisions** appear in the section they are about (a **Decisions** box under its frames, matched by `about`) and
+- **Decisions** appear in the section they are about (a **Decisions** box under its states, matched by `about`) and
   in the full list at the end. Each has a tag: `by build`, `removed` or `rejected`.
 - **Requirements** read like a book: a red position bullet (`2.1.3`, changes as the book changes) and, after the
-  sentence, a small gray **stable id** (`ORG-2EV2`, never changes). Each requirement is an anchor (`#ORG-2EV2`).
+  sentence, a small gray **stable id** (`ORG-2EV2`, never changes). Each requirement is an anchor (`#ORG-2EV2`). A requirement with `screens` shows a chip under it for each
+  screen or component it is about, "HomeScreen" or "HomeScreen · Admin" (a state narrows it), which opens that page in
+  the Screens view; an entry naming something not in the book says so on a dashed chip.
 - **Evidence** under each requirement, once `evidence.json` exists: **▶ e2e 1:02–1:09** plays that slice of the
   chapter's recording (✗ when it failed, "e2e not run" when an earlier block failed, "no video" when it ran
   unrecorded); a 📷 thumbnail of the pass screenshot, or the failure screenshot with the error, opens large; and
@@ -68,7 +77,9 @@ The page `serve` opens, in detail. The `specbook` skill points here.
   into the pin's head, with no border between them. Pins are numbered in book order. Drag a pin to re-aim it, and whatever it lands on (requirement, screen, section title,
   call, decision) becomes the note's subject; the sticky stays where it is and only the arrow re-aims. A note on a
   mockup also records the mockup element under its point (file, selector, text, clipped html), re-read when the
-  pin is moved, and sends it to Claude as the item's `element`. Dropping a note never scrolls the page.
+  pin is moved, and sends it to Claude as the item's `element`. A note dropped inside a component placed in a picture
+  goes on that component's state (and `element` names that state's own picture); anywhere else in a shown picture it
+  goes on the shown state, and its `section` still records where it was dropped. Dropping a note never scrolls the page.
   **On a narrow screen** (860 px or less, where the contents sidebar hides), the same notes show as cards in a list
   under the item they are on, in book order, each joined by a 1 px line to a 3 px dot on its spot. A tap selects a card and a tap on the selected card edits it; a long press deletes it; nothing is dragged, and a narrow screen never saves where a sticky sits, so
   it ignores and never changes a desktop's placement. Resizing the window switches between the two.
@@ -147,12 +158,41 @@ sets the notes it was sent to `answered`; drafts added during a build wait for t
   are disabled while Claude is busy, and the server refuses a review then (409 `locked`). The banner stays until every
   call is decided.
 
+## The Screens view
+
+The header's **Book · Screens** switch opens a second way to read the book: every screen and component listed once,
+drawn once per state, with every requirement about it. Pressing **Book** goes back to where you were reading.
+
+- **The list** (`#screens`): **Screens**, then **Components**, each with its count, in book order of first
+  appearance (what sections show, what those pictures place, what requirements name, then anything left). A row
+  shows the name, an open-review count, how many states it has and its `file` ("No file yet" when the build has not
+  created it). The contents sidebar lists the same names; on a phone it is the usual sheet.
+- **A page** (`#screen/<screen-id>`, or `#screen/<screen-id>.<state-id>` to scroll to a state and outline it):
+  the name and id, its kind, its `file`, its `intro`, then
+  - **States**, in a row laid out by role (`anyone` first, then the book's roles in order, then states with no
+    role), each captioned with its role tag and its `when.also` words; on a phone they stack. They follow the
+    View menu's Mockups and Screenshots, and a state with a `change` draws **Today** and **Proposed** panes as in
+    the chapter view.
+  - A quiet hint for every book role a screen's states do not cover: "No state for Visitor: same as another, or
+    doesn't see it?" Components get none. It opens no review.
+  - **Requirements**, grouped under "<chapter> › <section>" in book order, each with its id, its text, the state it
+    narrows to, and "via <component>" when it reached the screen through a component the screen places.
+  - For a component, **Used on**: a small picture of every state that places it, the component outlined, each
+    linking to that state's page.
+- **Review works as in the chapter view.** A screen heading and every state are note targets with review stacks and
+  ✓ Accept, and the sidebar and list count what is open. A state's review shows "Mockup changed" rather than a diff.
+  A state removed from the book while its review is open is listed on the page for Accept.
+- **Off-page reviews in the book.** A section's Accept gate covers the states it shows, the states they are drawn
+  as (`sameAs`), the component states placed in them (nested too) and the screen headings of all of them. The chapter
+  view draws only the states a section shows, so the rest appear under the section as **Under review in Screens:**
+  with links to their pages, and count toward the section's open reviews.
+
 ## Review: every change waits for you
 
 However an item changes (you edit it in the page, Claude edits it from a prompt, or Claude edits it from a note) it
-stays **under review** until you accept it. The reviewable items are requirements, frames (screens), section
-headings and chapter headings; `book-format.md` has the keys and `review.json`. Section stage, `label`, a frame's
-`state` and decisions are not reviewed, and the review is about wording: whether the app does it yet is the
+stays **under review** until you accept it. The reviewable items are requirements, screens (their headings), states, section
+headings (with the list of states they show) and chapter headings; `book-format.md` has the keys and `review.json`.
+Section stage, `label` and decisions are not reviewed, and the review is about wording: whether the app does it yet is the
 requirement's `change` marker and the stages.
 
 The toolbar's filter, **Only what needs you** (F), turns Changes mode on and off (remembered in this browser). In
@@ -168,10 +208,10 @@ only, remembered) draws the pins of sent and answered notes again, read-only.
   `▸ n earlier`), then the **current** version (**Now**, or **Now · unchanged** when only a note opened the review)
   with its open notes. A note shows its status (Draft, Sent, Answered) and Claude's `reply` when it made no change;
   a note that causes this item (written by `review.mjs link`) says "from a note on section …". Wording
-  differences are struck through (old) and highlighted (new). A frame shows "Mockup changed" rather than a diff.
+  differences are struck through (old) and highlighted (new). A state shows "Mockup changed" (or "Today's mockup changed") rather than a diff.
 - **⚠ This brings back the wording replaced on <date>.** appears when the current value equals what an earlier accepted
   review replaced, with the decisions recorded then.
-- **✓ Accept** in the requirement's own bullet (for a frame, section or chapter, at the top
+- **✓ Accept** in the requirement's own bullet (for a screen, state, section or chapter, at the top
   of its stack). The stack under the item lists what came before the current version, newest first: the tries, then
   **Original**, the version last accepted ("This requirement is new." when nothing was). Accept ends the review: the current
   version becomes the accepted one, and the review (its tries and notes) collapses into one history entry. Accept

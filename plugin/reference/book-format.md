@@ -12,6 +12,7 @@ them together. The skills point here at the step that needs each part.
   "roles": [{ "id": "signedout", "label": "Signed out", "color": "#c9ccd2" },
             { "id": "member", "label": "Member", "color": "#9cc3ff" }],
   "mockupCss": "mockups/phone.css",
+  "screens": [ … ],
   "settings": { "screenshotWidth": 100 },
   "chapters": [{
     "id": "directory", "prefix": "DIR", "title": "Directory", "intro": "HTML",
@@ -21,10 +22,9 @@ them together. The skills point here at the step that needs each part.
       "requirements": [{ "id": "DIR-4K7M", "text": "HTML sentence" },
                        { "id": "DIR-9QX2", "text": "new behavior", "change": "add" },
                        { "id": "DIR-2WLA", "text": "target", "change": "change", "today": "what happens now" },
-                       { "id": "DIR-5T8N", "text": "old behavior", "change": "remove", "reason": "why it goes" }],
-      "frames": [{ "id": "directory-people-1", "role": "member", "caption": "People · member",
-                   "mockup": "mockups/directory-people-1.html", "screenshot": "optional media path",
-                   "state": "proposed (optional: draws a change to a built screen)" }],
+                       { "id": "DIR-5T8N", "text": "old behavior", "change": "remove", "reason": "why it goes" },
+                       { "id": "DIR-6B3C", "text": "about a screen", "screens": [{ "screen": "SCR-4K7M", "state": "admin" }] }],
+      "shows": [{ "state": "SCR-4K7M.member", "highlight": "SCR-7T3N" }, { "state": "SCR-5W1B.member" }],
       "videos": [{ "path": "media/videos/…", "caption": "…" }]
     }]
   }],
@@ -46,8 +46,8 @@ them together. The skills point here at the step that needs each part.
   dropped once built. `change`: the text is the target and `today` says what happens now; both `change` and `today`
   are dropped once built. `remove`: shown struck through with its `reason`; once built it is deleted and a decision
   of kind `removed` records it. Never delete a built requirement by hand.
-- **Decisions** are one list: `by` is who decided (`user` or `build`), `about` holds requirement, section or frame
-  ids, and `kind` is `decision`, `removed` (a requirement taken out; its id, text and reason) or `rejected` (a build
+- **Decisions** are one list: `by` is who decided (`user` or `build`), `about` holds requirement, section, screen or
+  state ids, and `kind` is `decision`, `removed` (a requirement taken out; its id, text and reason) or `rejected` (a build
   call the user turned down). The `DEC` prefix is for new decision ids; a build's calls are `CALL` ids until
   accepted. There is no `calls` list. A decision's `about` names the items it settled (it is how the page links it to
   an item's review and history); write one only when a discussion settled something (see `design`).
@@ -56,6 +56,71 @@ them together. The skills point here at the step that needs each part.
   `proposed` with `today` becomes `change`, `proposed` without it becomes `add`, and `calls` join `decisions`.
 
 The server reads `book.json` and the mockups on every page load: edit, then reload.
+
+## Screens and components
+
+`screens` is a book-wide catalog beside `chapters`: every screen and every shared component (card, dialog, sheet,
+banner, header) is listed once and drawn once per state. A section does not copy a drawing; it lists the states it
+`shows`.
+
+```json
+"screens": [
+  { "id": "SCR-4K7M", "name": "HomeScreen", "kind": "screen", "file": "src/features/messages/HomeScreen.tsx",
+    "intro": "HTML, optional",
+    "states": [
+      { "id": "member", "name": "Member", "when": { "role": "member" }, "mockup": "mockups/screens/SCR-4K7M/member.html" },
+      { "id": "admin", "name": "Admin", "when": { "role": "admin" }, "mockup": "mockups/screens/SCR-4K7M/admin.html",
+        "change": "change", "today": "mockups/screens/SCR-4K7M/admin.today.html" },
+      { "id": "visitor", "name": "Visitor", "when": { "role": "visitor" }, "sameAs": "member" },
+      { "id": "empty", "name": "Empty", "when": { "role": "member", "also": "no messages yet" },
+        "mockup": "mockups/screens/SCR-4K7M/empty.html", "change": "add" },
+      { "id": "signedout", "name": "Signed out", "when": { "role": "signedout" },
+        "absent": "Signed-out people never reach Home." }
+    ] },
+  { "id": "SCR-9QX2", "name": "VisitorsCard", "kind": "component", "file": "src/features/directory/VisitorsCard.tsx",
+    "states": [{ "id": "waiting", "name": "3 waiting", "when": { "also": "visitors waiting" },
+                 "mockup": "mockups/screens/SCR-9QX2/waiting.html" }] }
+]
+```
+
+- **`id`** is a stable id (`SCR-` and four of `0-9A-Z`, minted by `assign-ids.mjs`). Requirements, `shows`,
+  `sb-component` tags, reviews, notes and media all link to it, so renaming a screen changes only `name` and
+  `file`. **`name`** is the component's name, unique in the book, and the only name the reader shows. **`file`** is
+  optional: a screen with no app component (a lock-screen notification, a system prompt) has none, and a screen not
+  built yet has none until the build creates it and fills it in. **`kind`** is `screen` (navigated to) or `component`
+  (placed inside screens). `intro` is optional HTML.
+- **A state** is one picture and the conditions behind it. Its key is `<screen-id>.<state-id>` (`SCR-4K7M.admin`),
+  unique in the book; state ids are unique within the screen. **`when.role`** is one of the book's `roles` (or
+  `anyone`, a role the book defines for everyone, which covers every role); **`when.also`** is free words for every
+  other condition (data, errors, connection).
+- A state has exactly one of `mockup` (a file under the data folder, `mockups/screens/<screen-id>/<state-id>.html`),
+  `sameAs` (the id of another state of the same screen that looks exactly like it; no chains, no cycles) and
+  `absent` (words saying the role never sees the screen; no picture).
+- **A change to a built screen** is carried by the state, like a requirement's: `"change": "change"` makes `mockup`
+  the proposed picture and `today` the path of today's picture (shown side by side); `"change": "add"` is a new
+  state; `"change": "remove"` is a state going away, with a `reason`. A build drops `change` and `today` when it
+  lands the state (and deletes today's picture file), and deletes a removed state, recording a `removed` decision
+  named for its key. This replaces a frame's `"state": "proposed"`.
+- **Missing roles.** A `screen` (not a component) with no state covering one of the book's roles gets a hint in the
+  Screens view: "No state for Visitor: same as another, or doesn't see it?". It is a hint, not a review: resolve it
+  with a `sameAs` or `absent` state.
+- **Components placed by name.** A picture places a component with
+  `<sb-component id="SCR-9QX2" state="waiting"></sb-component>` instead of copying its markup. The reader swaps the
+  tag for that state's picture (components may place components). A cycle, a missing component, state or picture
+  draws a red placeholder naming it, and a tag naming something that is not a component state is invalid.
+  "Used on" for a component is computed by scanning pictures for tags, never stored.
+- **`shows`** (a section's, in order) lists the states the section draws: `state` is a state key and `highlight`
+  (optional) is the id of a component placed in that picture, outlined there. The caption is `<screen name> ·
+  <state name>`, from the screen, never typed again. The same state may be shown by several sections.
+- **`screens`** on a requirement (optional) lists what it is about: `{ "screen": "SCR-4K7M" }`, optionally narrowed
+  with `"state": "admin"`. A requirement on a component reaches every screen that places it (the Screens view says
+  "via <component>"); name a screen only when the rule is about that screen. The requirement still lives in one
+  section.
+- **Valid** means: screen ids and names are unique; state ids are unique within a screen; each state has exactly one
+  of `mockup`, `sameAs` and `absent`; every `mockup` and `today` file exists; `sameAs` targets exist and are not
+  themselves `sameAs`; `when.role` is a book role; every `sb-component` tag names an existing component and state;
+  every `shows` and requirement `screens` entry names an existing screen, component and state; every `highlight`
+  names a component placed in that state's picture. `review.mjs land` and the server refuse a book that is not.
 
 ## Stable ids
 
@@ -70,10 +135,11 @@ Every requirement, decision and call has a **stable id**: a prefix of capitals, 
 - Moving a section to another chapter keeps its ids. Prefixes record where an id was born, not where it lives.
 - Plans and tests refer to requirements by id.
 
-Frame ids are `<chapter>-<section>-<n>`, unique, and never change.
+Screen ids are `SCR-` ids, minted by `assign-ids.mjs` for a screen entry that has none, like any other id. State ids
+are short words, chosen once (`member`, `empty`), and never change.
 
-Notes, reviews, requests and media are keyed by stable ids (requirement, frame, `<chapter>-<section>`), so renaming one
-orphans them. A removed requirement's id is never reused; its decision names it.
+Notes, reviews, requests and media are keyed by stable ids (requirement, screen, state key, `<chapter>-<section>`), so
+renaming one orphans them. A removed requirement's id is never reused; its decision names it.
 
 ## review.json
 
@@ -85,7 +151,7 @@ or from a note).
 {
   "rev": 12,
   "accepted": { "ONB-8KAB": { "text": "…" },
-                "onboarding-signin-1": { "caption": "…", "role": "signedout", "mockup": "<div…" } },
+                "SCR-4K7M.admin": { "name": "Admin", "when": { "role": "admin" }, "mockup": "<div…" } },
   "notes": {
     "n1k2": { "item": "ONB-8KAB", "text": "It doesn't say why…", "status": "draft | sent | answered | frozen",
               "created": "ISO", "reply": "Claude's answer when it made no change", "causes": ["DIR-4K7M"],
@@ -99,9 +165,10 @@ or from a note).
 ```
 
 - **Items and keys.** A requirement is keyed by its stable id (value: `text`, `change`, `today`, `reason`, the fields
-  present); a frame by its frame id (`caption`, `role`, and `mockup`, the mockup file's text); a section heading by
-  `<chapter-id>-<section-id>` and a chapter heading by `<chapter-id>` (`title`, `intro`). Section stage, `label`, a
-  frame's `state` and decisions are not reviewed.
+  present, `screens` among them); a screen by its id (`name`, `kind`, `file`, `intro`); a state by its key
+  (`name`, `when`, `sameAs`, `absent`, `change`, `reason`, and `mockup` and `today`, the picture files' text); a
+  section heading by `<chapter-id>-<section-id>` (`title`, `intro`, `shows`) and a chapter heading by `<chapter-id>`
+  (`title`, `intro`). Section stage, `label` and decisions are not reviewed.
 - **`accepted`** is an item's last accepted value. An item with none is new. A key in `accepted` that is gone from the
   book is a pending removal.
 - **Under review** means the current value differs from the accepted copy, or the item has a note that is not
@@ -114,7 +181,7 @@ or from a note).
   the pin stays on that word wherever the line wraps; `ax`, `ay` are the pixels from the target's top-left (exact on
   a mockup); `rx`, `ry`, fractions of the target's box, are the fallback for notes made before them. `dx`, `dy` place
   the sticky from the pin.
-- **Causes.** A note dropped on a section or frame is often answered by changes to other items. `causes` lists the
+- **Causes.** A note dropped on a section or a shown state is often answered by changes to other items. `causes` lists the
   keys of those items (written by `review.mjs link`); the note shows in the review stack of its own item and of each
   cause. `closedFor` lists keys whose review was accepted while the note was still open on others, so it stops
   showing there. A note is frozen when no key it is open on has a review left.

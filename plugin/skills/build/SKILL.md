@@ -34,7 +34,10 @@ and prints one JSON line; an error goes to stderr with exit code 1.
 
 1. **Start.** `build.mjs start` moves every Ready section to Building and prints the build's `id`, its `progress`
    and the `scope`: every requirement with a `change` (`add`, `change`, `remove`), with its section, text, `today`
-   and `reason`. It fails with `busy` if a build is running, `nothing-ready` if no section is Ready, and `unreviewed` (naming the
+   and `reason`. The scope lists requirements only: the screens to build are the states each Ready section
+   `shows` (and the component states placed in those pictures), read from `book.json`; a state's `change`, `today`
+   and `reason` say what to do (`add`: create it, `change`: redraw today's as the proposed picture, `remove`: take it
+   out). It fails with `busy` if a build is running, `nothing-ready` if no section is Ready, and `unreviewed` (naming the
    sections) if a Ready section has a change not accepted yet: **only accepted work is built**. On `unreviewed`, build
    nothing: tell the user which sections wait for ✓ Accept, file the request and re-arm the watch. Never accept on the
    user's behalf.
@@ -55,9 +58,18 @@ and prints one JSON line; an error goes to stderr with exit code 1.
    `build.mjs finish --build <id> --summary "<plain words for someone who uses the app: how the app changed>"`. Always pass `--summary`: it becomes the changelog entry, with the landed requirements (without it the entry is empty and `finish` warns). Write what a person can now do or will notice, not file names. It applies each proven change (drops `change` and `today`, in the book and in the item's accepted copy, so a build never opens a review by itself; wording a call changed does) and turns a
    section into `built` when all its changes are proven; a section with removals also needs every requirement that
    stays proven, and only then is each removal applied and a `removed` decision written. Any other section goes back
-   to `drafting` with its unproven changes and removals intact (`summary.md` lists the unproven ids). It writes
+   to `drafting` with its unproven changes and removals intact (`summary.md` lists the unproven ids). **Finish also
+   lands the state changes of every section it turns built**, with no test needed: an `add` or `change` state drops
+   `change` and `today` (and today's picture file is deleted, in the book and in the state's accepted copy, so no
+   review opens); a `remove` state is deleted, a `removed` decision naming its key is written, and sections and
+   requirements stop naming it. A removal something still depends on (another state is `sameAs` it, or a picture
+   places it) is **held back**: its marker stays and `summary.md` lists it under "Held back". Resolve those by hand
+   in the next revise. Never edit `change`, `today` or a state by hand to land it. It writes
    `builds/<id>/summary.md`. Add the commits to
    `summary.md`, then commit the book and `builds/<id>/` to the branch.
+   - When the build creates a screen or component, fill in its `file` in `book.json` (the path in the app), as part
+     of the same commit. A name change is a reviewed edit of `name` and `file` only: nothing else in the book links
+     by name.
    - A build that cannot continue: `build.mjs stop --build <id> --reason "<why>"` returns the Building sections to
      Drafting and keeps what was proven.
 7. **File the request** (`next-request.mjs --data <dir> --done <file>`; if the user pressed **Mark as stopped**,
@@ -70,14 +82,16 @@ no passing test.
 
 ## media
 
-- Screenshot for a frame: `media/screens/<frame-id>.png` (or `.jpg`, `.webp`), or `"screenshot"` on the frame.
-  It replaces the mockup in **Screenshots** and sits beside it in **Both**; frames without one keep the mockup
-  with a "No screenshot yet" line.
+- Screenshot for a state: `media/screens/<screen-id>.<state-id>.png` (the state key, `SCR-4K7M.admin`; or `.jpg`,
+  `.webp`). It replaces the mockup in **Screenshots** and sits beside it in **Both**, wherever the state is shown
+  (every section, and the Screens view); states without one keep the mockup with a "No screenshot yet" line. A
+  `sameAs` state uses its own, else the one it is the same as. A state's proposed picture never has one.
 - Recording for a section: `media/videos/<chapter-id>-<section-id>[-anything].mp4` (or `.mov`, `.webm`), or the
   section's `"videos": [{ "path", "caption" }]`.
-- `node ${CLAUDE_PLUGIN_ROOT}/server/add-media.mjs --data <dir> --screen <frame-id> <file>` /
-  `--video <chapter-id>-<section-id> <file>` copy files in. From an e2e run, map each test's recording and labeled
-  screenshots to the sections and frames they show.
+- `node ${CLAUDE_PLUGIN_ROOT}/server/add-media.mjs --data <dir> --screen <screen-id>.<state-id> <file>` /
+  `--video <chapter-id>-<section-id> <file>` copy files in (`--screen` refuses a key that is not a state in the
+  book). From an e2e run, map each test's recording to the sections it proves and its labeled screenshots to the
+  states they show.
 
 ## evidence
 
@@ -149,8 +163,8 @@ work.
    `change` and `today`, a section whose changes are all proven becomes `built` (with removals, only when every
    requirement that stays is proven too), and any other stays
    `drafting` with its findings (each id and why) in the plan's notes and the report.
-   - A pass screenshot that shows a frame's screen can also replace that frame's mockup:
-     `add-media.mjs --data <dir> --screen <frame-id> media/e2e/<ID>.png`.
+   - A pass screenshot that shows a screen state can also replace that state's mockup:
+     `add-media.mjs --data <dir> --screen <screen-id>.<state-id> media/e2e/<ID>.png`.
    - Reword a requirement only to match a decision the user can see in `decisions`.
 
 ## A block proves its own sentence
