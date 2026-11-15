@@ -16,7 +16,7 @@ import { createServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { createRequire } from 'node:module';
 import { execFileSync, spawn } from 'node:child_process';
-import { createReadStream, existsSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, readFileSync, readdirSync, realpathSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs';
 import { dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acceptItem, addNote, changeItem, currentSnapshot, forgetItem, readHistory, readReview, sendNotes, stampOpened, writeReviewNotes } from './lib/review.mjs';
@@ -29,6 +29,9 @@ import { findRequirement, findSection, listSections, setUserStage } from './lib/
 import { ensureIgnores, findProjectRoot } from './lib/gitignore.mjs';
 import { readJson, writeJsonAtomic } from './lib/json-file.mjs';
 import { shareBrokerOf } from './lib/broker.mjs';
+import { ensureDeps, loadRtc } from './lib/deps.mjs';
+import { createHost } from './lib/host.mjs';
+import { newId } from './lib/secret.mjs';
 import { SERVER_FIELDS, applyNoteChanges, checkGuestNotes, guestMay, guestOf, mergeGuestNotes, reviewForGuest } from './lib/guest.mjs';
 
 const SpecModel = createRequire(import.meta.url)('../app/model.js');
@@ -48,6 +51,9 @@ const CODE = (() => {
   }
   return hash.digest('hex').slice(0, 12);
 })();
+
+// The plugin's version: the share library is installed per version (lib/deps.mjs).
+const VERSION = JSON.parse(readFileSync(join(HERE, '..', '.claude-plugin', 'plugin.json'), 'utf8')).version;
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -162,6 +168,31 @@ function openBrowser() {
   return run('xdg-open', [url]);
 }
 
+// After a --detach start: the share link and the owner's pin link, once the share is live (up to 10 s). These two
+// lines are the only place the pin is ever printed. Nothing is said for a book that does not share.
+async function printShareLinks() {
+  const settings = readJson(join(DATA, 'book.json'), null)?.settings;
+  if (settings?.share === false || readJson(join(DATA, '.share.json'), null)?.stopped === true) {
+    return;
+  }
+  let view = null;
+  for (let i = 0; i < 100; i++) {
+    view = await fetch(`${url}api/share`).then(r => (r.ok ? r.json() : null), () => null);
+    if (view?.state === 'live' || view?.state === 'failed') {
+      break;
+    }
+    await new Promise(r => setTimeout(r, 100));
+  }
+  if (view?.state === 'live' && view.url && view.pinUrl) {
+    console.log(`Share link: ${view.url}`);
+    console.log(`Your pin link (opens with your powers; never send it to anyone): ${view.pinUrl}`);
+  } else if (view?.state === 'failed') {
+    console.log(`Sharing could not start: ${view.error ?? 'unknown error'}`);
+  } else {
+    console.log('Sharing is starting; Copy link in the bar gives the link.');
+  }
+}
+
 // A server an older copy of the plugin started for this folder: stop it and start this one on its port.
 if (arg('detach') && (await alreadyServing()) === 'old') {
   const rec = readJson(PIDFILE, null);
@@ -189,6 +220,11 @@ if ((await alreadyServing()) === true) {
 }
 
 if (arg('detach')) {
+  // The share library, installed once per plugin version. Without it the book is still served, only not shared.
+  const deps = await ensureDeps({ version: VERSION, log: m => console.log(m) });
+  if (!deps.ok) {
+    console.log(`The share library could not be installed (${deps.error}); the book is served, but not shared.`);
+  }
   const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--data', DATA, '--port', String(PORT)], {
     detached: true,
     stdio: 'ignore',
@@ -199,6 +235,7 @@ if (arg('detach')) {
     await new Promise(r => setTimeout(r, 100));
   }
   console.log(`Spec book served at ${url} (pid ${child.pid}). Stop with --stop.`);
+  await printShareLinks();
   if (arg('open')) {
     await openBrowser();
   }
@@ -529,45 +566,63 @@ function mergeNotes(stored, sent) {
   return out;
 }
 
-// Sharing. The book is shared whenever an owner tab is open (unless book.json says settings.share: false): every
-// owner tab holds /api/share/events, and the one listening (one per book, by a Web Lock in app/host.js) is asked to
-// host. That tab does the WebRTC; this server remembers its room (id, host token, link key) in .share.json (git-ignored),
-// so a reloaded or reopened tab, and this server after a restart, reuse it: the link stays the same until the owner
-// asks for a New link or stops sharing. The tab renews the room at the share server, or opens it again under the same
-// id once it has expired there.
+// Sharing. This server hosts the share itself (lib/host.mjs), from the moment it starts, unless book.json says
+// settings.share: false or the owner stopped sharing. It remembers the room (id, host token, expiry), the owner's pin
+// and whether sharing was stopped in .share.json (git-ignored, never served), so after a restart the link and the pin
+// stay the same until the owner asks for a New link, a New pin, or stops sharing. The owner's localhost tabs follow
+// the share on /api/share/events and pass their live messages to the readers through /api/live.
 const SHAREFILE = join(DATA, '.share.json');
 const ROOM_ID = /^[A-Za-z0-9_-]{16,64}$/;
-const shareTabs = new Map(); // tab id -> its events response, newest last
-let share = { state: 'idle', room: readSavedRoom(), stopped: false };
-function readSavedRoom() {
+const PIN = /^[A-Za-z0-9]{22}$/;
+const SHARE_TAB = /^[A-Za-z0-9_-]{8,64}$/;
+
+// What .share.json remembers: { room, hostToken, pin, expiresAt, stopped }. An older file (with the link key `secret`
+// and no pin) keeps its room and gains a pin.
+function readSavedShare() {
   const r = readJson(SHAREFILE, null);
-  const ok = r && typeof r === 'object' && ROOM_ID.test(r.room ?? '') && typeof r.hostToken === 'string' && /^[A-Za-z0-9_-]{43}$/.test(r.secret ?? '') &&
-    typeof r.url === 'string';
-  return ok ? { room: r.room, hostToken: r.hostToken, secret: r.secret, url: r.url, expiresAt: String(r.expiresAt ?? '') } : null;
+  const ok = isPlain(r) && ROOM_ID.test(r.room ?? '') && typeof r.hostToken === 'string' && r.hostToken !== '';
+  return {
+    room: ok ? r.room : null,
+    hostToken: ok ? r.hostToken : null,
+    pin: isPlain(r) && PIN.test(r.pin ?? '') ? r.pin : newId(),
+    expiresAt: ok && typeof r.expiresAt === 'string' ? r.expiresAt : null,
+    stopped: isPlain(r) && r.stopped === true,
+  };
 }
-function saveRoom(room) {
+let saved = readSavedShare();
+let savedText = existsSync(SHAREFILE) ? readFileSync(SHAREFILE, 'utf8') : null;
+function saveShare() {
+  const text = JSON.stringify({ room: saved.room, hostToken: saved.hostToken, pin: saved.pin, expiresAt: saved.expiresAt, stopped: saved.stopped }, null, 2);
+  if (text === savedText) {
+    return;
+  }
   try {
-    if (room) {
-      writeJsonAtomic(SHAREFILE, room);
-    } else {
-      rmSync(SHAREFILE, { force: true });
-    }
+    writeJsonAtomic(SHAREFILE, JSON.parse(text));
+    savedText = text;
   } catch {
     // kept in memory only: the link lasts until this server stops
   }
 }
-function sendEvent(tab, event, data) {
-  const res = shareTabs.get(tab);
-  if (res) {
-    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-  }
+// An older .share.json gains its pin now, so the pin link is the same from the first start on.
+if (savedText !== null) {
+  saveShare();
 }
-function shareView() {
-  // A tab asked to host that has not answered in 30 seconds is not going to.
-  if (share.state === 'starting' && Date.now() - share.at > 30000) {
-    share = { ...share, state: 'idle', error: 'The book tab did not start the share.' };
+
+// The host: the real one, or, for tests only, the module SPECBOOK_TEST_HOST names (CommonJS, exporting createHost),
+// read once here. It lets serve.test.mjs run a fake host with no WebRTC and no share server. Never set it otherwise.
+const makeHost = process.env.SPECBOOK_TEST_HOST ? createRequire(import.meta.url)(resolve(process.env.SPECBOOK_TEST_HOST)).createHost : createHost;
+const RTC = loadRtc(VERSION);
+let host = null;
+let hostBroker = null;
+let shareNow = { state: 'off', guests: [], error: null };
+const shareTabs = new Map(); // the owner tabs' events responses -> their tab id (or null)
+let stoppedTabs = null; // the tabs open when sharing was stopped: their reconnecting does not start it again
+
+function sendEvent(event, data) {
+  const text = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const res of shareTabs.keys()) {
+    res.write(text);
   }
-  return { state: share.state, url: share.room?.url ?? null, expiresAt: share.room?.expiresAt ?? null, guests: share.guests ?? [], error: share.error ?? null, tabs: shareTabs.size, room: !!share.room, stopped: !!share.stopped };
 }
 function shareBroker() {
   try {
@@ -583,38 +638,83 @@ function shareOn() {
     return false;
   }
 }
-// Asks a tab to host: with the remembered room when there is one, so the link stays the same.
-function askToHost(tab) {
+// What the owner's tabs see. The pin link is for the owner's localhost tabs only: guests are refused these routes.
+function shareView() {
+  const broker = hostBroker ?? shareBroker();
+  const link = broker && saved.room ? `${broker}/s/${saved.room}` : null;
+  return { state: shareNow.state, url: link, pinUrl: link ? `${link}#pin=${saved.pin}` : null, expiresAt: link ? saved.expiresAt : null, guests: shareNow.guests, error: shareNow.error, stopped: saved.stopped };
+}
+function setShare(next) {
+  shareNow = { ...shareNow, ...next };
+  sendEvent('state', shareView());
+}
+
+// The host for the book's share server, made when first needed (and again if book.json names another one).
+function hostFor(broker) {
+  if (host && hostBroker === broker) {
+    return host;
+  }
+  if (host) {
+    host.stop({ end: false }).catch(() => {});
+  }
+  const made = makeHost({
+    broker,
+    port: PORT,
+    version: VERSION,
+    ownerName: () => OWNER_NAME,
+    saved: { ...saved },
+    rtc: RTC,
+    readNotes,
+    onState(view) {
+      if (host !== made) {
+        return;
+      }
+      saved = { room: view.room ?? null, hostToken: view.hostToken ?? null, pin: PIN.test(view.pin ?? '') ? view.pin : saved.pin, expiresAt: view.expiresAt ?? null, stopped: saved.stopped };
+      saveShare();
+      setShare({ state: view.state, guests: Array.isArray(view.guests) ? view.guests : [], error: view.error ?? null });
+    },
+  });
+  host = made;
+  hostBroker = broker;
+  made.onLive(msg => {
+    if (host === made) {
+      sendEvent('live', msg);
+    }
+  });
+  return made;
+}
+
+// Starts sharing (stopped no longer holds). Returns false when the book names no valid share server.
+function startShare() {
+  stoppedTabs = null;
+  if (saved.stopped) {
+    saved = { ...saved, stopped: false };
+    saveShare();
+  }
   const broker = shareBroker();
-  if (!broker || !shareTabs.has(tab)) {
+  if (!broker) {
+    setShare({ state: 'failed', error: 'book.json settings.shareBroker is not a valid share server address.' });
     return false;
   }
-  share = { ...share, state: 'starting', tab, at: Date.now(), error: null };
-  sendEvent(tab, 'start', { hours: 24, broker, room: share.room ? { room: share.room.room, hostToken: share.room.hostToken, secret: share.room.secret, url: share.room.url, expiresAt: share.room.expiresAt } : null });
+  hostFor(broker).start().catch(() => {});
   return true;
 }
-// Ends the remembered room at the share server, so its link stops working: tried again a few times when the server
-// cannot be reached (it also ends by itself when it expires). Resolves once it ended or the tries ran out.
-const END_RETRY_MS = [1000, 3000, 9000];
-function endRoomAtBroker(room, tries = END_RETRY_MS.length + 1) {
-  const broker = shareBroker();
-  if (!room || !broker) {
-    return Promise.resolve();
+
+// The notes the host checks each reader's draft and typing frame against (app/relay.js mayDraft), which come many a
+// second: kept in memory, read again when review.json changes (on disk, or through this server), and at most every
+// few seconds otherwise, in case the change went unseen.
+let notesCache = null;
+let notesAt = 0;
+function readNotes() {
+  if (!notesCache || Date.now() - notesAt > 3000) {
+    notesCache = readReview(DATA).notes;
+    notesAt = Date.now();
   }
-  const attempt = n => fetch(`${broker}/api/rooms/${encodeURIComponent(room.room)}/end`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ token: room.hostToken }),
-    signal: AbortSignal.timeout(2000),
-  }).then(r => r.ok || r.status === 404 || r.status === 403, () => false).then(done => {
-    if (done || n + 1 >= tries) {
-      return undefined;
-    }
-    return new Promise(r => setTimeout(r, END_RETRY_MS[n])).then(() => attempt(n + 1));
-  });
-  return attempt(0);
+  return notesCache;
 }
-const SHARE_TAB = /^[A-Za-z0-9_-]{8,64}$/;
+function forgetNotes() {
+  notesCache = null;
+}
 
 // The owner's first name, which guests see on the owner's face and notes: git's user.name for the project.
 const OWNER_NAME = (() => {
@@ -630,8 +730,7 @@ function cleanOwnerName(name) {
   return s || 'Owner';
 }
 
-// The book or its notes changed on disk: the owner's listening tab hears it at once (it reloads, and passes it on to
-// the guests while it hosts).
+// The book or its notes changed on disk: the owner's tabs and every reader hear it at once (they read it again).
 let changeTimer = null;
 try {
   watch(DATA, { recursive: true }, (_event, file) => {
@@ -639,11 +738,13 @@ try {
     if (!/^(book\.json|review\.json|history\.json|mockups\/|evidence\/|media\/)/.test(f)) {
       return;
     }
+    if (f.startsWith('review.json')) {
+      forgetNotes();
+    }
     clearTimeout(changeTimer);
     changeTimer = setTimeout(() => {
-      for (const tab of shareTabs.keys()) {
-        sendEvent(tab, 'changed', {});
-      }
+      host?.changed();
+      sendEvent('changed', {});
     }, 50);
   });
 } catch {
@@ -671,6 +772,16 @@ const server = createServer(async (req, res) => {
     if (guest && (guest.invalid || !guestMay(req.method, path))) {
       json(res, 403, { error: 'guest' });
       return;
+    }
+    // The share and the owner's live messages are the owner's alone, whatever guestMay allows.
+    const flat = path.replace(/\/+/g, '/');
+    if (guest && (flat.startsWith('/api/share') || flat === '/api/live' || flat.startsWith('/api/live/'))) {
+      json(res, 403, { error: 'guest' });
+      return;
+    }
+    // Any write may change the notes: the host's copy of them is read again.
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      res.on('finish', forgetNotes);
     }
     if (path === '/api/health') {
       // `code` tells serve.mjs --detach whether this server runs its own code (see CODE).
@@ -716,34 +827,28 @@ const server = createServer(async (req, res) => {
         json(res, 403, { error: 'forbidden' });
         return;
       }
-      if (!SHARE_TAB.test(tab ?? '')) {
+      if (tab !== null && !SHARE_TAB.test(tab)) {
         json(res, 400, { error: 'bad-tab' });
         return;
       }
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
       res.write(': listening\n\n');
-      shareTabs.delete(tab);
-      shareTabs.set(tab, res);
+      shareTabs.set(res, tab);
       // An opened (or reloaded) book shares again, even after Stop sharing; a tab that was open at the stop and is only
       // reconnecting its events (the server blinked) does not.
-      if (share.stopped && share.stoppedTabs?.has(tab)) {
-        // still stopped
-      } else if (share.stopped) {
-        share = { ...share, stopped: false, stoppedTabs: null };
+      const reconnecting = saved.stopped && tab !== null && !!stoppedTabs?.has(tab);
+      if (!reconnecting && shareOn()) {
+        startShare();
+      } else if (!reconnecting && saved.stopped) {
+        stoppedTabs = null;
+        saved = { ...saved, stopped: false };
+        saveShare();
       }
-      if (shareOn() && !share.stopped) {
-        askToHost(tab);
-      }
+      res.write(`event: state\ndata: ${JSON.stringify(shareView())}\n\n`);
       const beat = setInterval(() => res.write(': beat\n\n'), 25000);
       req.on('close', () => {
         clearInterval(beat);
-        if (shareTabs.get(tab) === res) {
-          shareTabs.delete(tab);
-        }
-        // The hosting tab closed: nobody hosts until a tab opens again. The room is kept for it.
-        if (share.tab === tab && !shareTabs.has(tab)) {
-          share = { ...share, state: 'idle', tab: null, guests: [] };
-        }
+        shareTabs.delete(res);
       });
       return;
     }
@@ -752,81 +857,60 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (path === '/api/share' && req.method === 'POST') {
-      const view = shareView();
-      if (view.state !== 'idle') {
-        json(res, 200, view);
-        return;
-      }
-      if (!shareBroker()) {
+      if (!startShare()) {
         json(res, 409, { error: 'no-broker' });
         return;
       }
-      if (shareTabs.size === 0) {
-        json(res, 409, { error: 'no-tab' });
-        return;
-      }
-      share = { ...share, stopped: false, stoppedTabs: null };
-      askToHost([...shareTabs.keys()].at(-1));
       json(res, 202, shareView());
       return;
     }
-    const shareMsg = /^\/api\/share\/(live|failed|ended|guests|stop|new-link)$/.exec(path);
-    if (shareMsg && req.method === 'POST') {
-      const body = await readJsonBody(req);
-      const kind = shareMsg[1];
-      if (kind === 'stop') {
-        // The tab ends the room at the share server; the next opened book makes a new one.
-        // This server ends the room too, so the link stops even if the tab cannot reach the share server.
-        if (share.tab) {
-          sendEvent(share.tab, 'stop', {});
-        }
-        endRoomAtBroker(share.room);
-        saveRoom(null);
-        share = { state: 'idle', room: null, stopped: true, stoppedTabs: new Set(shareTabs.keys()), tab: null };
-        json(res, 200, shareView());
-        return;
+    if (path === '/api/share/stop' && req.method === 'POST') {
+      // The room ends at the share server, so its link stops working; the next start opens a new one.
+      stoppedTabs = new Set([...shareTabs.values()].filter(Boolean));
+      saved = { ...saved, stopped: true };
+      const broker = shareBroker();
+      if (host || (broker && saved.room)) {
+        (host ?? hostFor(broker)).stop({ end: true }).catch(() => {});
       }
-      if (kind === 'new-link') {
-        const tab = share.tab ?? [...shareTabs.keys()].at(-1);
-        if (!tab) {
-          endRoomAtBroker(share.room);
-          saveRoom(null);
-          share = { ...share, room: null };
-          json(res, 409, { error: 'no-tab' });
-          return;
-        }
-        sendEvent(tab, 'end-room', {});
-        endRoomAtBroker(share.room);
-        saveRoom(null);
-        share = { ...share, room: null, stopped: false, stoppedTabs: null };
-        askToHost(tab);
-        json(res, 202, shareView());
-        return;
-      }
-      if (body.tab !== share.tab) {
-        json(res, 409, { error: 'not-hosting' });
-        return;
-      }
-      if (kind === 'live') {
-        const broker = shareBroker();
-        const ok = broker && ROOM_ID.test(body.room ?? '') && typeof body.hostToken === 'string' && /^[A-Za-z0-9_-]{43}$/.test(body.secret ?? '') &&
-          body.url === `${broker}/s/${body.room}#${body.secret}`;
-        if (!ok) {
-          throw badRequest('bad-share');
-        }
-        share = { ...share, state: 'live', room: { room: body.room, hostToken: body.hostToken, secret: body.secret, url: body.url, expiresAt: String(body.expiresAt ?? '') }, guests: [] };
-        saveRoom(share.room);
-      } else if (kind === 'guests') {
-        share = { ...share, guests: Array.isArray(body.guests) ? body.guests.filter(g => typeof g === 'string').slice(0, 50).map(g => g.slice(0, 40)) : [] };
-      } else if (kind === 'failed') {
-        // The tab could not reach the share server: the room is kept, so the link still works once it can.
-        share = { ...share, state: 'idle', tab: null, error: String(body.error ?? 'The share could not start.').slice(0, 300) };
-      } else {
-        // The room was ended elsewhere (or taken under its id): the next start makes a new one.
-        saveRoom(null);
-        share = { ...share, state: 'idle', room: null, tab: null, error: null };
-      }
+      saved = { ...saved, room: null, hostToken: null, expiresAt: null };
+      saveShare();
+      setShare({ state: 'off', guests: [], error: null });
       json(res, 200, shareView());
+      return;
+    }
+    if (path === '/api/share/new-link' && req.method === 'POST') {
+      const broker = shareBroker();
+      if (!broker) {
+        json(res, 409, { error: 'no-broker' });
+        return;
+      }
+      // The old room ends (its link and pin link stop working), and a new one opens with a new pin.
+      const h = hostFor(broker);
+      h.stop({ end: true }).catch(() => {});
+      h.newPin();
+      startShare();
+      json(res, 202, shareView());
+      return;
+    }
+    if (path === '/api/share/new-pin' && req.method === 'POST') {
+      const broker = shareBroker();
+      if (!broker) {
+        json(res, 409, { error: 'no-broker' });
+        return;
+      }
+      // The room stays; every saved pin stops working.
+      hostFor(broker).newPin();
+      json(res, 200, shareView());
+      return;
+    }
+    if (path === '/api/live' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      if (!isPlain(body.msg)) {
+        json(res, 400, { error: 'bad-live' });
+        return;
+      }
+      host?.sendLive(body.msg);
+      json(res, 200, { ok: true });
       return;
     }
     if (path === '/api/claude' && req.method === 'GET') {
@@ -1136,6 +1220,10 @@ if (projectRoot) {
 stampOpened(DATA, new Date().toISOString());
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`Spec book served at ${url} from ${DATA}`);
+  // The book is shared from the start, unless it says not to or the owner stopped sharing.
+  if (shareOn() && !saved.stopped) {
+    startShare();
+  }
   if (arg('open')) {
     openBrowser();
   }

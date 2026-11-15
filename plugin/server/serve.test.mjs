@@ -17,6 +17,57 @@ const base = `http://127.0.0.1:${port}`;
 let data;
 let child;
 
+// Every server here hosts through a fake host (SPECBOOK_TEST_HOST, a test-only seam in serve.mjs): no WebRTC and no
+// share server. The fake opens a made-up room at once, logs each start to host-starts.log in the book folder, and
+// hands each live frame the owner sends back as a guest's. SPECBOOK_DEPS is a prepared stand-in for the share
+// library, so --detach installs nothing and never touches the real ~/.claude/specbook/deps.
+const FIXTURES = mkdtempSync(join(tmpdir(), 'specbook-serve-fixtures-'));
+const FAKE_HOST = join(FIXTURES, 'fake-host.cjs');
+writeFileSync(FAKE_HOST, `
+const { appendFileSync } = require('node:fs');
+const { join } = require('node:path');
+const { randomInt } = require('node:crypto');
+const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+const newId = () => Array.from({ length: 22 }, () => A[randomInt(62)]).join('');
+const dir = process.argv[process.argv.indexOf('--data') + 1];
+exports.createHost = ({ broker, saved, onState }) => {
+  let pin = saved && saved.pin ? saved.pin : newId();
+  let kept = saved && saved.room ? { room: saved.room, hostToken: saved.hostToken, expiresAt: saved.expiresAt || null } : null;
+  let state = 'off';
+  const listeners = [];
+  const view = () => ({ state, room: kept ? kept.room : null, hostToken: kept ? kept.hostToken : null, pin, expiresAt: kept ? kept.expiresAt : null, guests: [], error: null });
+  const report = () => onState(view());
+  return {
+    async start() {
+      if (state !== 'live') {
+        appendFileSync(join(dir, 'host-starts.log'), 'start\\n');
+        kept = kept || { room: newId(), hostToken: newId(), expiresAt: '2099-01-01T00:00:00.000Z' };
+        state = 'live';
+      }
+      report();
+    },
+    async stop({ end = false } = {}) {
+      if (end) { kept = null; }
+      state = 'off';
+      report();
+    },
+    newPin() { pin = newId(); report(); },
+    state: () => state,
+    links: () => (state === 'live' ? { url: broker + '/s/' + kept.room, pinUrl: broker + '/s/' + kept.room + '#pin=' + pin } : null),
+    people: () => [],
+    sendLive(msg) { for (const fn of listeners) { fn({ ...msg, from: 'echo' }); } },
+    changed() {},
+    onLive(fn) { listeners.push(fn); },
+  };
+};
+`);
+const DEPS = join(FIXTURES, 'deps');
+const fakeLib = join(DEPS, JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '.claude-plugin', 'plugin.json'), 'utf8')).version, 'node_modules', 'node-datachannel');
+mkdirSync(fakeLib, { recursive: true });
+writeFileSync(join(fakeLib, 'package.json'), JSON.stringify({ name: 'node-datachannel', exports: { './polyfill': './polyfill.js' } }));
+writeFileSync(join(fakeLib, 'polyfill.js'), 'exports.RTCPeerConnection = class {};');
+const HOST_ENV = { SPECBOOK_TEST_HOST: FAKE_HOST, SPECBOOK_DEPS: DEPS };
+
 const note = { item: 'R1', text: 'hi', created: '2026-01-01T00:00:00.000Z', pin: { rx: 0, ry: 0.5, dx: 0, dy: 0 } };
 const item = { text: 'hi' };
 
@@ -83,7 +134,7 @@ function raw(method, path, headers, body) {
 
 before(async () => {
   data = mkdtempSync(join(tmpdir(), 'specbook-serve-'));
-  child = spawn(process.execPath, [SERVE, '--data', data, '--port', String(port)], { stdio: 'ignore' });
+  child = spawn(process.execPath, [SERVE, '--data', data, '--port', String(port)], { stdio: 'ignore', env: { ...process.env, ...HOST_ENV } });
   writeFileSync(join(data, 'book.json'), JSON.stringify(freshBook()));
   for (let i = 0; i < 100; i++) {
     try {
@@ -101,6 +152,7 @@ before(async () => {
 after(() => {
   child.kill();
   rmSync(data, { recursive: true, force: true });
+  rmSync(FIXTURES, { recursive: true, force: true });
 });
 
 beforeEach(() => {
@@ -316,7 +368,7 @@ test('without --port, --detach reuses the server already running for the folder 
   writeFileSync(join(data, '.server.json'), JSON.stringify({ pid: child.pid, port }));
   const out = await new Promise(done => {
     let text = '';
-    const p = spawn(process.execPath, [SERVE, '--data', data, '--detach'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    const p = spawn(process.execPath, [SERVE, '--data', data, '--detach'], { stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, ...HOST_ENV } });
     p.stdout.on('data', d => { text += d; });
     p.on('exit', () => done(text));
   });
@@ -339,7 +391,7 @@ test('--detach replaces a server for the folder that runs older code, and says t
   try {
     const out = await new Promise(done => {
       let text = '';
-      const s = spawn(process.execPath, [SERVE, '--data', dir, '--detach'], { stdio: ['ignore', 'pipe', 'ignore'] });
+      const s = spawn(process.execPath, [SERVE, '--data', dir, '--detach'], { stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, ...HOST_ENV } });
       s.stdout.on('data', d => { text += d; });
       s.on('exit', () => done(text));
     });
@@ -816,10 +868,10 @@ test('a guest cannot write a note on an item that does not exist', async () => {
   assert.equal((await asGuest('PUT', '/api/notes', { rev: 0, notes: { a: { ...note, item: 'NOPE' } } })).status, 400);
 });
 
-// One owner tab's events stream: hear(text) waits until the stream has said it.
-async function listenAs(tab) {
+// The owner's events stream: hear(text) waits until the stream has said it.
+async function listenAs(tab, at = base) {
   const ctl = new AbortController();
-  const stream = await fetch(`${base}/api/share/events?tab=${tab}`, { signal: ctl.signal });
+  const stream = await fetch(`${at}/api/share/events${tab ? `?tab=${tab}` : ''}`, { signal: ctl.signal });
   const reader = stream.body.getReader();
   let heard = '';
   return {
@@ -834,190 +886,220 @@ async function listenAs(tab) {
     close() { ctl.abort(); },
   };
 }
-async function idle() {
-  for (let i = 0; i < 50 && (await api('GET', '/api/share')).body.tabs !== 0; i++) {
-    await new Promise(r => setTimeout(r, 20));
+// Polls GET /api/share until `ok(view)`, and returns that view.
+async function shareUntil(ok, at = base) {
+  let view = null;
+  for (let i = 0; i < 100; i++) {
+    view = await (await fetch(`${at}/api/share`)).json();
+    if (ok(view)) {
+      return view;
+    }
+    await new Promise(r => setTimeout(r, 30));
   }
+  throw new Error(`share never got there: ${JSON.stringify(view)}`);
 }
+const isLive = v => v.state === 'live';
 function sharedBook(settings) {
   const book = freshBook();
   book.settings = { shareBroker: 'https://share.example', ...settings };
   writeFileSync(join(data, 'book.json'), JSON.stringify(book));
 }
-const ROOM = { room: 'room-0000000000001', hostToken: 'token-0000000000000000001', secret: 'k'.repeat(43), expiresAt: '2099-01-01T00:00:00.000Z' };
-const liveBody = (tab, room = ROOM) => ({ tab, ...room, url: `https://share.example/s/${room.room}#${room.secret}` });
+const PIN = /^[A-Za-z0-9]{22}$/;
+const LINK = /^https:\/\/[^/]+\/s\/[A-Za-z0-9]{22}$/;
 
-test('an owner tab shares as soon as it listens, and a reopened tab gets the same room back', async () => {
-  sharedBook();
-  const one = await listenAs('tab-one-0001');
-  await one.hear('event: start');
-  assert.match(one.heard, /"broker":"https:\/\/share.example"/);
-  assert.match(one.heard, /"room":null/);
-  assert.equal((await api('POST', '/api/share/live', liveBody('someone-else'))).status, 409);
-  assert.equal((await api('POST', '/api/share/live', { ...liveBody('tab-one-0001'), url: 'https://evil.example/s/r#k' })).status, 400);
-  assert.equal((await api('POST', '/api/share/live', liveBody('tab-one-0001'))).status, 200);
-  assert.equal((await api('POST', '/api/share/guests', { tab: 'tab-one-0001', guests: ['Ann'] })).status, 200);
-  const live = (await api('GET', '/api/share')).body;
-  assert.deepEqual([live.state, live.url, live.guests, live.room], ['live', `https://share.example/s/${ROOM.room}#${ROOM.secret}`, ['Ann'], true]);
-  // A guest can neither see nor change the share.
-  assert.equal((await asGuest('GET', '/api/share')).status, 403);
-  assert.equal((await asGuest('POST', '/api/share/new-link', {})).status, 403);
-  // Another site's <script src> cannot pose as a tab.
-  assert.equal((await raw('GET', '/api/share/events?tab=evil-tab-001', { host: `127.0.0.1:${port}`, 'sec-fetch-dest': 'script' })).status, 403);
-  one.close();
-  await idle();
-  const two = await listenAs('tab-two-0002');
-  await two.hear('event: start');
-  assert.match(two.heard, new RegExp(`"room":\\{"room":"${ROOM.room}","hostToken":"${ROOM.hostToken}","secret":"${ROOM.secret}"`));
-  assert.equal((await api('GET', '/api/share')).body.url, `https://share.example/s/${ROOM.room}#${ROOM.secret}`);
-  await api('POST', '/api/share/stop', {});
-  two.close();
-  await idle();
-});
-
-test('New link ends the room and starts a new one', async () => {
-  sharedBook();
-  const tab = await listenAs('tab-new-0001');
-  await tab.hear('event: start');
-  await api('POST', '/api/share/live', liveBody('tab-new-0001'));
-  assert.equal((await api('POST', '/api/share/new-link', {})).status, 202);
-  await tab.hear('event: end-room');
-  await tab.hear('"room":null}');
-  assert.equal((await api('GET', '/api/share')).body.room, false);
-  await api('POST', '/api/share/stop', {});
-  tab.close();
-  await idle();
-});
-
-test('New link ends the old room at the share server, trying again when it fails', async () => {
-  const ends = [];
-  const fake = createServer((req, res) => {
-    ends.push(req.url);
-    res.writeHead(ends.length === 1 ? 503 : 204);
-    res.end();
-  });
-  await new Promise(r => fake.listen(0, '127.0.0.1', r));
-  try {
-    sharedBook({ shareBroker: `http://127.0.0.1:${fake.address().port}` });
-    const tab = await listenAs('tab-end-0001');
-    await tab.hear('event: start');
-    await api('POST', '/api/share/live', { ...liveBody('tab-end-0001'), url: `http://127.0.0.1:${fake.address().port}/s/${ROOM.room}#${ROOM.secret}` });
-    assert.equal((await api('POST', '/api/share/new-link', {})).status, 202);
-    const deadline = Date.now() + 5000;
-    while (ends.length < 2 && Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 50));
-    }
-    assert.deepEqual(ends.slice(0, 2), [`/api/rooms/${ROOM.room}/end`, `/api/rooms/${ROOM.room}/end`]);
-    await api('POST', '/api/share/stop', {});
-    tab.close();
-    await idle();
-  } finally {
-    fake.close();
-  }
-});
-
-test('Stop sharing lasts until the book is reopened', async () => {
-  sharedBook();
-  const tab = await listenAs('tab-stop-0001');
-  await tab.hear('event: start');
-  await api('POST', '/api/share/live', liveBody('tab-stop-0001'));
-  await api('POST', '/api/share/stop', {});
-  await tab.hear('event: stop');
-  const view = (await api('GET', '/api/share')).body;
-  assert.deepEqual([view.state, view.stopped, view.room], ['idle', true, false]);
-  tab.close();
-  await idle();
-  // The same tab's EventSource reconnecting (the server blinked) is not the book reopened.
-  const same = await listenAs('tab-stop-0001');
-  await same.hear(': listening');
-  await new Promise(r => setTimeout(r, 150));
-  assert.doesNotMatch(same.heard, /event: start/);
-  assert.equal((await api('GET', '/api/share')).body.stopped, true);
-  same.close();
-  await idle();
-  const again = await listenAs('tab-stop-0002');
-  await again.hear('event: start');
-  assert.equal((await api('GET', '/api/share')).body.stopped, false);
-  await api('POST', '/api/share/stop', {});
-  again.close();
-  await idle();
-});
-
-test('the link outlasts the server: a restart keeps the room (on disk, git-ignored) and does not end it; Stop forgets it', async () => {
-  const calls = [];
-  const fake = createServer((req, res) => { calls.push(req.url); res.writeHead(204); res.end(); });
-  await new Promise(r => fake.listen(0, '127.0.0.1', r));
-  const broker = `http://127.0.0.1:${fake.address().port}`;
-  const dir = mkdtempSync(join(tmpdir(), 'specbook-keep-'));
-  const book = freshBook();
-  book.settings = { shareBroker: broker };
-  writeFileSync(join(dir, 'book.json'), JSON.stringify(book));
+// A book server of its own on a folder of its own, with the fake host.
+async function ownServer(dir, env = HOST_ENV) {
   const p = 5000 + Math.floor(Math.random() * 900);
   const at = `http://127.0.0.1:${p}`;
-  const start = async () => {
-    const c = spawn(process.execPath, [SERVE, '--data', dir, '--port', String(p)], { stdio: 'ignore' });
-    for (let i = 0; i < 100 && !(await fetch(`${at}/api/health`).then(r => r.ok, () => false)); i++) {
-      await new Promise(r => setTimeout(r, 50));
-    }
-    return c;
-  };
-  const listen = async tab => {
-    const ctl = new AbortController();
-    const reader = (await fetch(`${at}/api/share/events?tab=${tab}`, { signal: ctl.signal })).body.getReader();
-    let heard = '';
-    const deadline = Date.now() + 3000;
-    while (!heard.includes('event: start')) {
-      if (Date.now() > deadline) { throw new Error(`no start; heard ${heard}`); }
-      heard += new TextDecoder().decode((await reader.read()).value);
-    }
-    return { heard, close: () => ctl.abort() };
-  };
-  const post = (path, body) => fetch(at + path, { method: 'POST', headers: { 'content-type': 'application/json', origin: at }, body: JSON.stringify(body) });
-  let c = await start();
-  try {
-    let tab = await listen('tab-keep-0001');
-    assert.equal((await post('/api/share/live', { ...liveBody('tab-keep-0001'), url: `${broker}/s/${ROOM.room}#${ROOM.secret}` })).status, 200);
-    assert.ok(existsSync(join(dir, '.share.json')), 'the room is written to .share.json');
-    assert.ok(IGNORED.includes('<rel>/.share.json'), '.share.json is git-ignored');
-    tab.close();
+  const c = spawn(process.execPath, [SERVE, '--data', dir, '--port', String(p)], { stdio: 'ignore', env: { ...process.env, ...env } });
+  for (let i = 0; i < 100 && !(await fetch(`${at}/api/health`).then(r => r.ok, () => false)); i++) {
+    await new Promise(r => setTimeout(r, 50));
+  }
+  const stop = async () => {
     const exited = new Promise(done => c.on('exit', done));
     c.kill('SIGTERM');
     await exited;
-    assert.deepEqual(calls.filter(u => /\/end$/.test(u)), [], 'stopping the server does not end the room');
-    c = await start();
-    tab = await listen('tab-keep-0002');
-    assert.match(tab.heard, new RegExp(`"room":\\{"room":"${ROOM.room}","hostToken":"${ROOM.hostToken}","secret":"${ROOM.secret}"`));
-    // A share server that cannot be reached does not cost the link.
-    assert.equal((await post('/api/share/failed', { tab: 'tab-keep-0002', error: 'offline' })).status, 200);
-    tab.close();
-    for (let i = 0; i < 50 && (await (await fetch(`${at}/api/share`, { headers: { origin: at } })).json()).tabs !== 0; i++) {
-      await new Promise(r => setTimeout(r, 20));
-    }
-    tab = await listen('tab-keep-0003');
-    assert.match(tab.heard, new RegExp(`"room":\\{"room":"${ROOM.room}"`));
-    await post('/api/share/live', { ...liveBody('tab-keep-0003'), url: `${broker}/s/${ROOM.room}#${ROOM.secret}` });
-    // Stop sharing (and New link) end the room and forget it.
-    await post('/api/share/stop', {});
-    assert.ok(!existsSync(join(dir, '.share.json')), 'Stop removes .share.json');
-    tab.close();
+  };
+  return { at, stop };
+}
+function ownBook(settings) {
+  const dir = mkdtempSync(join(tmpdir(), 'specbook-share-'));
+  const book = freshBook();
+  book.settings = { shareBroker: 'https://share.example', ...settings };
+  writeFileSync(join(dir, 'book.json'), JSON.stringify(book));
+  return dir;
+}
+
+test('the server hosts the book as soon as it starts, and gives the owner the link and the pin link', async () => {
+  const view = await shareUntil(isLive);
+  assert.match(view.url, LINK);
+  assert.equal(view.pinUrl.slice(0, view.url.length + 5), `${view.url}#pin=`);
+  assert.match(view.pinUrl.slice(view.url.length + 5), PIN);
+  assert.deepEqual([view.guests, view.error, view.stopped], [[], null, false]);
+  assert.match(view.expiresAt, ISO);
+});
+
+test('a guest gets 403 on every share and live route', async () => {
+  const calls = [
+    ['GET', '/api/share'],
+    ['POST', '/api/share', {}],
+    ['POST', '/api/share/stop', {}],
+    ['POST', '/api/share/new-link', {}],
+    ['POST', '/api/share/new-pin', {}],
+    ['GET', '/api/share/events'],
+    ['POST', '/api/live', { msg: { kind: 'where' } }],
+    ['GET', '//api/share'],
+  ];
+  for (const [method, path, body] of calls) {
+    assert.equal((await asGuest(method, path, body)).status, 403, `${method} ${path}`);
+  }
+  assert.equal((await shareUntil(isLive)).state, 'live');
+});
+
+test('New pin changes the pin link and keeps the link', async () => {
+  const before = await shareUntil(isLive);
+  const r = await api('POST', '/api/share/new-pin', {});
+  assert.equal(r.status, 200);
+  const after = await shareUntil(v => v.pinUrl !== before.pinUrl);
+  assert.equal(after.url, before.url);
+  assert.match(after.pinUrl.slice(after.url.length + 5), PIN);
+});
+
+test('New link opens a new room with a new pin', async () => {
+  const before = await shareUntil(isLive);
+  assert.equal((await api('POST', '/api/share/new-link', {})).status, 202);
+  const after = await shareUntil(v => isLive(v) && v.url !== before.url);
+  assert.match(after.url, LINK);
+  assert.notEqual(after.pinUrl.slice(-22), before.pinUrl.slice(-22));
+});
+
+test('the owner tab hears the share state, the guests\' live frames and changes; its own live frames go to the host', async () => {
+  // Another site's <script src> cannot listen.
+  assert.equal((await raw('GET', '/api/share/events', { host: `127.0.0.1:${port}`, 'sec-fetch-dest': 'script' })).status, 403);
+  assert.equal((await api('GET', '/api/share/events?tab=bad')).status, 400);
+  const tab = await listenAs();
+  await tab.hear('event: state');
+  assert.match(tab.heard, /"state":"live"/);
+  // The fake host hands each live frame it is sent back as a guest's.
+  assert.equal((await api('POST', '/api/live', { msg: { kind: 'where', at: 'c/d' } })).status, 200);
+  await tab.hear('event: live');
+  assert.match(tab.heard, /"kind":"where","at":"c\/d","from":"echo"/);
+  assert.equal((await api('POST', '/api/live', { msg: 'x' })).status, 400);
+  writeFileSync(join(data, 'book.json'), JSON.stringify({ ...freshBook(), title: 'T2' }));
+  await tab.hear('event: changed');
+  assert.doesNotMatch(tab.heard, /event: (start|stop)/);
+  tab.close();
+});
+
+test('Stop sharing ends the room and lasts until the book is opened again', async () => {
+  const tab = await listenAs('tab-stop-0001');
+  await tab.hear('event: state');
+  assert.equal((await api('POST', '/api/share/stop', {})).status, 200);
+  const view = await shareUntil(v => v.stopped);
+  assert.deepEqual([view.state, view.url, view.pinUrl], ['off', null, null]);
+  tab.close();
+  // The same tab's EventSource reconnecting (the server blinked) is not the book opened again.
+  const same = await listenAs('tab-stop-0001');
+  await same.hear('event: state');
+  await new Promise(r => setTimeout(r, 150));
+  assert.deepEqual([(await api('GET', '/api/share')).body.stopped, (await api('GET', '/api/share')).body.state], [true, 'off']);
+  same.close();
+  const again = await listenAs('tab-stop-0002');
+  const live = await shareUntil(isLive);
+  assert.equal(live.stopped, false);
+  assert.match(live.url, LINK);
+  again.close();
+});
+
+test('settings.share false keeps a book from sharing until asked', async () => {
+  await api('POST', '/api/share/stop', {});
+  sharedBook({ share: false });
+  const tab = await listenAs('tab-off-0001');
+  await tab.hear('event: state');
+  await new Promise(r => setTimeout(r, 150));
+  assert.equal((await api('GET', '/api/share')).body.state, 'off');
+  assert.equal((await api('POST', '/api/share', {})).status, 202);
+  assert.equal((await shareUntil(isLive)).stopped, false);
+  tab.close();
+});
+
+test('an old .share.json gains a pin and keeps its room, and the link outlasts the server; .share.json is never served', async () => {
+  const dir = ownBook();
+  const old = { room: 'room-0000000000001', hostToken: 'token-0000000000000000001', secret: 'k'.repeat(43), url: 'https://share.example/s/room-0000000000001#kkk', expiresAt: '2099-01-01T00:00:00.000Z' };
+  writeFileSync(join(dir, '.share.json'), JSON.stringify(old));
+  let s = await ownServer(dir);
+  try {
+    const saved = JSON.parse(readFileSync(join(dir, '.share.json'), 'utf8'));
+    assert.match(saved.pin, PIN);
+    assert.deepEqual([saved.room, saved.hostToken, saved.stopped], [old.room, old.hostToken, false]);
+    const view = await shareUntil(isLive, s.at);
+    assert.equal(view.url, `https://share.example/s/${old.room}`);
+    assert.equal(view.pinUrl, `${view.url}#pin=${saved.pin}`);
+    assert.ok(IGNORED.includes('<rel>/.share.json'), '.share.json is git-ignored');
+    assert.equal((await fetch(`${s.at}/data/.share.json`)).status, 403);
+    await s.stop();
+    s = await ownServer(dir);
+    const again = await shareUntil(isLive, s.at);
+    assert.deepEqual([again.url, again.pinUrl], [view.url, view.pinUrl]);
   } finally {
-    c.kill();
-    fake.close();
+    await s.stop();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('settings.share false keeps a book from sharing until asked', async () => {
-  sharedBook({ share: false });
-  const tab = await listenAs('tab-off-0001');
-  await tab.hear(': listening');
-  await new Promise(r => setTimeout(r, 150));
-  assert.doesNotMatch(tab.heard, /event: start/);
-  assert.equal((await api('POST', '/api/share', {})).status, 202);
-  await tab.hear('event: start');
-  await api('POST', '/api/share/stop', {});
-  tab.close();
-  await idle();
+test('Stop sharing lasts across a restart: no host starts', async () => {
+  const dir = ownBook();
+  let s = await ownServer(dir);
+  try {
+    await shareUntil(isLive, s.at);
+    await fetch(`${s.at}/api/share/stop`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    assert.equal(JSON.parse(readFileSync(join(dir, '.share.json'), 'utf8')).stopped, true);
+    await s.stop();
+    s = await ownServer(dir);
+    await new Promise(r => setTimeout(r, 200));
+    const view = await (await fetch(`${s.at}/api/share`)).json();
+    assert.deepEqual([view.state, view.stopped, view.url], ['off', true, null]);
+    assert.deepEqual(readFileSync(join(dir, 'host-starts.log'), 'utf8').trim().split('\n').length, 1, 'only the first server started a host');
+  } finally {
+    await s.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('without the share library the book is still served, and the share says it failed', async () => {
+  const dir = ownBook();
+  const s = await ownServer(dir, { SPECBOOK_DEPS: join(FIXTURES, 'no-deps'), SPECBOOK_TEST_HOST: '' });
+  try {
+    assert.equal((await fetch(`${s.at}/api/book`)).status, 200);
+    const view = await shareUntil(v => v.state === 'failed', s.at);
+    assert.equal(typeof view.error, 'string');
+  } finally {
+    await s.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('--detach with the share library in place prints the link and the pin link', async () => {
+  const dir = ownBook();
+  const p = 5000 + Math.floor(Math.random() * 900);
+  try {
+    const out = await new Promise(done => {
+      let text = '';
+      const s = spawn(process.execPath, [SERVE, '--data', dir, '--port', String(p), '--detach'], { stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, ...HOST_ENV } });
+      s.stdout.on('data', d => { text += d; });
+      s.on('exit', () => done(text));
+    });
+    const link = /^Share link: (https:\/\/share\.example\/s\/[A-Za-z0-9]{22})$/m.exec(out);
+    assert.ok(link, out);
+    assert.match(out, new RegExp(`^Your pin link \\(opens with your powers; never send it to anyone\\): ${link[1]}#pin=[A-Za-z0-9]{22}$`, 'm'));
+  } finally {
+    try {
+      process.kill(JSON.parse(readFileSync(join(dir, '.server.json'), 'utf8')).pid);
+    } catch {
+      // already gone
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('per-note saves never drop another\'s change, and say who changed a note last', async () => {
