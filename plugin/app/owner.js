@@ -60,8 +60,8 @@
     var was = view.state;
     view = next;
     waiting = false;
-    // Nobody reads on the link (the share stopped, or the last reader left): no faces stay.
-    if (view.state !== 'live' || !Array.isArray(view.guests) || !view.guests.length) { readers = {}; }
+    // The share stopped: no faces stay. (While it is live, readers come and go by roster, hello and bye.)
+    if (view.state !== 'live') { readers = {}; }
     if (view.state === 'live' && was !== 'live') { sayHello(); }
     changedState();
   }
@@ -74,8 +74,16 @@
   function toLive(msg) { if (window.SpecLive && window.SpecLive.receive) { window.SpecLive.receive(msg); } }
   // A reader's live message, already checked and stamped by the server.
   function onLive(msg) {
-    if (!msg || msg.t !== 'live' || typeof msg.from !== 'string' || msg.from === 'host') { return; }
-    if (msg.kind === 'hello') {
+    if (!msg || msg.t !== 'live') { return; }
+    if (msg.kind !== 'roster' && (typeof msg.from !== 'string' || msg.from === 'host')) { return; }
+    if (msg.kind === 'roster') {
+      // Who is reading already, sent when this tab connects to the server.
+      readers = {};
+      (Array.isArray(msg.people) ? msg.people : []).forEach(function (p) {
+        if (p && typeof p.id === 'string' && p.id !== 'host') { readers[p.id] = { id: p.id, name: p.name, color: p.color, role: p.role || 'guest' }; }
+      });
+      changedState();
+    } else if (msg.kind === 'hello') {
       readers[msg.from] = { id: msg.from, name: msg.name, color: msg.color, role: msg.role || 'guest' };
       changedState();
     } else if (msg.kind === 'bye' && readers[msg.from]) {

@@ -54,7 +54,7 @@ exports.createHost = ({ broker, saved, onState }) => {
     newPin() { pin = newId(); report(); },
     state: () => state,
     links: () => (state === 'live' ? { url: broker + '/s/' + kept.room, pinUrl: broker + '/s/' + kept.room + '#pin=' + pin } : null),
-    people: () => [],
+    people: () => [{ id: 'host', name: 'Owner', color: '#3ecf8e', role: 'owner' }].concat(state === 'live' ? [{ id: 'ana-device', name: 'Ana', color: '#f27aa0', role: 'guest' }] : []),
     sendLive(msg) { for (const fn of listeners) { fn({ ...msg, from: 'echo' }); } },
     changed() {},
     onLive(fn) { listeners.push(fn); },
@@ -939,6 +939,24 @@ test('the server hosts the book as soon as it starts, and gives the owner the li
   assert.match(view.expiresAt, ISO);
 });
 
+test('an owner tab that connects while the book is shared hears who is reading first', async () => {
+  await shareUntil(isLive);
+  const tab = await listenAs('rosterTab01');
+  try {
+    await tab.hear('event: live');
+    const first = tab.heard.split('\n\n').find(block => block.startsWith('event: live'));
+    const msg = JSON.parse(first.split('\n').find(l => l.startsWith('data: ')).slice(6));
+    assert.deepEqual(msg, {
+      t: 'live',
+      kind: 'roster',
+      you: 'host',
+      people: [{ id: 'host', name: 'Owner', color: '#3ecf8e', role: 'owner' }, { id: 'ana-device', name: 'Ana', color: '#f27aa0', role: 'guest' }],
+    });
+  } finally {
+    tab.close();
+  }
+});
+
 test('a guest gets 403 on every share and live route', async () => {
   const calls = [
     ['GET', '/api/share'],
@@ -982,7 +1000,8 @@ test('the owner tab hears the share state, the guests\' live frames and changes;
   assert.match(tab.heard, /"state":"live"/);
   // The fake host hands each live frame it is sent back as a guest's.
   assert.equal((await api('POST', '/api/live', { msg: { kind: 'where', at: 'c/d' } })).status, 200);
-  await tab.hear('event: live');
+  // (Its first live event is the roster of who is reading; the echo follows.)
+  await tab.hear('"from":"echo"');
   assert.match(tab.heard, /"kind":"where","at":"c\/d","from":"echo"/);
   assert.equal((await api('POST', '/api/live', { msg: 'x' })).status, 400);
   writeFileSync(join(data, 'book.json'), JSON.stringify({ ...freshBook(), title: 'T2' }));

@@ -853,6 +853,11 @@ const server = createServer(async (req, res) => {
         saveShare();
       }
       res.write(`event: state\ndata: ${JSON.stringify(shareView())}\n\n`);
+      // Who is reading already: a tab opened (or reloaded, or reconnected) while readers are connected hears them now,
+      // not only when each says hello again.
+      if (host && host.state() === 'live') {
+        res.write(`event: live\ndata: ${JSON.stringify({ t: 'live', kind: 'roster', you: 'host', people: host.people() })}\n\n`);
+      }
       const beat = setInterval(() => res.write(': beat\n\n'), 25000);
       req.on('close', () => {
         clearInterval(beat);

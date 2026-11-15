@@ -37,7 +37,7 @@ cpSync(join(PLUGIN, 'starter'), data, { recursive: true });
 }
 
 // The server hosts through a fake host (SPECBOOK_TEST_HOST, a test-only seam in serve.mjs): no WebRTC and no share
-// server. Started, it opens a made-up room and a reader, Ana, says hello; it logs what the owner's tab sends to
+// server. Started, it opens a made-up room and a reader, Ana, says hello (and is in its people from then on); it logs what the owner's tab sends to
 // live.log in the book folder. SPECBOOK_DEPS is an empty folder, so the real ~/.claude/specbook/deps is never read.
 const fixtures = mkdtempSync(join(tmpdir(), 'specbook-smoke-fixtures-'));
 const fakeHost = join(fixtures, 'fake-host.cjs');
@@ -74,7 +74,7 @@ exports.createHost = ({ broker, saved, onState }) => {
     newPin() { pin = newId(); report(); },
     state: () => state,
     links: () => (state === 'live' ? { url: broker + '/s/' + kept.room, pinUrl: broker + '/s/' + kept.room + '#pin=' + pin } : null),
-    people: () => [],
+    people: () => [{ id: 'host', name: 'Owner', color: '#3ecf8e', role: 'owner' }].concat(state === 'live' ? [{ id: 'ana-device', name: 'Ana', color: '#f27aa0', role: 'guest' }] : []),
     sendLive(msg) { if (state === 'live') { appendFileSync(join(dir, 'live.log'), JSON.stringify(msg) + '\\n'); } },
     changed() {},
     onLive(fn) { listeners.push(fn); },
@@ -717,6 +717,10 @@ try {
     if ((await page.evaluate(() => window.SpecHost.link())) !== links.link) {
       throw new Error('New pin changed the link');
     }
+    // A reloaded tab hears who is reading already (Ana says no new hello): her face is back.
+    await open();
+    await page.waitForFunction(() => document.querySelectorAll('.share-pill .face').length === 2, null, { timeout: 3000 });
+    await page.locator('.share-pill .share-more').click();
     await page.locator('.share-menu .share-stop').click();
     await page.waitForSelector('.share-pill .share-start', { timeout: 3000 });
     if (await page.evaluate(() => window.SpecHost.link() !== null || document.querySelectorAll('.share-pill .face').length)) {
