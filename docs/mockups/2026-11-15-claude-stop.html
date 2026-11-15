@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup: Stop in the Claude menu</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  /* The reader's own tokens (plugin/app/book.css). */
+  :root {
+    --bg: #17181a; --side: #1d1f22; --surface: #212327; --ink: #e8e9eb; --muted: #9a9ea6; --line: #33363b;
+    --accent: #6aa8ff; --note: #ffd479; --claude: #d97757; --stop: #ff8a80;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    --sans: "IBM Plex Sans", "Helvetica Neue", system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #0f1012; color: var(--ink); font: 15px/1.55 var(--sans); }
+  .page { max-width: 1240px; margin: 0 auto; padding: 32px 24px 80px; }
+  h1 { margin: 0 0 6px; font-size: 28px; }
+  .sub { color: var(--muted); margin: 0 0 8px; max-width: 84ch; }
+  .try { display: inline-block; font: 600 12px var(--mono); color: var(--note); border: 1px dashed var(--note); border-radius: 6px; padding: 2px 8px; margin: 8px 0 22px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 28px 24px; }
+  .cap { font: 600 12px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin: 0 0 4px; }
+  .cap-note { color: var(--muted); font-size: 13px; margin: 0 0 10px; min-height: 2.6em; }
+  .shot { position: relative; height: 330px; background: var(--bg); border: 1px solid #2b2e33; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,.5); }
+  .shot.tall { height: 380px; }
+  .hdr { display: flex; align-items: center; justify-content: flex-end; gap: 12px; height: 56px; padding: 0 14px; background: rgba(29,31,34,.96); border-bottom: 1px solid var(--line); }
+  .book { padding: 18px 20px; color: #4a4e55; font-size: 14px; }
+  .book p { margin: 0 0 10px; }
+
+  .ico { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .share { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 999px; padding: 4px 6px 4px 12px; font: 600 13px var(--sans); }
+  .share .solo { color: var(--muted); font-size: 12px; }
+  .share .chev { color: var(--muted); }
+  .claude-btn { position: relative; display: flex; align-items: center; gap: 7px; font: 700 14px var(--sans); color: var(--claude); background: #2a1c16; border: 1px solid #5c3a2c; border-radius: 9px; padding: 6px 12px; }
+  .claude-btn.open { box-shadow: 0 0 0 2px var(--accent); }
+  .claude-btn .spark { width: 14px; height: 14px; fill: currentColor; stroke: none; }
+  .claude-btn.busy .spark { animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .claude-btn .busy-t { color: #f3c1ac; font-weight: 600; }
+  .badge { position: absolute; top: -7px; right: -7px; font: 700 11px/1.5 var(--sans); background: var(--note); color: #222; border-radius: 8px; padding: 0 5px; border: 2px solid var(--side); }
+
+  .menu { position: absolute; right: 14px; top: 64px; width: 330px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 6px; box-shadow: 0 12px 30px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 2px; }
+  .act { display: flex; align-items: flex-start; gap: 10px; padding: 8px; border-radius: 8px; }
+  .act.hover { background: #2a2c31; }
+  .act .txt { flex: 1; min-width: 0; font: 600 14px var(--sans); }
+  .act small { display: block; font: 400 12px/1.45 var(--sans); color: var(--muted); margin-top: 2px; }
+  .act.off { opacity: .5; }
+  .act.running { background: #2a1c16; border: 1px solid #5c3a2c; }
+  .act.running .txt { color: #f3c1ac; }
+  .act.running .txt b { color: var(--claude); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--claude); margin-right: 6px; vertical-align: 1px; animation: pulse 1.2s infinite; }
+  .stop { flex: none; display: inline-flex; align-items: center; gap: 6px; align-self: center; font: 600 13px var(--sans); color: var(--stop); background: transparent; border: 1px solid #5a2b28; border-radius: 8px; padding: 5px 10px; }
+  .stop .sq { width: 10px; height: 10px; border-radius: 2px; background: currentColor; }
+  .stop.hover { background: #3a1d1b; }
+
+  .ask { margin: 2px 0 0; padding: 10px; border-radius: 8px; background: #2a1715; border: 1px solid #5a2b28; }
+  .ask p { margin: 0 0 4px; font: 600 14px var(--sans); }
+  .ask small { display: block; color: var(--muted); font-size: 12px; line-height: 1.45; }
+  .ask .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+  .btn { font: 600 13px var(--sans); border-radius: 8px; padding: 6px 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+  .btn.red { background: #8a2b1d; border-color: #a33a2b; color: #fff; }
+
+  .toast { position: absolute; left: 16px; bottom: 16px; max-width: 340px; padding: 8px 12px; font-size: 13px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.45); }
+
+  .phone { width: 393px; height: 600px; border-radius: 44px; border: 10px solid #000; outline: 1px solid #333; }
+  .phone .status { height: 40px; background: var(--side); }
+  .phone .hdr { justify-content: space-between; padding: 0 10px; }
+  .phone .menu { left: 8px; right: 8px; width: auto; top: 104px; }
+  .phone .claude-btn .lbl { display: none; }
+  .phone .act { padding: 10px; }
+  .phone .stop { min-height: 44px; padding: 0 14px; }
+  .phone .ask .btn { flex: 1; min-height: 44px; }
+  .title { font: 700 16px var(--sans); }
+
+  section.what { border-top: 1px solid var(--line); padding-top: 22px; margin-top: 36px; }
+  section.what h2 { margin: 0 0 8px; font-size: 20px; }
+  .notes { color: var(--muted); max-width: 86ch; margin: 0; padding-left: 20px; }
+  .notes li { margin: 6px 0; }
+  .notes b { color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Stop in the Claude menu</h1>
+  <p class="sub">While Claude is revising or building, the action it is doing shows in the Claude menu as running, with
+    <b>Stop</b> beside it. Stop asks once, then withdraws the request. Nothing here is built yet.</p>
+  <span class="try">Frames left to right: today · running · Stop pressed · after · a build · a phone</span>
+
+  <div class="grid">
+    <!-- 1. Today -->
+    <div>
+      <p class="cap">1 · Idle (today)</p>
+      <p class="cap-note">Unchanged: Revise and Build, each saying what it does.</p>
+      <div class="shot">
+        <div class="hdr">
+          <span class="share"><span class="solo">Only you</span>Share <svg class="ico chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+          <span class="claude-btn open"><svg class="spark" viewBox="0 0 24 24"><path d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8z"/></svg><span class="lbl">Claude</span><svg class="ico" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg><span class="badge">4</span></span>
+        </div>
+        <div class="menu">
+          <div class="act hover"><div class="txt">Revise<small>Review your 4 notes, then send them. Claude revises the book and you review each change.</small></div></div>
+          <div class="act off"><div class="txt">Build<small>No section is marked Ready.</small></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. Revising -->
+    <div>
+      <p class="cap">2 · Revising, menu open</p>
+      <p class="cap-note">Revise is the running row: what was sent, when, and <b>Stop</b>. Build waits.</p>
+      <div class="shot">
+        <div class="hdr">
+          <span class="share"><span class="solo">Only you</span>Share <svg class="ico chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+          <span class="claude-btn busy open"><svg class="spark" viewBox="0 0 24 24"><path d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8z"/></svg><span class="lbl">Claude</span><span class="busy-t">· Revising…</span><svg class="ico" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+        </div>
+        <div class="menu">
+          <div class="act running">
+            <div class="txt"><span class="dot"></span><b>Revising</b><small>Your 4 notes, sent at 11:15. Claude is working through them in the terminal.</small></div>
+            <span class="stop hover"><span class="sq"></span>Stop</span>
+          </div>
+          <div class="act off"><div class="txt">Build<small>Waiting for Claude to finish.</small></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. Stop pressed -->
+    <div>
+      <p class="cap">3 · Stop pressed</p>
+      <p class="cap-note">It asks once, inside the menu, saying what happens to the notes and to anything already changed.</p>
+      <div class="shot tall">
+        <div class="hdr">
+          <span class="share"><span class="solo">Only you</span>Share <svg class="ico chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+          <span class="claude-btn busy open"><svg class="spark" viewBox="0 0 24 24"><path d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8z"/></svg><span class="lbl">Claude</span><span class="busy-t">· Revising…</span><svg class="ico" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+        </div>
+        <div class="menu">
+          <div class="act running">
+            <div class="txt"><span class="dot"></span><b>Revising</b><small>Your 4 notes, sent at 11:15.</small></div>
+          </div>
+          <div class="ask">
+            <p>Stop revising?</p>
+            <small>Your 4 notes go back to drafts, ready to edit or send again. Anything Claude already changed stays in the
+              book for you to review.</small>
+            <div class="row"><span class="btn">Keep going</span><span class="btn red">Stop revising</span></div>
+          </div>
+          <div class="act off"><div class="txt">Build<small>Waiting for Claude to finish.</small></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. After -->
+    <div>
+      <p class="cap">4 · Stopped</p>
+      <p class="cap-note">The menu closes, a toast says what happened, and the book is unlocked: the notes are drafts again.</p>
+      <div class="shot">
+        <div class="hdr">
+          <span class="share"><span class="solo">Only you</span>Share <svg class="ico chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+          <span class="claude-btn"><svg class="spark" viewBox="0 0 24 24"><path d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8z"/></svg><span class="lbl">Claude</span><svg class="ico" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg><span class="badge">4</span></span>
+        </div>
+        <div class="book"><p>CHAPTER 02</p><p>Onboarding</p><p>§2.1 Opening the app</p></div>
+        <div class="toast">Stopped. Your 4 notes are drafts again.</div>
+      </div>
+    </div>
+
+    <!-- 5. Building -->
+    <div>
+      <p class="cap">5 · Building</p>
+      <p class="cap-note">The same for Build: the running row says how far it got, and Stop asks what to keep.</p>
+      <div class="shot tall">
+        <div class="hdr">
+          <span class="share"><span class="solo">Only you</span>Share <svg class="ico chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+          <span class="claude-btn busy open"><svg class="spark" viewBox="0 0 24 24"><path d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8z"/></svg><span class="lbl">Claude</span><span class="busy-t">· Building · task 3 of 9</span><svg class="ico" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+        </div>
+        <div class="menu">
+          <div class="act off"><div class="txt">Revise<small>Waiting for Claude to finish.</small></div></div>
+          <div class="act running">
+            <div class="txt"><span class="dot"></span><b>Building · task 3 of 9</b><small>2 sections marked Ready, started at 11:40.</small></div>
+          </div>
+          <div class="ask">
+            <p>Stop the build?</p>
+            <small>The sections go back to Drafting, ready to build again. Tests that already pass and their evidence are kept.</small>
+            <div class="row"><span class="btn">Keep going</span><span class="btn red">Stop the build</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. Phone -->
+    <div>
+      <p class="cap">6 · On a phone</p>
+      <p class="cap-note">The menu spans the screen; Stop and the two answers are 44 points tall.</p>
+      <div class="shot phone">
+        <div class="status"></div>
+        <div class="hdr">
+          <span class="title">Tribes</span>
+          <span style="display:flex;gap:8px;align-items:center">
+            <span class="share">Share <svg class="ico chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+            <span class="claude-btn busy open"><svg class="spark" viewBox="0 0 24 24"><path d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8z"/></svg><span class="busy-t">· Revising…</span><svg class="ico" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+          </span>
+        </div>
+        <div class="menu">
+          <div class="act running">
+            <div class="txt"><span class="dot"></span><b>Revising</b><small>Your 4 notes, sent at 11:15.</small></div>
+            <span class="stop"><span class="sq"></span>Stop</span>
+          </div>
+          <div class="act off"><div class="txt">Build<small>Waiting for Claude to finish.</small></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section class="what">
+    <h2>How it behaves</h2>
+    <ul class="notes">
+      <li><b>Stop sits on the running row only.</b> The other action is greyed out with "Waiting for Claude to finish."</li>
+      <li><b>Stop asks once</b>, inside the menu, then withdraws the request. The book unlocks at once. For a revise, the
+        notes go back to drafts. For a build, the build is marked stopped: its sections go back to Drafting and
+        the evidence already written is kept (the build skill's stop works this way today).</li>
+      <li><b>If Claude has already started</b>, its session notices the stop the next time it checks (before each
+        section it edits, or each build task), stops there, and says so in the terminal. Whatever it already changed
+        stays in the book, to review like any other change.</li>
+      <li>A guest on a shared link has no Claude menu, so no Stop.</li>
+      <li><b>Keys:</b> none new. Esc closes the question as it closes the menu.</li>
+    </ul>
+  </section>
+</div>
+</body>
+</html>
