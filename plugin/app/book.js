@@ -1431,7 +1431,19 @@
     return fetch('/api/notes', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: body, keepalive: !!keepalive })
       .then(function (r) { return r.json().then(function (j) { return { status: r.status, j: j }; }); })
       .then(function (res) {
-        if (res.status === 200) { state.notesRev = res.j.rev; markSynced(sent); savedDrafts(sent, res.j.rev); return true; }
+        if (res.status === 200) {
+          state.notesRev = res.j.rev;
+          markSynced(sent);
+          savedDrafts(sent, res.j.rev);
+          // A note the server would not take (another's, or no longer a draft) keeps its text under a new id; the
+          // server's copy of the old one comes back with the reload.
+          var sk = window.SpecModel.rekeySkipped(state.notes, changes, res.j.skipped, newId);
+          if (!sk.unsynced.length) { return true; }
+          sk.unsynced.forEach(function (id) { delete synced[id]; });
+          state.notes = sk.notes;
+          saveNotes();
+          return reloadNotes('').then(function () { return false; });
+        }
         if (res.status === 409 && res.j.error === 'stale') {
           var own = reviewPending || Date.now() - ownReviewAt < 5000;
           return reloadNotes(own ? '' : 'Notes changed elsewhere; reloaded.').then(function () { return false; });

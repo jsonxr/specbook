@@ -40,3 +40,18 @@ test('a peer id is a short stable hash of the guest key', async () => {
   assert.notEqual(await R.peerIdOf('guest-key-0002'), a);
   assert.match(a, /^[A-Za-z0-9_-]{12}$/);
 });
+
+test('two tabs with the same guest key are two people, each with a stable id', async () => {
+  const a = await R.peerIdOf('guest-key-0001', 'conn-a');
+  const b = await R.peerIdOf('guest-key-0001', 'conn-b');
+  assert.notEqual(a, b);
+  assert.equal(await R.peerIdOf('guest-key-0001', 'conn-a'), a);
+});
+
+test('a new note id belongs to whoever drafted it first; others cannot draft it', () => {
+  const claims = {};
+  assert.equal(R.mayDraft({ key: 'k1', id: 'p1' }, 'fresh', {}, claims), true);
+  assert.equal(R.mayDraft({ key: 'k2', id: 'p2' }, 'fresh', {}, claims), false);
+  assert.equal(R.mayDraft({ key: 'k1', id: 'p1' }, 'fresh', {}, claims), true);
+  assert.equal(R.mayDraft({ host: true }, 'fresh', {}, claims), true);
+});

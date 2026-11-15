@@ -97,3 +97,9 @@ test('null deletes only what the writer may delete, and notes past draft are nev
   assert.equal(byOwner.sent.text, 'gone to Claude');
   assert.equal(applyNoteChanges(stored(), { sent: { text: 'x', item: 'R1' } }, owner).sent.text, 'gone to Claude');
 });
+
+test('a save reports the ids it was not allowed to change, so the page does not think them saved', () => {
+  const skipped = [];
+  applyNoteChanges(stored(), { hers: { text: 'x', item: 'R1' }, bobs: { text: 'x', item: 'R1' }, mine: null, sent: { text: 'x', item: 'R1' } }, ann, skipped);
+  assert.deepEqual(skipped.sort(), ['bobs', 'mine', 'sent']);
+});

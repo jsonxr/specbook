@@ -784,11 +784,14 @@ const server = createServer(async (req, res) => {
           }
         }
         const writer = guest ? { guest: true, name: guest.name, key: guest.key } : { guest: false, name: OWNER_NAME };
-        const next = applyNoteChanges(review.notes, changes, writer);
+        const skipped = [];
+        const next = applyNoteChanges(review.notes, changes, writer, skipped);
         if (guest) {
           checkGuestNotes(next, guest);
         }
-        json(res, 200, writeReviewNotes(DATA, next, review.rev));
+        // `skipped`: the ids this writer may not change (another's note, or one no longer a draft). The page moves its
+        // own text in a skipped note to a new note, so nothing typed is lost.
+        json(res, 200, { ...writeReviewNotes(DATA, next, review.rev), skipped });
         return;
       }
       const notes = body.notes;

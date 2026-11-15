@@ -280,6 +280,29 @@ try {
     await owner.waitForFunction(() => !document.body.classList.contains('followed'), null, { timeout: 3000 });
   });
 
+  await check('a follower on a phone-width screen lands on the leader\'s place too', async () => {
+    await guest.setViewportSize({ width: 390, height: 844 });
+    try {
+      await owner.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+      await guest.locator('.share-pill .face:not(.me)').first().click();
+      await guest.waitForFunction(() => !document.querySelector('.follow-chip').hidden, null, { timeout: 3000 });
+      await owner.evaluate(() => {
+        const e = document.querySelector('#filters-bar > h3');
+        const bar = document.querySelector('.bar').offsetHeight + 8;
+        window.scrollTo({ top: e.getBoundingClientRect().top + window.scrollY - bar, behavior: 'instant' });
+      });
+      await guest.waitForFunction(() => {
+        const r = document.querySelector('#filters-bar > h3').getBoundingClientRect();
+        return r.top >= 0 && r.bottom <= window.innerHeight;
+      }, null, { timeout: 4000 });
+      await guest.mouse.move(200, 400);
+      await guest.mouse.wheel(0, 300);
+      await guest.waitForFunction(() => document.querySelector('.follow-chip').hidden, null, { timeout: 3000 });
+    } finally {
+      await guest.setViewportSize({ width: 1280, height: 900 });
+    }
+  });
+
   await check('reloading the owner\'s tab keeps the link, and the guest reconnects', async () => {
     await owner.reload();
     await owner.waitForSelector('#todos-list');

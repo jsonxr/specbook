@@ -12,7 +12,7 @@
 //   GET  /api/rooms/<room>/guest   WebSocket; while the host is away it waits, and hears host-online when it comes
 //   GET  /api/rooms/<room>/ice     { iceServers }: STUN, plus TURN when the TURN secrets are set
 import { DurableObject } from 'cloudflare:workers';
-import { GUEST_IDLE_MS, isLocalOrigin, MAX_GUESTS, MAX_MESSAGE, STUN, countRoom, fromGuest, fromHost, mayMintTurn, roomHours, roomProtocol, turnServers, validId } from './rules.mjs';
+import { GUEST_IDLE_MS, isLocalOrigin, MAX_GUESTS, MAX_MESSAGE, STUN, countRoom, fromGuest, fromHost, mayMintTurn, mayWait, roomHours, roomProtocol, turnServers, validId, WAIT_MS } from './rules.mjs';
 
 
 export default {
@@ -154,6 +154,10 @@ export class Broker extends DurableObject {
         old.close(4000, 'replaced');
       }
       const res = this.accept({ role: 'host', room: m[1] }, [`host:${m[1]}`]);
+      // Only a room a host has opened lets guests wait for it.
+      if (!room.hosted) {
+        await this.ctx.storage.put(`room:${m[1]}`, { ...(await this.room(m[1])), hosted: true });
+      }
       // Guests waiting for the host start their handshake now, with a fresh minute for it.
       const now = Date.now();
       for (const g of this.ctx.getWebSockets(`guest:${m[1]}`)) {
@@ -174,10 +178,16 @@ export class Broker extends DurableObject {
     const gid = randomId(9);
     const ip = request.headers.get('cf-connecting-ip') ?? 'local';
     const away = !this.ctx.getWebSockets(`host:${m[1]}`).length;
+    if (away) {
+      const waitingFromIp = this.ctx.getWebSockets(`guest:${m[1]}`).filter(g => g.deserializeAttachment()?.ip === ip).length;
+      if (!mayWait({ hosted: room.hosted, waitingFromIp })) {
+        return json(409, { error: room.hosted ? 'too-many-waiting' : 'host-offline' });
+      }
+    }
     const res = this.accept({ role: 'guest', room: m[1], gid, at: Date.now(), ip, iced: false, offered: false }, [`guest:${m[1]}`, `g:${m[1]}:${gid}`], away ? { type: 'host-offline' } : null);
     // A guest's socket is for the handshake: while the host is there, the alarm closes any left open, so idle sockets
     // cannot fill a room. While the host is away it waits (hibernating, at no cost) to hear host-online.
-    await this.schedule(Date.now() + GUEST_IDLE_MS);
+    await this.schedule(Date.now() + (away ? WAIT_MS : GUEST_IDLE_MS));
     return res;
   }
 
@@ -306,9 +316,13 @@ export class Broker extends DurableObject {
     }
     // A host that reconnected has a newer socket: its guests have not lost it.
     if (me?.role === 'host' && this.ctx.getWebSockets(`host:${me.room}`).every(h => h === ws)) {
+      const now = Date.now();
       for (const g of this.ctx.getWebSockets(`guest:${me.room}`)) {
+        // The wait for the host starts now.
+        g.serializeAttachment({ ...g.deserializeAttachment(), at: now });
         g.send(JSON.stringify({ type: 'host-offline' }));
       }
+      await this.schedule(now + WAIT_MS);
       // The host tab closed or reloaded: the room stays until it expires or is ended, so the same link works when the
       // book is open again. Its guests wait for host-online.
     }
@@ -352,11 +366,21 @@ export class Broker extends DurableObject {
   async alarm() {
     const now = Date.now();
     let guestsLeft = false;
+    let waitEnds = Infinity;
     for (const g of this.ctx.getWebSockets()) {
       const a = g.deserializeAttachment();
       if (a?.role === 'guest') {
-        // A guest waiting for a host that is away is not idle.
+        // A guest waiting for a host that is away is not idle, but it waits WAIT_MS at most.
         if (!this.ctx.getWebSockets(`host:${a.room}`).length) {
+          if (now - a.at >= WAIT_MS) {
+            try {
+              g.close(4408, 'waited');
+            } catch {
+              // already closed
+            }
+          } else {
+            waitEnds = Math.min(waitEnds, a.at + WAIT_MS);
+          }
           continue;
         }
         if (now - a.at >= GUEST_IDLE_MS) {
@@ -389,6 +413,6 @@ export class Broker extends DurableObject {
         }
       }
     }
-    await this.schedule(guestsLeft ? now + GUEST_IDLE_MS : Infinity);
+    await this.schedule(Math.min(guestsLeft ? now + GUEST_IDLE_MS : Infinity, waitEnds));
   }
 }

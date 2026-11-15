@@ -11,10 +11,11 @@
     return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
 
-  // A guest's id among the people in the book: a short hash of their key, the same across reconnects. The key itself
-  // makes notes theirs, so it is never shown to anyone else.
-  function peerIdOf(key) {
-    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(key)))
+  // A guest's id among the people in the book: a short hash of their key and this connection, so two tabs of one guest
+  // are two people (rather than taking turns knocking each other off). The key itself makes notes theirs, so it is
+  // never shown to anyone else.
+  function peerIdOf(key, conn) {
+    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(key) + '\n' + String(conn || '')))
       .then(function (h) { return b64url(new Uint8Array(h)).slice(0, 12); });
   }
 
@@ -30,13 +31,18 @@
   }
 
   // Whether a sender may show others a draft of this note: the owner any note; a guest a note of their own, or a new
-  // one. `sender` is { host: true } or { key }; `notes` the owner's notes, which carry each guest note's authorKey.
-  function mayDraft(sender, id, notes) {
+  // one nobody else has drafted (`claims`, id -> the first drafter's peer id, is kept by the host and filled here).
+  // `sender` is { host: true } or { key, id }; `notes` the owner's notes, which carry each guest note's authorKey.
+  function mayDraft(sender, id, notes, claims) {
     if (typeof id !== 'string' || id === '__proto__' || !id) { return false; }
     if (sender && sender.host) { return true; }
     var n = Object.prototype.hasOwnProperty.call(notes || {}, id) ? notes[id] : null;
-    if (!n) { return true; }
-    return !!(sender && sender.key && n.authorKey === sender.key);
+    if (n) { return !!(sender && sender.key && n.authorKey === sender.key); }
+    if (!claims) { return true; }
+    var who = sender && sender.id;
+    if (Object.prototype.hasOwnProperty.call(claims, id) && claims[id] !== who) { return false; }
+    claims[id] = who;
+    return true;
   }
 
   window.SpecRelay = { PALETTE: PALETTE, peerIdOf: peerIdOf, colorOf: colorOf, relayTargets: relayTargets, mayDraft: mayDraft };

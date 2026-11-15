@@ -124,17 +124,17 @@ export function mergeGuestNotes(stored, sent, guest) {
 // new id, which becomes theirs. A note past draft (sent to Claude, answered) is never changed. Saves are applied one
 // after another as they arrive, so a change to one note never drops another's: the later change to the same note
 // wins, and `lastBy` says who made it.
-export function applyNoteChanges(stored, changes, writer) {
+// Ids the writer may not change are left alone and listed in `skipped` (when given), so the page knows they were not
+// saved.
+export function applyNoteChanges(stored, changes, writer, skipped = []) {
   const out = { ...stored };
   for (const [id, next] of Object.entries(changes)) {
     if (id === '__proto__') {
       continue;
     }
     const was = Object.hasOwn(stored, id) ? stored[id] : null;
-    if (was && was.status !== 'draft') {
-      continue;
-    }
-    if (writer.guest && was && was.authorKey !== writer.key) {
+    if ((was && was.status !== 'draft') || (writer.guest && was && was.authorKey !== writer.key)) {
+      skipped.push(id);
       continue;
     }
     if (next === null) {

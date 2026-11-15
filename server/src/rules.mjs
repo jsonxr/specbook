@@ -6,7 +6,9 @@ export const MAX_MESSAGE = 64 * 1024; // bytes in one handshake message
 export const DEFAULT_HOURS = 8;
 export const MAX_HOURS = 24;
 export const GUEST_IDLE_MS = 60_000; // a guest's handshake socket is closed after this while the host is there
-export const PROTOCOL = 2; // the newest wire protocol between a host tab and a guest page
+export const PROTOCOL = 2;
+export const WAIT_MS = 6 * 3600_000; // a guest waits this long for a host that is away before its socket closes
+export const WAIT_PER_IP = 3; // guests one address may have waiting in one room // the newest wire protocol between a host tab and a guest page
 export const TURN_PER_ROOM = 30; // relay credentials one room may hand out
 export const TURN_PER_IP = 30; // relay credentials one address may get in a day
 export const STUN = [{ urls: 'stun:stun.cloudflare.com:3478' }];
@@ -27,6 +29,12 @@ export function roomHours(asked) {
 export function roomProtocol(asked) {
   const n = Number(asked);
   return Number.isInteger(n) && n >= 1 ? Math.min(PROTOCOL, n) : 1;
+}
+
+// Whether a guest may wait in a room whose host is away: only in a room a host has opened (so nobody can park sockets
+// in rooms made for it), and only a few from one address (so one person cannot fill a room).
+export function mayWait({ hosted, waitingFromIp }) {
+  return !!hosted && waitingFromIp < WAIT_PER_IP;
 }
 
 // The rate window for one address after one more room: { ok, next } where next is the window to store.

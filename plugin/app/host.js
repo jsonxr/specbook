@@ -53,7 +53,8 @@
     return fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) });
   }
 
-  var share = null; // the share this tab hosts: { room, token, secret, broker, ws, peers, url, expiresAt }
+  var share = null; // the share this tab hosts: { room, token, secret, broker, ws, peers, claims, url, expiresAt }
+  // (claims: a new note's id -> the peer id that drafted it first, so no other guest can draft under it)
   var hostState = 'starting'; // 'starting' | 'live' | 'off' | 'other-tab', for the share pill (live.js)
   var watchers = [];
   function changedState() { watchers.forEach(function (fn) { try { fn(); } catch (e) { /* the page's problem */ } }); }
@@ -105,7 +106,7 @@
       var notes = {};
       var n = window.SpecBook && window.SpecBook.noteOf ? window.SpecBook.noteOf(id) : null;
       if (n) { notes[id] = n; }
-      if (!window.SpecRelay.mayDraft({ key: peer.key }, id, notes)) { return; }
+      if (!window.SpecRelay.mayDraft({ key: peer.key, id: peer.id }, id, notes, share ? share.claims : {})) { return; }
       msg.author = peer.name;
     }
     if (msg.kind === 'follow' && msg.leader !== null && typeof msg.leader !== 'string') { return; }
@@ -212,11 +213,6 @@
     // A channel the guest opened is often open already by the time it arrives here.
     var joined = function () {
       if (peer.joined) { return; }
-      // The same person on a newer connection replaces the older one.
-      Object.keys(share.peers).forEach(function (k) {
-        var other = share.peers[k];
-        if (other !== peer && other.id === peer.id) { drop(k, other); }
-      });
       peer.joined = true;
       welcome(peer);
       reportGuests();
@@ -267,7 +263,7 @@
       var peer = { from: msg.from, name: name, key: msg.key, id: null, inFlight: 0, joined: false, channel: null, pc: null };
       s.peers[msg.from] = peer;
       peer.timer = setTimeout(function () { if (!peer.joined) { drop(msg.from, peer); } }, 30000);
-      return window.SpecRelay.peerIdOf(msg.key).then(function (id) { peer.id = id; return iceServers(); }).then(function (ice) {
+      return window.SpecRelay.peerIdOf(msg.key, msg.from).then(function (id) { peer.id = id; return iceServers(); }).then(function (ice) {
         var pc = peer.pc = new RTCPeerConnection({ iceServers: ice });
         pc.ondatachannel = function (e) { onChannel(peer, e.channel); };
         pc.addEventListener('connectionstatechange', function () {
@@ -366,7 +362,7 @@
       });
   }
   function begin(room, secret, broker) {
-    share = { room: room.room, token: room.hostToken, expiresAt: room.expiresAt, secret: secret, broker: broker, peers: {}, live: false,
+    share = { room: room.room, token: room.hostToken, expiresAt: room.expiresAt, secret: secret, broker: broker, peers: {}, claims: {}, live: false,
       url: broker + '/s/' + room.room + '#' + secret };
     var s = share;
     var left = Date.parse(room.expiresAt) - Date.now();

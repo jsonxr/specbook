@@ -257,7 +257,21 @@
     return out;
   }
 
+  // After a save, the ids the server skipped (another's note, or one no longer a draft): a note this page changed moves
+  // to a new id (from makeId) so the text typed is not lost; a delete it skipped is simply not ours to make. `unsynced`
+  // are the ids to forget as saved, so the server's copy of each comes back on the next reload.
+  function rekeySkipped(notes, changes, skipped, makeId) {
+    if (!skipped || !skipped.length) { return { notes: notes, unsynced: [] }; }
+    var out = {};
+    Object.keys(notes).forEach(function (id) {
+      var moved = skipped.indexOf(id) >= 0 && changes[id] != null;
+      out[moved ? makeId() : id] = notes[id];
+    });
+    return { notes: out, unsynced: skipped.slice() };
+  }
+
   return {
+    rekeySkipped: rekeySkipped,
     isProven: isProven,
     sectionStage: sectionStage,
     chapterStage: chapterStage,

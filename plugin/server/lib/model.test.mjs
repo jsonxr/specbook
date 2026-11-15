@@ -181,3 +181,12 @@ test('reviews: a note whose item and causes are gone shows on its section, then 
   assert.deepEqual(r.byChapter, { a: 2, b: 2 });
   assert.equal(r.count, 4);
 });
+
+test('a note the server would not save moves to a new id, so what was typed is kept', () => {
+  const notes = { mine: { text: 'kept' }, theirs: { text: 'typed over' }, other: { text: 'x' } };
+  const changes = { theirs: { text: 'typed over' }, gone: null };
+  const out = M.rekeySkipped(notes, changes, ['theirs', 'gone'], () => 'fresh');
+  assert.deepEqual(out.notes, { mine: { text: 'kept' }, fresh: { text: 'typed over' }, other: { text: 'x' } });
+  assert.deepEqual(out.unsynced, ['theirs', 'gone']);
+  assert.deepEqual(M.rekeySkipped(notes, changes, [], () => 'fresh'), { notes, unsynced: [] });
+});

@@ -887,7 +887,10 @@ test('per-note saves never drop another\'s change, and say who changed a note la
   assert.equal(typeof notes.hers.lastBy, 'string');
   assert.ok(c.body.rev > a.body.rev);
   assert.equal((await api('PUT', '/api/notes', { changes: [] })).status, 400);
-  assert.equal((await asGuest('PUT', '/api/notes', { changes: { own: null } })).status, 200);
+  const d = await asGuest('PUT', '/api/notes', { changes: { own: null } });
+  assert.equal(d.status, 200);
+  assert.deepEqual(d.body.skipped, ['own']);
+  assert.deepEqual(c.body.skipped, []);
   assert.ok(readReview(data).notes.own);
 });
 

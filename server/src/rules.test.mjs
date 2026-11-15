@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isLocalOrigin, ROOMS_PER_HOUR, TURN_PER_IP, TURN_PER_ROOM, mayMintTurn, countRoom, fromGuest, fromHost, roomHours, turnServers, validId, roomProtocol } from './rules.mjs';
+import { isLocalOrigin, ROOMS_PER_HOUR, TURN_PER_IP, TURN_PER_ROOM, mayMintTurn, countRoom, fromGuest, fromHost, roomHours, turnServers, validId, roomProtocol, mayWait, WAIT_MS } from './rules.mjs';
 
 test('room length is clamped to 1-24 hours, 8 by default', () => {
   assert.equal(roomHours(undefined), 8);
@@ -65,4 +65,11 @@ test('a guest offer carries its protocol to the host', () => {
   const out = fromGuest({ type: 'offer', sdp: 's', sig: 'g', key: 'k', name: 'n', protocol: 2 }, 'gid-000000001');
   assert.equal(out.protocol, 2);
   assert.equal(fromGuest({ type: 'offer', sdp: 's', sig: 'g' }, 'gid-000000001').protocol, 1);
+});
+
+test('a guest may wait for a host only in a room that has had one, three at most from one address', () => {
+  assert.equal(mayWait({ hosted: false, waitingFromIp: 0 }), false);
+  assert.equal(mayWait({ hosted: true, waitingFromIp: 2 }), true);
+  assert.equal(mayWait({ hosted: true, waitingFromIp: 3 }), false);
+  assert.ok(WAIT_MS >= 3600_000 && WAIT_MS <= 24 * 3600_000);
 });
