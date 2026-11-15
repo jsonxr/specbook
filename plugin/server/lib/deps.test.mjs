@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { depsDir, ensureDeps, loadRtc } from './deps.mjs';
@@ -25,13 +25,25 @@ test('depsDir is under SPECBOOK_DEPS', () =>
 
 test('ensureDeps does not run npm when the library is already there', () =>
   withDeps(async root => {
-    mkdirSync(join(root, '1.4.0', 'node_modules', 'node-datachannel'), { recursive: true });
+    const lib = join(root, '1.4.0', 'node_modules', 'node-datachannel');
+    mkdirSync(lib, { recursive: true });
+    writeFileSync(join(lib, 'package.json'), JSON.stringify({ name: 'node-datachannel', exports: { './polyfill': './polyfill.js' } }));
+    writeFileSync(join(lib, 'polyfill.js'), '');
     let calls = 0;
     const logs = [];
     const r = await ensureDeps({ version: '1.4.0', log: m => logs.push(m), run: async () => { calls++; return { ok: true }; } });
     assert.deepEqual(r, { ok: true });
     assert.equal(calls, 0);
     assert.deepEqual(logs, []);
+  }));
+
+test('ensureDeps installs again when the library folder is only partly there', () =>
+  withDeps(async root => {
+    mkdirSync(join(root, '1.4.0', 'node_modules', 'node-datachannel'), { recursive: true });
+    let calls = 0;
+    const r = await ensureDeps({ version: '1.4.0', log: () => {}, run: async () => { calls++; return { ok: true }; } });
+    assert.deepEqual(r, { ok: true });
+    assert.equal(calls, 1);
   }));
 
 test('ensureDeps copies package.json, logs once and runs npm in the folder', () =>

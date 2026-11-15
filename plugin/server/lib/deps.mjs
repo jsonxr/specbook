@@ -29,6 +29,17 @@ function npmInstall(dir) {
   });
 }
 
+// Installed means the package.json is there and the polyfill export resolves (an aborted install leaves neither).
+function installed(dir) {
+  if (!existsSync(join(dir, 'node_modules', 'node-datachannel', 'package.json'))) return false;
+  try {
+    createRequire(join(dir, 'package.json')).resolve('node-datachannel/polyfill');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Installs node-datachannel into the per-version folder once. `run(dir)` resolves to
 // { ok: true } or { ok: false, error }; tests inject it.
 export async function ensureDeps({ version, log = () => {}, run = npmInstall } = {}) {
@@ -37,7 +48,7 @@ export async function ensureDeps({ version, log = () => {}, run = npmInstall } =
   try {
     mkdirSync(dir, { recursive: true });
     copyFileSync(join(PLUGIN_ROOT, 'package.json'), join(dir, 'package.json'));
-    if (existsSync(join(dir, 'node_modules', 'node-datachannel'))) return { ok: true };
+    if (installed(dir)) return { ok: true };
     log('Installing the share library (once)…');
     const r = await run(dir);
     return r?.ok ? { ok: true } : { ok: false, error: r?.error ?? 'Install failed' };
