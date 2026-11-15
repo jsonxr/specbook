@@ -539,3 +539,47 @@ test('a removal something still depends on is held back and named in the summary
   assert.equal(problemOf(), null);
   assert.match(readFileSync(join(data, 'builds', p.id, 'summary.md'), 'utf8'), /## Held back\n- SCR-HOME\.old: .*SCR-HOME\.same is sameAs it/);
 });
+
+test('a built section lands the placed component states and sameAs targets its gate covers, and nothing reopens', () => {
+  const files = {
+    'mockups/home.html': '<main><sb-component id="SCR-CARD" state="on"></sb-component></main>',
+    'mockups/member.html': '<p>member</p>',
+    'mockups/card-on.html': '<b>on</b>',
+    'mockups/card-on.today.html': '<b>was on</b>',
+  };
+  mkdirSync(join(data, 'mockups'), { recursive: true });
+  for (const [rel, text] of Object.entries(files)) {
+    writeFileSync(join(data, rel), text);
+  }
+  writeJsonAtomic(join(data, 'book.json'), {
+    screens: [
+      {
+        id: 'SCR-HOME', name: 'HomeScreen', kind: 'screen',
+        states: [
+          { id: 'admin', name: 'Admin', mockup: 'mockups/home.html' },
+          { id: 'member', name: 'Member', mockup: 'mockups/member.html', change: 'add' },
+          { id: 'visitor', name: 'Visitor', sameAs: 'member' },
+        ],
+      },
+      {
+        id: 'SCR-CARD', name: 'Card', kind: 'component',
+        states: [{ id: 'on', name: 'On', mockup: 'mockups/card-on.html', today: 'mockups/card-on.today.html', change: 'change' }],
+      },
+    ],
+    chapters: [{ id: 'c', sections: [{ id: 'r', stage: 'ready', shows: [{ state: 'SCR-HOME.admin' }, { state: 'SCR-HOME.visitor' }], requirements: [] }] }],
+    usedIds: [],
+  });
+  const p = startAccepted(data);
+  const out = finishBuild(data, p.id);
+  assert.deepEqual(out.built, ['c-r']);
+  const book = readBook();
+  const card = book.screens[1].states[0];
+  assert.deepEqual([card.change, card.today], [undefined, undefined]);
+  assert.equal(existsSync(join(data, 'mockups/card-on.today.html')), false);
+  assert.equal(book.screens[0].states.find(s => s.id === 'member').change, undefined);
+  const accepted = readReview(data).accepted;
+  assert.deepEqual(accepted['SCR-CARD.on'], { name: 'On', mockup: '<b>on</b>' });
+  assert.deepEqual(accepted['SCR-HOME.member'], { name: 'Member', mockup: '<p>member</p>' });
+  assert.deepEqual(readHistory(data).changelog[0].landed.map(l => [l.id, l.kind]).sort(), [['SCR-CARD.on', 'changed'], ['SCR-HOME.member', 'added']]);
+  assertNothingReopens(data, out.built);
+});

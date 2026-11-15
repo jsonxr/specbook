@@ -7,7 +7,7 @@ import { findRequirement, findSection, listSections } from './book-model.mjs';
 import { addNote, currentSnapshot, recordBuild, setAccepted, readReview, sectionsUnderReview } from './review.mjs';
 import { plain } from './migrate.mjs';
 
-const { isProven, screenIndex, shownIn, mockupPaths, componentsIn } = createRequire(import.meta.url)('../../app/model.js');
+const { isProven, screenIndex, gateKeys, mockupPaths, componentsIn } = createRequire(import.meta.url)('../../app/model.js');
 
 const REQUIREMENT_STATUSES = ['queued', 'in_progress', 'proven', 'failed'];
 
@@ -200,7 +200,8 @@ function unreference(book, key, { accepted, accept }) {
   }
 }
 
-// Applies the change of every state a built section shows: `add` drops its marker, `change` also drops `today`, and
+// Applies the change of every state a built section's Accept gate covers (the states it shows, the states they are
+// sameAs, the component states their pictures place): `add` drops its marker, `change` also drops `today`, and
 // `remove` deletes the state and records a decision. A removal something still depends on is held back, marker kept.
 // Returns the picture paths that went out of use and the held-back removals.
 function landStates(book, built, land, ctx, at) {
@@ -208,9 +209,18 @@ function landStates(book, built, land, ctx, at) {
   const gone = [];
   const held = [];
   const mint = createMinter(book).mint;
-  for (const [key, sections] of Object.entries(shownIn(book))) {
+  // Gathered before anything changes: a removal must not shrink what another built section's gate covers.
+  const keys = [];
+  for (const fullId of built) {
+    for (const key of gateKeys(book, ctx.snap.mockups, fullId)) {
+      if (Object.hasOwn(ix.states, key) && !keys.includes(key)) {
+        keys.push(key);
+      }
+    }
+  }
+  for (const key of keys) {
     const hit = ix.states[key];
-    if (!hit || !hit.state.change || !sections.some(s => built.includes(s))) {
+    if (!hit.state.change) {
       continue;
     }
     const { screen, state } = hit;
@@ -330,7 +340,7 @@ export function finishBuild(data, id, now = Date.now(), { summary } = {}) {
       drafting.push({ section: fullId, unproven });
     }
   }
-  // A built section lands the states it shows: pictures need no proof, only the section being built.
+  // A built section lands the states its gate covers: pictures need no proof, only the section being built.
   const { gone, held } = landStates(book, built, land, { snap: currentSnapshot(data), accepted: review.accepted, accept }, at);
   progress.state = 'done';
   progress.finishedAt = at;
