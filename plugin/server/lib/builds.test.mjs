@@ -389,3 +389,94 @@ test('a build with nothing proven adds a changelog entry with no landed items an
   assert.deepEqual(readHistory(data).changelog[0].landed, []);
   assert.equal(readReview(data).rev, 0);
 });
+
+function seedScreensBook(stage = 'ready') {
+  const files = {
+    'mockups/home-admin.html': '<p>admin</p>',
+    'mockups/home-new.html': '<p>new</p>',
+    'mockups/home-new.today.html': '<p>was</p>',
+    'mockups/home-old.html': '<p>old</p>',
+    'mockups/home-draft.html': '<p>draft</p>',
+  };
+  mkdirSync(join(data, 'mockups'), { recursive: true });
+  for (const [rel, text] of Object.entries(files)) {
+    writeFileSync(join(data, rel), text);
+  }
+  writeJsonAtomic(join(data, 'book.json'), {
+    screens: [
+      {
+        id: 'SCR-HOME',
+        name: 'HomeScreen',
+        kind: 'screen',
+        states: [
+          { id: 'admin', name: 'Admin', when: { role: 'admin' }, mockup: 'mockups/home-admin.html', change: 'add' },
+          { id: 'new', name: 'New', when: { role: 'member' }, mockup: 'mockups/home-new.html', today: 'mockups/home-new.today.html', change: 'change' },
+          { id: 'old', name: 'Old', when: { role: 'visitor' }, mockup: 'mockups/home-old.html', change: 'remove', reason: 'retired' },
+          { id: 'draft', name: 'Draft', when: { role: 'x' }, mockup: 'mockups/home-draft.html', change: 'add' },
+        ],
+      },
+    ],
+    chapters: [
+      {
+        id: 'c',
+        sections: [
+          { id: 'r', stage, shows: [{ state: 'SCR-HOME.admin' }, { state: 'SCR-HOME.new' }, { state: 'SCR-HOME.old' }], requirements: [] },
+          { id: 'd', stage: 'drafting', shows: [{ state: 'SCR-HOME.draft' }], requirements: [] },
+        ],
+      },
+    ],
+    usedIds: [],
+  });
+}
+const stateOf = id => readBook().screens[0].states.find(s => s.id === id);
+
+test('a built section lands the changes of the states it shows', () => {
+  seedScreensBook();
+  const p = startAccepted(data);
+  const out = finishBuild(data, p.id, Date.parse('2026-11-12T23:30:00Z'));
+  assert.deepEqual(out, { built: ['c-r'], drafting: [] });
+  const book = readBook();
+  assert.equal(stateOf('admin').change, undefined);
+  assert.equal(stateOf('new').change, undefined);
+  assert.equal(stateOf('new').today, undefined);
+  assert.equal(existsSync(join(data, 'mockups/home-new.today.html')), false);
+  assert.equal(existsSync(join(data, 'mockups/home-new.html')), true);
+  assert.equal(stateOf('old'), undefined);
+  assert.equal(existsSync(join(data, 'mockups/home-old.html')), false);
+  assert.deepEqual(book.decisions.map(({ id, ...d }) => d), [
+    { date: '2026-11-12', about: ['SCR-HOME.old'], by: 'build', title: 'Old', body: 'retired', kind: 'removed' },
+  ]);
+  assert.match(book.decisions[0].id, /^DEC-/);
+  // A state shown only by a drafting section keeps its markers.
+  assert.equal(stateOf('draft').change, 'add');
+  // The accepted copies lose the markers (mockup text stays) and the removal's goes.
+  const accepted = readReview(data).accepted;
+  assert.equal(accepted['SCR-HOME.admin'].change, undefined);
+  assert.equal(accepted['SCR-HOME.admin'].mockup, '<p>admin</p>');
+  assert.equal(accepted['SCR-HOME.new'].today, undefined);
+  assert.equal(accepted['SCR-HOME.new'].change, undefined);
+  assert.equal(accepted['SCR-HOME.new'].mockup, '<p>new</p>');
+  assert.equal(Object.hasOwn(accepted, 'SCR-HOME.old'), false);
+  assert.deepEqual(readHistory(data).changelog[0].landed, [
+    { id: 'SCR-HOME.admin', kind: 'added', text: 'Admin' },
+    { id: 'SCR-HOME.new', kind: 'changed', text: 'New' },
+    { id: 'SCR-HOME.old', kind: 'removed', text: 'Old' },
+  ]);
+});
+
+test('a section that goes back to drafting keeps the markers of the states it shows', () => {
+  seedScreensBook();
+  const book = readBook();
+  book.chapters[0].sections[0].requirements = [{ id: 'R1', text: 'x', change: 'add' }];
+  book.usedIds = ['R1'];
+  writeJsonAtomic(join(data, 'book.json'), book);
+  const p = startAccepted(data);
+  assert.equal(finishBuild(data, p.id).drafting.length, 1);
+  assert.equal(stateOf('admin').change, 'add');
+  assert.equal(stateOf('new').change, 'change');
+  assert.equal(stateOf('new').today, 'mockups/home-new.today.html');
+  assert.equal(stateOf('old').change, 'remove');
+  assert.equal(existsSync(join(data, 'mockups/home-new.today.html')), true);
+  assert.equal(existsSync(join(data, 'mockups/home-old.html')), true);
+  assert.equal(readBook().decisions, undefined);
+});

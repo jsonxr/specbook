@@ -1,13 +1,13 @@
-import { existsSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { readJson, writeJsonAtomic } from './json-file.mjs';
 import { createMinter } from './ids.mjs';
 import { findRequirement, findSection, listSections } from './book-model.mjs';
-import { addNote, recordBuild, setAccepted, readReview, sectionsUnderReview } from './review.mjs';
+import { addNote, currentItems, recordBuild, setAccepted, readReview, sectionsUnderReview } from './review.mjs';
 import { plain } from './migrate.mjs';
 
-const { isProven } = createRequire(import.meta.url)('../../app/model.js');
+const { isProven, screenIndex, shownIn, mockupPaths } = createRequire(import.meta.url)('../../app/model.js');
 
 const REQUIREMENT_STATUSES = ['queued', 'in_progress', 'proven', 'failed'];
 
@@ -158,6 +158,40 @@ export function stopBuild(data, id, reason, now = Date.now()) {
   return progress;
 }
 
+// Applies the change of every state a built section shows: `add` drops its marker, `change` also drops `today`, and
+// `remove` deletes the state and records a decision. Returns the picture paths that went out of use.
+function landStates(book, built, land, items, at) {
+  const ix = screenIndex(book);
+  const gone = [];
+  const mint = createMinter(book).mint;
+  for (const [key, sections] of Object.entries(shownIn(book))) {
+    const hit = ix.states[key];
+    if (!hit || !hit.state.change || !sections.some(s => built.includes(s))) {
+      continue;
+    }
+    const { screen, state } = hit;
+    const kind = { add: 'added', change: 'changed', remove: 'removed' }[state.change];
+    if (!kind) {
+      continue;
+    }
+    if (kind === 'removed') {
+      book.decisions = book.decisions ?? [];
+      book.decisions.push({ id: mint('DEC'), date: at.slice(0, 10), about: [key], by: 'build', title: state.name ?? '', body: state.reason ?? '', kind: 'removed' });
+      screen.states = screen.states.filter(st => st !== state);
+      gone.push(state.mockup, state.today);
+      land(state, kind, { key, label: state.name ?? '' });
+    } else {
+      land(state, kind, { key, label: state.name ?? '', now: items[key] });
+      if (kind === 'changed') {
+        gone.push(state.today);
+      }
+      delete state.change;
+      delete state.today;
+    }
+  }
+  return gone.filter(p => typeof p === 'string' && p !== '');
+}
+
 // Settles a running build from evidence: proven changes are applied, and a section whose changes are all proven
 // is built (its removals become decisions). A section with removals also needs every requirement that stays proven.
 // Any other section goes back to drafting with its unproven changes and its removals intact.
@@ -172,24 +206,25 @@ export function finishBuild(data, id, now = Date.now(), { summary } = {}) {
   const landed = [];
   const accept = {};
   const builtItems = [];
+  const withoutMarkers = ({ change: _change, today: _today, ...rest }) => rest;
   // Marks an item as landed: its accepted copy loses the change markers (or goes, for a removal).
-  const land = (req, kind) => {
-    const before = Object.hasOwn(review.accepted, req.id) ? review.accepted[req.id] : null;
+  // `now` is the item's value as it stands, for an item never accepted; `label` is what the changelog calls it.
+  const land = (req, kind, { key = req.id, now: current, label } = {}) => {
+    const before = Object.hasOwn(review.accepted, key) ? review.accepted[key] : null;
     if (kind === 'removed') {
-      landed.push({ id: req.id, kind, text: before?.text ?? req.text ?? '' });
-      accept[req.id] = null;
-      builtItems.push({ key: req.id, before, after: null });
+      landed.push({ id: key, kind, text: label ?? before?.text ?? req.text ?? '' });
+      accept[key] = null;
+      builtItems.push({ key, before, after: null });
       return;
     }
     // An accepted copy keeps its own text (a reword stays under review); an item never accepted takes today's value.
-    const withoutMarkers = ({ change: _change, today: _today, ...rest }) => rest;
-    const after = withoutMarkers(before ?? { text: req.text, reason: req.reason });
+    const after = withoutMarkers(before ?? current ?? { text: req.text, reason: req.reason });
     if (after.reason === undefined) {
       delete after.reason;
     }
-    landed.push({ id: req.id, kind, text: req.text ?? '' });
-    accept[req.id] = after;
-    builtItems.push({ key: req.id, before, after });
+    landed.push({ id: key, kind, text: label ?? req.text ?? '' });
+    accept[key] = after;
+    builtItems.push({ key, before, after });
   };
   for (const { section, fullId } of listSections(book)) {
     if (!progress.sections.includes(fullId)) {
@@ -245,6 +280,8 @@ export function finishBuild(data, id, now = Date.now(), { summary } = {}) {
       drafting.push({ section: fullId, unproven });
     }
   }
+  // A built section lands the states it shows: pictures need no proof, only the section being built.
+  const gone = landStates(book, built, land, currentItems(data), at);
   progress.state = 'done';
   progress.finishedAt = at;
   progress.heartbeat = at;
@@ -265,6 +302,15 @@ export function finishBuild(data, id, now = Date.now(), { summary } = {}) {
   );
   setAccepted(data, accept);
   writeJsonAtomic(bookFile(data), book);
+  // Pictures last: the book no longer names them, and a retry after a crash only finds them already gone.
+  const kept = new Set(mockupPaths(book));
+  const root = resolve(data);
+  for (const rel of gone.filter(p => !kept.has(p))) {
+    const file = resolve(root, rel);
+    if (file.startsWith(root + sep)) {
+      rmSync(file, { force: true });
+    }
+  }
   writeJsonAtomic(progressFile(data, id), progress);
   const lines = ['# Build summary', '', '## Built', ...(built.length > 0 ? built.map(s => `- ${s}`) : ['- none']), '', '## Back to drafting'];
   lines.push(...(drafting.length > 0 ? drafting.map(d => `- ${d.section}: unproven ${d.unproven.join(', ')}`) : ['- none']), '');
