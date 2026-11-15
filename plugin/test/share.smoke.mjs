@@ -767,6 +767,23 @@ try {
     }
   });
 
+  await check('a room whose host names a reader not published here says the share server needs deploying', async () => {
+    const res = await fetch(`${BROKER}/api/rooms`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ hours: 1, protocol: 3, reader: '9.9.9' }) });
+    const room = await res.json();
+    if (res.status !== 201 || !room.room) {
+      throw new Error(`open: ${res.status} ${JSON.stringify(room)}`);
+    }
+    const page = await fetch(`${BROKER}/s/${room.room}`);
+    const text = await page.text();
+    await fetch(`${BROKER}/api/rooms/${room.room}/end`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: room.hostToken }) });
+    if (page.status !== 503 || !text.includes('This book needs a newer share server. Ask its owner to deploy it.')) {
+      throw new Error(`/s/<room> answered ${page.status}: ${text.slice(0, 200)}`);
+    }
+    if (!page.headers.get('content-security-policy')?.includes("script-src 'self'")) {
+      throw new Error('the notice has no CSP');
+    }
+  });
+
   await check('New link ends the old link: This share has ended', async () => {
     const before = errors.length;
     await owner.waitForFunction(() => window.SpecHost.state() === 'live', null, { timeout: 15000 });

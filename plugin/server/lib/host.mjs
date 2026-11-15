@@ -535,7 +535,13 @@ export function createHost({ broker, port, version, ownerName, saved = null, rtc
     const r = await fetch(`${broker}/api/rooms`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     if (!r.ok) {
       const t = (await r.text().catch(() => '')).slice(0, 300);
-      throw Object.assign(new Error(`The share server refused to open a room (${r.status}): ${t}`), { status: r.status });
+      let code = null;
+      try {
+        code = JSON.parse(t)?.error ?? null;
+      } catch {
+        // not JSON
+      }
+      throw Object.assign(new Error(`The share server refused to open a room (${r.status}): ${t}`), { status: r.status, code });
     }
     const room = await r.json();
     if (!room || !ROOM_ID.test(room.room ?? '') || typeof room.hostToken !== 'string' || !room.hostToken) {
@@ -576,6 +582,9 @@ export function createHost({ broker, port, version, ownerName, saved = null, rtc
         return;
       }
       if (e.status === 409) {
+        if (e.code === 'taken') {
+          forgetPin();
+        }
         gone(s);
         return;
       }
@@ -619,6 +628,9 @@ export function createHost({ broker, port, version, ownerName, saved = null, rtc
       return await openRoom(keep);
     } catch (e) {
       if (e.status === 409) {
+        if (e.code === 'taken') {
+          forgetPin();
+        }
         return openRoom(null);
       }
       throw e;
@@ -737,6 +749,13 @@ export function createHost({ broker, port, version, ownerName, saved = null, rtc
         drop(p);
       }
     }
+    report();
+  }
+
+  // The kept room is held at the share server under another token: whoever holds it may have heard the pin from a
+  // reader, so the pin is not carried to the new room.
+  function forgetPin() {
+    pin = newId();
     report();
   }
 

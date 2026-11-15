@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isLocalOrigin, ROOMS_PER_HOUR, TURN_PER_IP, TURN_PER_ROOM, mayMintTurn, countRoom, fromGuest, fromHost, roomHours, turnServers, validId, roomProtocol, mayWait, WAIT_MS, newId, validReader, pageFor, PROTOCOL, CSP, assetHeaders, shareChoice, renewed } from './rules.mjs';
+import { isLocalOrigin, ROOMS_PER_HOUR, TURN_PER_IP, TURN_PER_ROOM, mayMintTurn, countRoom, fromGuest, fromHost, roomHours, turnServers, validId, roomProtocol, mayWait, WAIT_MS, newId, validReader, pageFor, PROTOCOL, CSP, assetHeaders, shareChoice, renewed, mayReopen, sameToken, HELD_KEPT_MS, heldUntil } from './rules.mjs';
 
 test('room length is clamped to 1-24 hours, 8 by default', () => {
   assert.equal(roomHours(undefined), 8);
@@ -135,7 +135,7 @@ test('a protocol 3 room with no reader published gets the notice, not the old gu
   assert.deepEqual(shareChoice({ kind: 'legacy' }, []), { file: '/guest.html', csp: false });
   assert.deepEqual(shareChoice({ kind: 'none' }, []), { unavailable: true });
   assert.deepEqual(shareChoice({ kind: 'missing', version: '1.5.0' }, []), { unavailable: true });
-  assert.deepEqual(shareChoice({ kind: 'missing', version: '1.5.0' }, ['1.4.0', '1.10.0', '1.9.0']), { file: '/r/1.10.0/share.html', csp: true });
+  assert.deepEqual(shareChoice({ kind: 'none' }, ['1.4.0', '1.10.0', '1.9.0']), { file: '/r/1.10.0/share.html', csp: true });
   assert.deepEqual(shareChoice({ kind: 'reader', version: '1.4.0' }, ['1.4.0']), { file: '/r/1.4.0/share.html', csp: true });
 });
 
@@ -145,4 +145,33 @@ test('renewing a room takes the host\'s current reader and protocol', () => {
   assert.equal(renewed(held, { reader: '../x' }, 200).reader, '1.4.0');
   assert.equal(renewed(held, {}, 200).protocol, 3);
   assert.equal(renewed(held, {}, 200).expiresAt, 200);
+});
+
+test('a room whose host names a reader this site does not hold says the share server needs deploying', () => {
+  // Serving another version's reader would only tell the guest to reload, again and again.
+  assert.deepEqual(shareChoice({ kind: 'missing', version: '9.9.9' }, ['1.4.0', '1.10.0']), { unavailable: true });
+});
+
+test('an expired room is opened again only by the token it was held under', () => {
+  const now = 1_000_000;
+  const held = { hash: 'a'.repeat(43), until: now + 1 };
+  assert.equal(mayReopen({ held, tokenHash: 'a'.repeat(43), now }), true);
+  assert.equal(mayReopen({ held, tokenHash: 'b'.repeat(43), now }), false);
+  assert.equal(mayReopen({ held, tokenHash: 'a'.repeat(42), now }), false);
+  assert.equal(mayReopen({ held, tokenHash: undefined, now }), false);
+  // No record: an id never held here, or one let go long ago.
+  assert.equal(mayReopen({ held: undefined, tokenHash: 'b'.repeat(43), now }), true);
+  assert.equal(mayReopen({ held: { hash: 'a'.repeat(43), until: now }, tokenHash: 'b'.repeat(43), now }), true);
+});
+
+test('a room is held for its host 30 days past its expiry', () => {
+  assert.equal(HELD_KEPT_MS, 30 * 86400_000);
+  assert.equal(heldUntil(500), 500 + HELD_KEPT_MS);
+});
+
+test('tokens are compared whole', () => {
+  assert.equal(sameToken('abc', 'abc'), true);
+  assert.equal(sameToken('abc', 'abd'), false);
+  assert.equal(sameToken('abc', 'abcd'), false);
+  assert.equal(sameToken(undefined, 'abc'), false);
 });

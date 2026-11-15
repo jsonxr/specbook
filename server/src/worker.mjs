@@ -4,7 +4,8 @@
 //
 //   GET  /                         the plugin's front page (public/index.html)
 //   GET  /s/<room>                 the reader: public/r/<version>/share.html for a protocol 3 room (the version its host
-//                                  named), with the CSP; public/guest.html, as it was, for protocol 1 and 2 rooms
+//                                  named), with the CSP, or a 503 notice when that version is not published here;
+//                                  public/guest.html, as it was, for protocol 1 and 2 rooms
 //   GET  /r/<version>/...          the published readers, and /r/versions.json
 //   GET  /guest.js                 the protocol 1 and 2 guest page's script
 //   POST /api/rooms                { hours, protocol, reader } -> { room, hostToken, expiresAt }   (the host; CORS for localhost)
@@ -16,7 +17,7 @@
 //   GET  /api/rooms/<room>/guest   WebSocket; while the host is away it waits, and hears host-online when it comes
 //   GET  /api/rooms/<room>/ice     { iceServers }: STUN, plus TURN when the TURN secrets are set
 import { DurableObject } from 'cloudflare:workers';
-import { assetHeaders, CSP, GUEST_IDLE_MS, isLocalOrigin, MAX_GUESTS, MAX_MESSAGE, STUN, countRoom, fromGuest, fromHost, mayMintTurn, mayWait, NEEDS_NEWER, newId, pageFor, renewed as renewedRoom, shareChoice, roomHours, roomProtocol, turnServers, validId, validReader, WAIT_MS } from './rules.mjs';
+import { assetHeaders, CSP, heldUntil, mayReopen, sameToken, GUEST_IDLE_MS, isLocalOrigin, MAX_GUESTS, MAX_MESSAGE, STUN, countRoom, fromGuest, fromHost, mayMintTurn, mayWait, NEEDS_NEWER, newId, pageFor, renewed as renewedRoom, shareChoice, roomHours, roomProtocol, turnServers, validId, validReader, WAIT_MS } from './rules.mjs';
 
 
 export default {
@@ -126,15 +127,10 @@ const HOST_TOKEN = /^[A-Za-z0-9_-]{32}$/;
 // How long an ended room's address keeps saying it ended.
 const ENDED_KEPT_MS = 7 * 86400_000;
 
-function sameToken(a, b) {
-  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) {
-    return false;
-  }
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
+// The SHA-256 of a host token, base64url: what `held:<id>` keeps, so the token itself is not stored past its room.
+async function tokenHash(token) {
+  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token)));
+  return btoa(String.fromCharCode(...d)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 export class Broker extends DurableObject {
@@ -279,8 +275,14 @@ export class Broker extends DurableObject {
         }
         const renewed = renewedRoom(held, body, until);
         await this.ctx.storage.put(`room:${body.room}`, renewed);
+        await this.hold(body.room, held.hostToken, renewed.expiresAt);
         await this.schedule();
         return json(200, { room: body.room, hostToken: held.hostToken, expiresAt: new Date(renewed.expiresAt).toISOString(), keeps: true });
+      }
+      // Expired: only the token it was held under opens it again. Under protocol 3 whoever holds the room is the book,
+      // so a former guest who knows its id must not get it.
+      if (!mayReopen({ held: await this.ctx.storage.get(`held:${body.room}`), tokenHash: await tokenHash(body.hostToken), now })) {
+        return json(409, { error: 'taken' });
       }
     }
     const rate = countRoom(await this.ctx.storage.get(`ip:${ip}`), now);
@@ -294,8 +296,14 @@ export class Broker extends DurableObject {
       room.reader = body.reader;
     }
     await this.ctx.storage.put(`room:${id}`, room);
+    await this.hold(id, room.hostToken, room.expiresAt);
     await this.schedule();
     return json(201, { room: id, hostToken: room.hostToken, expiresAt: new Date(room.expiresAt).toISOString(), keeps: true });
+  }
+
+  // Keeps a room's id for its host until HELD_KEPT_MS past its expiry: only its token opens it again.
+  async hold(id, hostToken, expiresAt) {
+    await this.ctx.storage.put(`held:${id}`, { hash: await tokenHash(hostToken), until: heldUntil(expiresAt) });
   }
 
   // STUN always; a TURN credential too while the room, the caller's address and the day are all under their caps.
@@ -481,6 +489,11 @@ export class Broker extends DurableObject {
     }
     for (const [key, until] of await this.ctx.storage.list({ prefix: 'ended:' })) {
       if (until <= now) {
+        await this.ctx.storage.delete(key);
+      }
+    }
+    for (const [key, held] of await this.ctx.storage.list({ prefix: 'held:' })) {
+      if (!(held?.until > now)) {
         await this.ctx.storage.delete(key);
       }
     }

@@ -42,8 +42,9 @@ export function validReader(v) {
   return typeof v === 'string' && VERSION.test(v);
 }
 
-// The page a room's guests get: the old guest page (protocol below 3), the reader of the room's version, or the newest
-// reader when the room's version is not published (or the room is not there), which tells the guest itself.
+// The page a room's guests get: the old guest page (protocol below 3), the reader of the room's version, a notice when
+// the room's version is not published here (`missing`), or the newest reader when the room is not there, which tells
+// the guest itself.
 export function pageFor(room, versions) {
   if (!room) {
     return { kind: 'none' };
@@ -150,10 +151,15 @@ export function assetHeaders(path, status) {
 
 export const NEEDS_NEWER = 'This book needs a newer share server. Ask its owner to deploy it.';
 
-// What /s/<room> serves: { file } or, when a protocol 3 room has no reader to show, { unavailable: true }.
+// What /s/<room> serves: { file } or, when a protocol 3 room has no reader to show, { unavailable: true } (NEEDS_NEWER).
+// A room whose host names a version this site does not hold gets the notice: another version's reader would see the
+// mismatch and ask the guest to reload, forever.
 export function shareChoice(page, versions) {
   if (page.kind === 'legacy') {
     return { file: '/guest.html', csp: false };
+  }
+  if (page.kind === 'missing') {
+    return { unavailable: true };
   }
   const version = page.kind === 'reader' ? page.version : newestVersion(versions);
   return version ? { file: `/r/${version}/share.html`, csp: true } : { unavailable: true };
@@ -178,4 +184,33 @@ export function renewed(held, body, until) {
     next.protocol = roomProtocol(body.protocol);
   }
   return next;
+}
+
+// Constant-time comparison of two tokens (or two token hashes).
+export function sameToken(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) {
+    return false;
+  }
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
+// How long past its expiry a room's id stays held for its host (`held:<id>`: the hash of its host token).
+export const HELD_KEPT_MS = 30 * 86400_000;
+
+export function heldUntil(expiresAt) {
+  return expiresAt + HELD_KEPT_MS;
+}
+
+// Whether a room that is not live may be opened again under its id by the token whose hash is `tokenHash`: only by
+// the token it was held under, so a former guest who knows the id cannot open it as the book once it expires. An id
+// with no record (never held here, or let go over HELD_KEPT_MS ago) may be opened.
+export function mayReopen({ held, tokenHash, now = Date.now() }) {
+  if (!held || typeof held.hash !== 'string' || !(held.until > now)) {
+    return true;
+  }
+  return sameToken(tokenHash, held.hash);
 }

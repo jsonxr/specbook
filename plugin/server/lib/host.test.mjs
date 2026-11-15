@@ -5,8 +5,11 @@ import { framesOf } from './channel.mjs';
 import { createHost } from './host.mjs';
 
 // A fake share server: opens and renews rooms, answers a room's state and ICE, and records every POST body.
+// Rooms in `taken` are held there under another token (409 taken); rooms in `missing` are not there (404).
 function fakeBroker() {
   const posts = [];
+  const taken = new Set();
+  const missing = new Set();
   let n = 0;
   const server = createServer((req, res) => {
     let text = '';
@@ -20,6 +23,10 @@ function fakeBroker() {
       if (req.method === 'POST' && req.url === '/api/rooms') {
         const body = JSON.parse(text);
         posts.push(body);
+        if (body.room && taken.has(body.room)) {
+          send(409, { error: 'taken' });
+          return;
+        }
         if (body.room) {
           send(200, { room: body.room, hostToken: body.hostToken, expiresAt, keeps: true });
         } else {
@@ -38,13 +45,17 @@ function fakeBroker() {
         return;
       }
       if (req.method === 'GET' && /^\/api\/rooms\/[^/?]+$/.test(req.url)) {
+        if (missing.has(req.url.slice('/api/rooms/'.length))) {
+          send(404, { error: 'no-room' });
+          return;
+        }
         send(200, { host: false, protocol: 3, keeps: true, reader: '1.4.0' });
         return;
       }
       send(404, { error: 'not-found' });
     });
   });
-  return { server, posts };
+  return { server, posts, taken, missing };
 }
 
 // The book server on this machine, as far as the host can tell: it records every call.
@@ -193,6 +204,42 @@ test('start() with a saved room renews that room and keeps its link and pin', as
   assert.equal(host.links().url, `${brokerUrl}/s/${saved.room}`);
   assert.equal(host.links().pinUrl, `${brokerUrl}/s/${saved.room}#pin=${saved.pin}`);
   assert.ok(FakeSocket.all.at(-1).url.endsWith(`/api/rooms/${saved.room}/host?token=${saved.hostToken}`));
+});
+
+test('start() with a saved room taken under another token opens a new room with a new pin', async t => {
+  const saved = { room: 'SavedRoom0000000000003', hostToken: 'H'.repeat(32), pin: 'p'.repeat(22), expiresAt: null };
+  const views = [];
+  const { host, broker, brokerUrl } = await setup(t, { saved, onState: v => views.push(v) });
+  broker.taken.add(saved.room);
+  await host.start();
+  assert.equal(broker.posts[0].room, saved.room);
+  assert.equal(broker.posts[1].room, undefined);
+  const { url, pinUrl } = host.links();
+  assert.equal(url, `${brokerUrl}/s/Room000000000000000001`);
+  const pin = /#pin=(.*)$/.exec(pinUrl)[1];
+  assert.notEqual(pin, saved.pin);
+  assert.match(pin, /^[A-Za-z0-9]{22}$/);
+  assert.equal(views.at(-1).pin, pin);
+});
+
+test('a room taken while it is being reopened is let go, and the next start has a new pin', async t => {
+  const saved = { room: 'SavedRoom0000000000004', hostToken: 'H'.repeat(32), pin: 'p'.repeat(22), expiresAt: null };
+  const views = [];
+  const { host, broker } = await setup(t, { saved, onState: v => views.push(v) });
+  await host.start();
+  assert.equal(host.links().pinUrl.endsWith(`#pin=${saved.pin}`), true);
+  // The room expired there and someone else opened it under its id.
+  broker.missing.add(saved.room);
+  broker.taken.add(saved.room);
+  const ws = FakeSocket.all.at(-1);
+  ws.open();
+  ws.onclose({ code: 1006 });
+  await until(() => host.state() === 'off', 'the host to let the room go');
+  assert.notEqual(views.at(-1).pin, saved.pin);
+  await host.start();
+  const pin = /#pin=(.*)$/.exec(host.links().pinUrl)[1];
+  assert.notEqual(pin, saved.pin);
+  assert.notEqual(host.links().url.split('/s/')[1], saved.room);
 });
 
 test('newPin() changes the pin, keeps the room, and reports the new pin', async t => {
