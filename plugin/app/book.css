@@ -202,9 +202,22 @@ body.locked-notes .sticky, body.locked-notes .pin { cursor: default; }
 /* "Where am I" and the contents sheet: a narrow screen has no sidebar, so the bar names the section in view, and it
    (or the strip's Contents button) opens the contents as a sheet from the bottom. Wide screens never show either. */
 .bar-where, .bar .toc-tool, .toc-backdrop { display: none; }
-/* A guest's status chip (the guest page's) speaks only when something is wrong: once the book is drawn here, the
-   connection is live, so a plain "Live · name" chip hides. (The guest page hides it too; this covers an older one.) */
+/* A shared book's status chip (share.js) speaks only when something is wrong: once the book is drawn here, the
+   connection is live, so a plain "Live · name" chip hides. */
+.share-chip { position: fixed; left: 12px; bottom: 12px; z-index: 99; max-width: min(420px, calc(100vw - 24px)); padding: 6px 12px;
+  border-radius: 999px; background: #1f6f43; color: #fff; font: 600 12px/1.3 system-ui, sans-serif; box-shadow: 0 2px 8px rgba(0,0,0,.18); }
+.share-chip.bad { background: #8a2b1d; }
+.share-chip[hidden] { display: none; }
 body .share-chip:not(.bad) { display: none; }
+/* A shared book asks a guest's name before it connects (share.js). */
+.share-join { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; background: rgba(20, 20, 24, .45); }
+.share-join form { width: min(360px, calc(100vw - 32px)); padding: 22px; border-radius: 14px; background: #fff; box-shadow: 0 12px 40px rgba(0,0,0,.25);
+  display: grid; gap: 10px; font: 400 14px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif; color: #222; }
+.share-join h2 { margin: 0; font-size: 18px; }
+.share-join p { margin: 0; color: #555; }
+.share-join p.share-join-bad { color: #8a2b1d; font-weight: 600; }
+.share-join input { font: inherit; font-size: 16px; padding: 9px 11px; border: 1px solid #c9c9cf; border-radius: 8px; }
+.share-join button { font: 600 15px/1 system-ui, sans-serif; padding: 11px; border: 0; border-radius: 8px; background: #1f6f43; color: #fff; }
 @media (max-width: 860px) {
   .bar-title { display: none; }
   .bar > * { flex-shrink: 0; }
@@ -463,7 +476,7 @@ body.coverage .reqs li.unproven:has(.ev-chip.failed) > :not(.pin) { opacity: 1; 
 .reqs .ev-panel[hidden] { display: none; }
 .reqs .ev-error { display: block; }
 
-/* A shared book (app/guest.js): a guest reads and keeps their own notes; Claude's controls, Accept, stages and edits are
+/* A shared book (app/share.js): a guest reads and keeps their own notes; Claude's controls, Accept, stages and edits are
    the owner's alone, so they are not drawn. The server refuses them for guests anyway. */
 body.guest .bar-group.claude, body.guest #np-send, body.guest .rv-acts, body.guest .stage-btn, body.guest .edit-ctl,
 body.guest .add-req, body.guest .req-form, body.guest .build-banner button, body.guest #review-panel { display: none !important; }
@@ -565,7 +578,7 @@ body.guest #claude-menu { display: none; }
   .share-solo { display: none; }
   .claude-btn span:not(.claude-busy) { display: none; }
   main { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
-  /* A guest's status chip (the guest page's) sits above the toolbar, not under it. */
+  /* A shared book's status chip sits above the toolbar, not under it. */
   body .share-chip { bottom: calc(63px + env(safe-area-inset-bottom)); }
   /* A requirement's screenshots go under its text, so the text and its test pills keep the width. */
   .reqs li.has-shot { grid-template-columns: 64px minmax(0, 1fr); }

@@ -15,10 +15,42 @@
     if (t) { t.scrollIntoView({ behavior: 'instant', block: 'start' }); }
   });
 
+  // On the website (a shared book, share.js set window.SpecShare), the book's HTML comes from someone else's book
+  // server, so before it is drawn it loses whatever could run: scripts, frames, plugins, <base>, <meta>, HTML imports,
+  // every on* attribute, and javascript: URLs. The page's CSP is the second wall. On localhost the book is the owner's
+  // own, drawn as it is. Every HTML string the reader draws goes through setHtml.
+  var shared = !!window.SpecShare;
+  var DROP = 'script, iframe, frame, frameset, object, embed, base, meta, link[rel~="import" i]';
+  var URL_ATTRS = { href: 1, src: 1, 'xlink:href': 1, action: 1, formaction: 1 };
+  var ANIMATED = { to: 1, from: 1, values: 1 }; // an SVG <animate>/<set> can write a javascript: href
+  function jsUrl(v) { return /^javascript:/i.test(String(v).replace(/[\u0000- ]/g, '')); }
+  function scrub(root) {
+    Array.prototype.forEach.call(root.querySelectorAll(DROP), function (e) { e.remove(); });
+    Array.prototype.forEach.call(root.querySelectorAll('*'), function (e) {
+      Array.prototype.slice.call(e.attributes).forEach(function (a) {
+        var n = a.name.toLowerCase();
+        if (n.indexOf('on') === 0 || ((URL_ATTRS[n] || ANIMATED[n]) && jsUrl(a.value))) { e.removeAttribute(a.name); }
+      });
+      if (e.content && e.tagName === 'TEMPLATE') { scrub(e.content); }
+    });
+  }
+  // The HTML, parsed where nothing in it loads or runs (a <template>), and cleaned: a fragment to insert.
+  function clean(html) {
+    var t = document.createElement('template');
+    t.innerHTML = html == null ? '' : String(html);
+    scrub(t.content);
+    return t.content;
+  }
+  // Inserts the cleaned nodes themselves, not their HTML again, so nothing can change meaning in a second parse.
+  function setHtml(node, html) {
+    if (!shared) { node.innerHTML = html; return; }
+    node.replaceChildren(clean(html));
+  }
+
   function el(tag, attrs, html) {
     var e = document.createElement(tag);
     Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
-    if (html !== undefined) { e.innerHTML = html; }
+    if (html !== undefined) { setHtml(e, html); }
     return e;
   }
   // Safe in text and in quoted attributes alike.
@@ -29,7 +61,10 @@
   }
   // A key in a CSS attribute selector.
   function attrSel(k) { return String(k).replace(/["\\]/g, '\\$&'); }
-  function plain(html) { var d = document.createElement('div'); d.innerHTML = html || ''; return d.textContent.trim(); }
+  function plain(html) {
+    if (shared) { return clean(html || '').textContent.trim(); }
+    var d = document.createElement('div'); setHtml(d, html || ''); return d.textContent.trim();
+  }
   // Keys keep the old "spec-book-" prefix on purpose: renaming them would lose the notes people have drafted.
   function store(k, v) {
     try {
@@ -328,7 +363,7 @@
     } else {
       html += '<div class="rv-ver rv-isnew"><p class="rv-head">Original</p><p class="rv-field"><em>This ' + (KIND_WORD[kind] || 'item') + ' is new.</em></p></div>';
     }
-    box.innerHTML = html;
+    setHtml(box, html);
     var details = box.querySelector('.rv-earlier');
     if (details) {
       details.addEventListener('toggle', function () {
@@ -397,9 +432,9 @@
     body += '<div class="rv-ver"><p class="rv-head">After</p>' + (e.after ? versionHtml(kind, e.after, prev) : '<p class="rv-field"><span class="tag removed">Removed</span></p>') + '</div>';
     if (e.notes && e.notes.length) { body += '<div class="rv-ver"><p class="rv-head">Notes</p>' + notesHtml(e.notes, key, true) + '</div>'; }
     var li = el('li', { class: 'hi-entry' + (e.kind === 'built' ? ' built' : '') });
-    li.innerHTML = '<p class="hi-line"><span class="hi-date">' + esc(shortDate(e.acceptedAt)) + '</span> ' + line + '</p>' +
+    setHtml(li, '<p class="hi-line"><span class="hi-date">' + esc(shortDate(e.acceptedAt)) + '</span> ' + line + '</p>' +
       ((e.decisions || []).length ? '<ul class="hi-decs">' + e.decisions.map(decisionRef).join('') + '</ul>' : '') +
-      '<details class="hi-details"' + (openDetails[detailKey] ? ' open' : '') + '><summary>' + (openDetails[detailKey] ? '▾' : '▸') + ' details</summary>' + body + '</details>';
+      '<details class="hi-details"' + (openDetails[detailKey] ? ' open' : '') + '><summary>' + (openDetails[detailKey] ? '▾' : '▸') + ' details</summary>' + body + '</details>');
     var d = li.querySelector('.hi-details');
     d.addEventListener('toggle', function () {
       if (d.open) { openDetails[detailKey] = true; } else { delete openDetails[detailKey]; }
@@ -712,8 +747,8 @@
           var li = el('li', {});
           var id = String((x && x.id) || '');
           // Linked when the requirement is still in the book.
-          li.innerHTML = (hasOwn(state.items, id) ? '<a href="#' + esc(id) + '">' + esc(id) + '</a>' : '<span class="sid">' + esc(id) + '</span>') +
-            ' <span class="tag' + (hasOwn(LANDED, x && x.kind) ? ' cl-' + LANDED[x.kind] : '') + '">' + esc(hasOwn(LANDED, x && x.kind) ? LANDED[x.kind] : (x && x.kind) || '') + '</span> ' + ((x && x.text) || '');
+          setHtml(li, (hasOwn(state.items, id) ? '<a href="#' + esc(id) + '">' + esc(id) + '</a>' : '<span class="sid">' + esc(id) + '</span>') +
+            ' <span class="tag' + (hasOwn(LANDED, x && x.kind) ? ' cl-' + LANDED[x.kind] : '') + '">' + esc(hasOwn(LANDED, x && x.kind) ? LANDED[x.kind] : (x && x.kind) || '') + '</span> ' + ((x && x.text) || ''));
           ul.appendChild(li);
         });
         div.appendChild(ul);
@@ -764,9 +799,9 @@
   // The line under the cover in Changes mode: how many reviews are open, and anything removed with its place.
   function diffSummary(rv, orphans) {
     var box = el('div', { class: 'diff-summary', role: 'status' });
-    box.innerHTML = rv.count ?
+    setHtml(box, rv.count ?
       '<b>' + rv.count + (rv.count === 1 ? ' change' : ' changes') + '</b> to review. Sections with none are hidden; unchanged lines inside a changed section are dimmed. <b>Next</b> steps through them. <b>✓ Accept</b> takes one off the list; to ask for something else, drop a note on it with <b>Comment</b>.' :
-      'Nothing to review: every change has been accepted.';
+      'Nothing to review: every change has been accepted.');
     if (orphans && orphans.length) { box.appendChild(removedList(orphans)); }
     return box;
   }
@@ -793,7 +828,7 @@
     host.dataset.mockup = path;
     var root = host.attachShadow({ mode: 'open' });
     var css = '<style>' + (state.mockupCss || '') + '</style>';
-    root.innerHTML = css + (state.mockups[path] || '<p style="color:#c00">Missing mockup ' + esc(path) + '</p>');
+    setHtml(root, css + (state.mockups[path] || '<p style="color:#c00">Missing mockup ' + esc(path) + '</p>'));
   }
 
   function renderFrameBody(frame, section) {
@@ -933,7 +968,7 @@
       var ul = el('ul', {});
       g.tests.forEach(function (t) {
         var li = el('li', { class: t.status });
-        li.innerHTML = '<span class="ev-mark">' + (t.status === 'passed' ? '✓' : t.status === 'failed' ? '✗' : '?') + '</span> ';
+        setHtml(li, '<span class="ev-mark">' + (t.status === 'passed' ? '✓' : t.status === 'failed' ? '✗' : '?') + '</span> ');
         var txt = el('span', {});
         txt.textContent = t.title;
         li.appendChild(txt);
@@ -1008,7 +1043,7 @@
       if (run.screenshot) {
         var failed = status === 'failed';
         var thumb = el('button', { type: 'button', class: 'ev-thumb' + (failed ? ' failed' : ''), title: failed ? 'Failure screenshot' : 'Enlarge screenshot' });
-        thumb.innerHTML = '<span class="ev-cam" aria-hidden="true">📷</span><img alt="' + (failed ? 'Failure screenshot for ' : 'Screenshot for ') + esc(rid) + '" src="' + esc(evidenceShotUrl(run.screenshot)) + '">';
+        setHtml(thumb, '<span class="ev-cam" aria-hidden="true">📷</span><img alt="' + (failed ? 'Failure screenshot for ' : 'Screenshot for ') + esc(rid) + '" src="' + esc(evidenceShotUrl(run.screenshot)) + '">');
         thumb.addEventListener('click', function () { openLightbox(run.screenshot, (failed ? 'Failed: ' : '') + rid + (run.title ? ' · ' + run.title : ''), failed ? (run.error || '') : undefined); });
         shots.appendChild(thumb);
       }
@@ -1065,11 +1100,11 @@
     toc.innerHTML = '';
 
     var cover = el('header', { class: 'cover', id: 'top' });
-    cover.innerHTML = '<p class="eyebrow">' + esc(b.eyebrow || 'Spec book') + '</p><h1>' + esc(b.title) + '</h1>' +
+    setHtml(cover, '<p class="eyebrow">' + esc(b.eyebrow || 'Spec book') + '</p><h1>' + esc(b.title) + '</h1>' +
       (b.lede ? '<p>' + b.lede + '</p>' : '') +
       (b.sources && b.sources.length ? '<p>' + b.sources.map(function (s) { return esc(s.label) + ': <code>' + esc(s.path) + '</code>'; }).join(' · ') + '</p>' : '') +
       '<div class="howto"><b>Making notes:</b> ' +
-      'Press <b>Comment</b> in the bar (or <b>C</b>), then click the exact spot you mean: a numbered pin drops there with a sticky beside it: type your note straight into it, and Enter finishes. Comment mode stays on until you press it again or Esc, so you can drop several in a row. Each note stays up as its sticky, with its numbered pin as the arrowhead: click a sticky to select it and again to edit it, drag it to move it, and press Delete to remove the selected one (a long press on a phone). Drag a pin to point it at something else. <b>Notes</b> lists them all, with exactly what Claude will receive. Notes are saved with the book. <b>Revise</b> sends them all to Claude, which works through them with you in the terminal. A sent note then shows in <b>Changes</b>, with the review of what it changed, until you accept it. <b>Build</b> builds every section marked Ready.</div>';
+      'Press <b>Comment</b> in the bar (or <b>C</b>), then click the exact spot you mean: a numbered pin drops there with a sticky beside it: type your note straight into it, and Enter finishes. Comment mode stays on until you press it again or Esc, so you can drop several in a row. Each note stays up as its sticky, with its numbered pin as the arrowhead: click a sticky to select it and again to edit it, drag it to move it, and press Delete to remove the selected one (a long press on a phone). Drag a pin to point it at something else. <b>Notes</b> lists them all, with exactly what Claude will receive. Notes are saved with the book. <b>Revise</b> sends them all to Claude, which works through them with you in the terminal. A sent note then shows in <b>Changes</b>, with the review of what it changed, until you accept it. <b>Build</b> builds every section marked Ready.</div>');
     main.appendChild(cover);
     main.appendChild(diffSummary(rv, removed['']));
     updateChangesBar();
@@ -1089,7 +1124,7 @@
       if (ch.intro) { sec.appendChild(el('p', { class: 'lede' }, ch.intro)); }
       if (removed[ch.id]) { sec.appendChild(removedList(removed[ch.id])); }
       var tocCh = el('div', { class: 'sb-ch' });
-      tocCh.innerHTML = '<a class="sb-chl" href="#' + ch.id + '"><span class="sb-n">' + nn + '</span>' + esc(ch.title) + '</a>';
+      setHtml(tocCh, '<a class="sb-chl" href="#' + ch.id + '"><span class="sb-n">' + nn + '</span>' + esc(ch.title) + '</a>');
       var tocSecs = el('div', { class: 'sb-secs' });
       if (chChanged) { tocCh.classList.add('has-chg'); }
 
@@ -1315,7 +1350,7 @@
   var notesDirty = false;
   var synced = {}; // id -> the note as the server last had it (JSON), to tell which notes were changed here
   function notesLocked() { return state.claude.state === 'revising'; }
-  // Who is reading: the owner at their desk, or a guest of a shared book (see owner.js and guest.js).
+  // Who is reading: the owner at their desk, or a guest of a shared book (see owner.js and share.js).
   function viewer() { return state.viewer || { guest: false }; }
   // Everyone in the book edits every note (they are collaborating); notes lock only while Claude is revising them.
   function noteLocked() { return notesLocked(); }
@@ -1861,7 +1896,7 @@
     var box = el('div', { class: 'sticky', role: 'group' });
     // The hidden copy of the text sizes the sticky to its words (up to a width, then it wraps); the textarea lies
     // over it, so typing grows the sticky as it goes.
-    box.innerHTML = '<div class="st-size" aria-hidden="true"></div><textarea rows="1" readonly></textarea>';
+    setHtml(box, '<div class="st-size" aria-hidden="true"></div><textarea rows="1" readonly></textarea>');
     var ta = box.querySelector('textarea');
     ta.placeholder = 'Add a note';
     // A note is deleted by selecting it and pressing Delete (or Backspace), or on a touch screen by a long press.
@@ -2186,8 +2221,8 @@
       ids.forEach(function (id, i) {
         var n = state.notes[id];
         var li = el('li', { class: 'np-note' });
-        li.innerHTML = '<button type="button" class="np-go"><span class="np-num"></span><span class="np-where"></span></button>' +
-          '<p class="np-about"></p><textarea rows="2"></textarea><div class="np-row"><button type="button" class="linkbtn np-del">Delete</button></div>';
+        setHtml(li, '<button type="button" class="np-go"><span class="np-num"></span><span class="np-where"></span></button>' +
+          '<p class="np-about"></p><textarea rows="2"></textarea><div class="np-row"><button type="button" class="linkbtn np-del">Delete</button></div>');
         li.querySelector('.np-num').textContent = String(i + 1);
         li.querySelector('.np-where').textContent = labelFor(n);
         li.querySelector('.np-go').setAttribute('aria-label', 'Go to note ' + (i + 1) + ' on ' + labelFor(n));
@@ -2225,8 +2260,8 @@
     ol.innerHTML = '';
     its.forEach(function (it) {
       var li = el('li', {});
-      li.innerHTML = '<dl><dt>Where</dt><dd class="np-i-where"></dd><dt>About</dt><dd class="np-i-about"></dd>' +
-        (it.element ? '<dt>Element</dt><dd class="np-i-el"><code></code><span></span></dd>' : '') + '<dt>Note</dt><dd class="np-i-note"></dd></dl>';
+      setHtml(li, '<dl><dt>Where</dt><dd class="np-i-where"></dd><dt>About</dt><dd class="np-i-about"></dd>' +
+        (it.element ? '<dt>Element</dt><dd class="np-i-el"><code></code><span></span></dd>' : '') + '<dt>Note</dt><dd class="np-i-note"></dd></dl>');
       if (it.element) {
         li.querySelector('.np-i-el code').textContent = it.element.selector;
         li.querySelector('.np-i-el span').textContent = it.element.text ? ' “' + it.element.text + '”' : '';
@@ -2502,7 +2537,7 @@
         pollTimer = setTimeout(pollClaude, state.claude.state === 'idle' ? 5000 : 3000);
       });
   }
-  // guest.js asks for a poll at once when the host says the book or its notes changed.
+  // share.js asks for a poll at once when the host says the book or its notes changed.
   window.SpecBook = {
     poll: pollClaude,
     // Notes changed on disk (someone saved): loaded now, unless a note is being written here, which waits.
@@ -2626,7 +2661,7 @@
   var bannerShown = '';
   function showBanner() {
     var html = bannerHtml();
-    if (html !== bannerShown) { banner.innerHTML = html; bannerShown = html; }
+    if (html !== bannerShown) { setHtml(banner, html); bannerShown = html; }
     banner.hidden = !html;
     banner.classList.toggle('review', html.indexOf('bb-review') !== -1);
   }
@@ -3319,7 +3354,8 @@
   ['revise', 'build'].forEach(function (id) { document.getElementById(id).addEventListener('click', function () { setClaudeMenu(false); }); });
   if (store('spec-book-diff') === '1') { state.diff = true; }
 
-  fetchBook().then(function (data) {
+  // A shared book loads once its connection says who this reader is (share.js's `ready`, at the host's welcome).
+  (shared && window.SpecShare.ready ? window.SpecShare.ready : Promise.resolve()).then(fetchBook).then(function (data) {
     var savedView = store('spec-book-view');
     if (savedView === 'shot' || savedView === 'both') {
       state.view = savedView;
@@ -3337,6 +3373,6 @@
     return data;
   }).catch(function (e) {
     console.error(e);
-    main.innerHTML = '<p class="loading">Could not load the book: ' + esc(e.message) + '</p><pre class="loading">' + esc(e.stack || '') + '</pre>';
+    setHtml(main, '<p class="loading">Could not load the book: ' + esc(e.message) + '</p><pre class="loading">' + esc(e.stack || '') + '</pre>');
   });
 })();

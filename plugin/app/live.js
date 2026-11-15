@@ -316,6 +316,16 @@
     c.addEventListener('click', function () { copy(c, link()); });
     row.appendChild(input); row.appendChild(c);
     m.appendChild(row);
+    // On the website, a reader who opened the book with the owner's pin can take it off this browser.
+    if (guest && window.SpecShare.role === 'owner' && window.SpecShare.forgetPin) {
+      var fp = document.createElement('button');
+      fp.type = 'button'; fp.className = 'bar-btn share-forget-pin'; fp.textContent = 'Forget pin on this device';
+      fp.title = 'Remove the owner’s pin from this browser; the plain link still opens the book as a guest';
+      fp.addEventListener('click', function () { window.SpecShare.forgetPin(); location.reload(); });
+      var fpActs = document.createElement('div'); fpActs.className = 'share-acts';
+      fpActs.appendChild(fp);
+      m.appendChild(fpActs);
+    }
     if (!guest) {
       var ul = document.createElement('ul');
       ul.className = 'share-people';
