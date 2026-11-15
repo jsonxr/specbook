@@ -29,6 +29,9 @@ Raise `version` in `plugin/.claude-plugin/plugin.json` and push. Users get it wi
 
 Load the plugin from this checkout for one session: `claude --plugin-dir ./plugin`.
 
+Where to try changes (localhost, phone sizes, the share link end to end), and why shortcuts such as loading the reader
+from the book server or opening localhost to the network are not taken: [docs/development.md](docs/development.md).
+
 ```
 claude plugin validate plugin
 node --test plugin/server/ server/src/
