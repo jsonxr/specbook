@@ -270,7 +270,333 @@
     return { notes: out, unsynced: skipped.slice() };
   }
 
+  // ---- Screens ----------------------------------------------------------------------------------------------------
+  // A book-wide catalog: book.screens is a list of screens and components, each with states (one picture apiece, or
+  // `sameAs` another state, or `absent`). A state's key is "<screen id>.<state id>". Pictures place components with
+  // <sb-component id="..." state="..."></sb-component>; sections list the states they show in `shows`.
+  var MAX_DEPTH = 8;
+
+  function stateKey(screenId, stateId) { return screenId + '.' + stateId; }
+
+  function screensOf(book) { return (book && book.screens) || []; }
+
+  function screenIndex(book) {
+    var out = { screens: {}, states: {}, byName: {} };
+    screensOf(book).forEach(function (s) {
+      if (!s || typeof s !== 'object') { return; }
+      if (!has(out.screens, s.id)) { out.screens[s.id] = s; }
+      if (!has(out.byName, s.name)) { out.byName[s.name] = s.id; }
+      (s.states || []).forEach(function (st) {
+        var key = stateKey(s.id, st.id);
+        if (!has(out.states, key)) { out.states[key] = { screen: s, state: st }; }
+      });
+    });
+    return out;
+  }
+
+  // The state whose picture a key draws: itself, or the one it is `sameAs` (one step). Null when either is missing.
+  function drawnState(book, key) { return drawnIn(screenIndex(book), key); }
+
+  function drawnIn(ix, key) {
+    var hit = has(ix.states, key) ? ix.states[key] : null;
+    if (!hit) { return null; }
+    if (hit.state.sameAs) {
+      var to = stateKey(hit.screen.id, hit.state.sameAs);
+      return has(ix.states, to) ? ix.states[to] : null;
+    }
+    return hit;
+  }
+
+  function pictureOf(state) {
+    var out = [];
+    if (state.mockup) { out.push(state.mockup); }
+    if (state.today) { out.push(state.today); }
+    return out;
+  }
+
+  function mockupPaths(book) {
+    var out = [];
+    screensOf(book).forEach(function (s) {
+      (s.states || []).forEach(function (st) {
+        pictureOf(st).forEach(function (p) { if (out.indexOf(p) < 0) { out.push(p); } });
+      });
+    });
+    return out;
+  }
+
+  function attr(tag, name) {
+    var m = new RegExp('\\b' + name + '\\s*=\\s*(?:"([^"]*)"|\'([^\']*)\')', 'i').exec(tag);
+    return m ? (m[1] !== undefined ? m[1] : m[2]) : '';
+  }
+
+  function componentsIn(html) {
+    var out = [];
+    var re = /<sb-component\b[^>]*>/gi;
+    var m;
+    while ((m = re.exec(html || ''))) {
+      out.push({ id: attr(m[0], 'id'), state: attr(m[0], 'state') });
+    }
+    return out;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // Replaces each component tag in `html` with that state's picture (nested tags too), wrapped in
+  // <div class="sb-comp" data-key="...">. A cycle, a missing component or state, or a missing picture becomes a
+  // visible <div class="sb-missing"> naming the key. opts.highlight is a component id to outline (class sb-hl).
+  function expandMockup(book, mockups, html, opts) {
+    return expandIn(screenIndex(book), mockups || {}, html, opts || {}, [], 0);
+  }
+
+  function expandIn(ix, mockups, html, opts, path, depth) {
+    return String(html || '').replace(/<sb-component\b[^>]*>(?:\s*<\/sb-component>)?/gi, function (tag) {
+      var id = attr(tag, 'id');
+      var key = stateKey(id, attr(tag, 'state'));
+      var missing = function (why) {
+        return '<div class="sb-missing" data-key="' + escapeHtml(key) + '">' + escapeHtml(why + ': ' + key) + '</div>';
+      };
+      var d = drawnIn(ix, key);
+      if (!d || !d.state.mockup) { return missing('Missing component state'); }
+      var drawn = stateKey(d.screen.id, d.state.id);
+      if (path.indexOf(drawn) >= 0 || depth >= MAX_DEPTH) { return missing('Component placed inside itself'); }
+      var text = mockups[d.state.mockup];
+      if (typeof text !== 'string') { return missing('Missing picture'); }
+      var inner = expandIn(ix, mockups, text, opts, path.concat(drawn), depth + 1);
+      var cls = 'sb-comp' + (opts.highlight && opts.highlight === id ? ' sb-hl' : '');
+      return '<div class="' + cls + '" data-key="' + escapeHtml(key) + '">' + inner + '</div>';
+    });
+  }
+
+  function eachSection(book, f) {
+    ((book && book.chapters) || []).forEach(function (ch) {
+      (ch.sections || []).forEach(function (s) { f(ch, s, ch.id + '-' + s.id); });
+    });
+  }
+
+  function pushOnce(list, v) { if (list.indexOf(v) < 0) { list.push(v); } }
+
+  // Component states a state's pictures place directly: the keys as written in the tags.
+  function placedKeys(mockups, state) {
+    var out = [];
+    pictureOf(state).forEach(function (p) {
+      componentsIn(mockups && mockups[p]).forEach(function (c) { pushOnce(out, stateKey(c.id, c.state)); });
+    });
+    return out;
+  }
+
+  // {component id: [state keys whose picture, today's included, places it]}
+  function usedOn(book, mockups) {
+    var out = {};
+    screensOf(book).forEach(function (s) {
+      (s.states || []).forEach(function (st) {
+        var key = stateKey(s.id, st.id);
+        pictureOf(st).forEach(function (p) {
+          componentsIn(mockups && mockups[p]).forEach(function (c) {
+            if (!has(out, c.id)) { out[c.id] = []; }
+            pushOnce(out[c.id], key);
+          });
+        });
+      });
+    });
+    return out;
+  }
+
+  // {state key: [section full ids in book order]}
+  function shownIn(book) {
+    var out = {};
+    eachSection(book, function (ch, s, fullId) {
+      (s.shows || []).forEach(function (sh) {
+        if (!sh || !sh.state) { return; }
+        if (!has(out, sh.state)) { out[sh.state] = []; }
+        pushOnce(out[sh.state], fullId);
+      });
+    });
+    return out;
+  }
+
+  // Everything a section's Accept gate covers beyond its own text: the states it shows, followed through sameAs and
+  // through the components those pictures place (nested too), and the screen headings of all of them.
+  function gateKeys(book, mockups, fullId) {
+    var ix = screenIndex(book);
+    var out = [];
+    var seen = {};
+    var add = function (key) {
+      if (!has(ix.states, key)) { return; }
+      pushOnce(out, key);
+      pushOnce(out, ix.states[key].screen.id);
+      var d = drawnIn(ix, key);
+      if (!d) { return; }
+      var dk = stateKey(d.screen.id, d.state.id);
+      pushOnce(out, dk);
+      if (has(seen, dk)) { return; }
+      seen[dk] = true;
+      placedKeys(mockups, d.state).forEach(add);
+    };
+    eachSection(book, function (ch, s, id) {
+      if (id !== fullId) { return; }
+      (s.shows || []).forEach(function (sh) { if (sh && sh.state) { add(sh.state); } });
+    });
+    return out;
+  }
+
+  // Component ids placed, at any depth, by any state of a screen.
+  function placedComponents(ix, mockups, screenId) {
+    var out = [];
+    var seen = {};
+    var walk = function (screen) {
+      (screen.states || []).forEach(function (st) {
+        placedKeys(mockups, st).forEach(function (key) {
+          var c = has(ix.states, key) ? ix.states[key] : null;
+          var id = key.split('.')[0];
+          pushOnce(out, id);
+          if (c && !has(seen, id)) { seen[id] = true; walk(c.screen); }
+        });
+      });
+    };
+    if (has(ix.screens, screenId)) { seen[screenId] = true; walk(ix.screens[screenId]); }
+    return out;
+  }
+
+  // Requirements that apply to a screen, in book order: those naming it, and those naming a component it places
+  // (`via` is that component's id).
+  function requirementsFor(book, mockups, screenId) {
+    var ix = screenIndex(book);
+    var placed = placedComponents(ix, mockups, screenId);
+    var out = [];
+    eachSection(book, function (ch, s, fullId) {
+      (s.requirements || []).forEach(function (req) {
+        if (!req || typeof req !== 'object') { return; }
+        (req.screens || []).forEach(function (e) {
+          if (!e) { return; }
+          var direct = e.screen === screenId;
+          if (!direct && placed.indexOf(e.screen) < 0) { return; }
+          out.push({ req: req, fullId: fullId, chapterId: ch.id, state: e.state || null, via: direct ? null : e.screen });
+        });
+      });
+    });
+    return out;
+  }
+
+  // Book roles that no state of a screen covers. Components, and screens with an "anyone" state, miss none.
+  function missingRoles(book, screenId) {
+    var screen = screenIndex(book).screens[screenId];
+    if (!screen || screen.kind === 'component') { return []; }
+    var covered = [];
+    (screen.states || []).forEach(function (st) { if (st.when && st.when.role) { covered.push(st.when.role); } });
+    if (covered.indexOf('anyone') >= 0) { return []; }
+    return ((book && book.roles) || []).map(function (r) { return r.id; })
+      .filter(function (id) { return id !== 'anyone' && covered.indexOf(id) < 0; });
+  }
+
+  // The first way the screens in a book are invalid, in words; null when valid (the spec's "Validity" list).
+  // `exists(path)` says whether a mockup file is there; `mockups` holds the text of those that are.
+  function screenProblem(book, exists, mockups) {
+    var screens = screensOf(book);
+    var ix = screenIndex(book);
+    var ids = {};
+    var names = {};
+    var roles = ((book && book.roles) || []).map(function (r) { return r.id; });
+    for (var i = 0; i < screens.length; i++) {
+      var s = screens[i];
+      if (has(ids, s.id)) { return 'Two screens share the id ' + s.id; }
+      ids[s.id] = true;
+      if (has(names, s.name)) { return 'Two screens are named ' + s.name + ' (' + s.id + ')'; }
+      names[s.name] = true;
+      var stateIds = {};
+      var states = s.states || [];
+      for (var j = 0; j < states.length; j++) {
+        var st = states[j];
+        var key = stateKey(s.id, st.id);
+        if (has(stateIds, st.id)) { return 'Screen ' + s.id + ' has two states with the id ' + st.id; }
+        stateIds[st.id] = true;
+        var kinds = ['mockup', 'sameAs', 'absent'].filter(function (k) { return st[k]; });
+        if (kinds.length !== 1) {
+          return 'State ' + key + ' needs exactly one of mockup, sameAs and absent (it has ' + (kinds.join(', ') || 'none') + ')';
+        }
+        if (st.when && st.when.role && roles.indexOf(st.when.role) < 0) {
+          return 'State ' + key + ' names the role ' + st.when.role + ', which the book does not define';
+        }
+        var files = pictureOf(st);
+        for (var f = 0; f < files.length; f++) {
+          if (!exists(files[f])) { return 'State ' + key + ' points at a missing picture, ' + files[f]; }
+        }
+        if (st.sameAs) {
+          var to = has(ix.states, stateKey(s.id, st.sameAs)) ? ix.states[stateKey(s.id, st.sameAs)].state : null;
+          if (!to) { return 'State ' + key + ' is sameAs ' + st.sameAs + ', which is not a state of ' + s.id; }
+          if (to.sameAs) {
+            var hops = 0;
+            var at = to;
+            while (at && at.sameAs && at.id !== st.id && hops++ < states.length) {
+              at = has(ix.states, stateKey(s.id, at.sameAs)) ? ix.states[stateKey(s.id, at.sameAs)].state : null;
+            }
+            if (at && at.id === st.id) { return 'State ' + key + ' is in a sameAs cycle'; }
+            return 'State ' + key + ' is sameAs ' + st.sameAs + ', which is itself sameAs another state';
+          }
+        }
+      }
+    }
+    for (var i2 = 0; i2 < screens.length; i2++) {
+      var states2 = screens[i2].states || [];
+      for (var j2 = 0; j2 < states2.length; j2++) {
+        var files2 = pictureOf(states2[j2]);
+        for (var p = 0; p < files2.length; p++) {
+          var tags = componentsIn(mockups && mockups[files2[p]]);
+          for (var t = 0; t < tags.length; t++) {
+            var tk = stateKey(tags[t].id, tags[t].state);
+            var comp = has(ix.screens, tags[t].id) ? ix.screens[tags[t].id] : null;
+            if (!comp || comp.kind !== 'component') {
+              return 'The picture ' + files2[p] + ' places ' + tags[t].id + ', which is not a component in the book';
+            }
+            if (!has(ix.states, tk)) { return 'The picture ' + files2[p] + ' places ' + tk + ', which is not a state'; }
+          }
+        }
+      }
+    }
+    var problem = null;
+    eachSection(book, function (ch, sec, fullId) {
+      if (problem) { return; }
+      (sec.requirements || []).forEach(function (req) {
+        if (problem || !req || typeof req !== 'object') { return; }
+        (req.screens || []).forEach(function (e) {
+          if (problem) { return; }
+          if (!e || !has(ix.screens, e.screen)) {
+            problem = 'Requirement ' + req.id + ' names ' + (e && e.screen) + ', which is not a screen or component';
+          } else if (e.state && !has(ix.states, stateKey(e.screen, e.state))) {
+            problem = 'Requirement ' + req.id + ' names ' + stateKey(e.screen, e.state) + ', which is not a state';
+          }
+        });
+      });
+      (sec.shows || []).forEach(function (sh) {
+        if (problem) { return; }
+        if (!sh || !has(ix.states, sh.state)) {
+          problem = 'Section ' + fullId + ' shows ' + (sh && sh.state) + ', which is not a state';
+        } else if (sh.highlight) {
+          var d = drawnIn(ix, sh.state);
+          var here = d ? placedKeys(mockups, d.state).map(function (k) { return k.split('.')[0]; }) : [];
+          if (here.indexOf(sh.highlight) < 0) {
+            problem = 'Section ' + fullId + ' highlights ' + sh.highlight + ', which ' + sh.state + ' does not place';
+          }
+        }
+      });
+    });
+    return problem;
+  }
+
   return {
+    stateKey: stateKey,
+    screenIndex: screenIndex,
+    drawnState: drawnState,
+    mockupPaths: mockupPaths,
+    componentsIn: componentsIn,
+    expandMockup: expandMockup,
+    usedOn: usedOn,
+    shownIn: shownIn,
+    gateKeys: gateKeys,
+    requirementsFor: requirementsFor,
+    missingRoles: missingRoles,
+    screenProblem: screenProblem,
     rekeySkipped: rekeySkipped,
     isProven: isProven,
     sectionStage: sectionStage,
