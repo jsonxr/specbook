@@ -1,0 +1,6 @@
+{
+  "name": "specbook-dev",
+  "owner": { "name": "Jason Rowland" },
+  "description": "The specbook plugin from this checkout, loaded in place for development.",
+  "plugins": [{ "name": "specbook", "source": "./plugin" }]
+}
