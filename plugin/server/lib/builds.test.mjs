@@ -411,13 +411,15 @@ function seedScreensBook(stage = 'ready') {
     writeFileSync(join(data, rel), text);
   }
   writeJsonAtomic(join(data, 'book.json'), {
+    roles: [{ id: 'admin', label: 'Admin' }, { id: 'member', label: 'Member' }, { id: 'visitor', label: 'Visitor' }],
     screens: [
       {
         id: 'SCR-HOME',
         name: 'HomeScreen',
         kind: 'screen',
         states: [
-          { id: 'admin', name: 'Admin', when: { role: 'admin' }, mockup: 'mockups/home-admin.html', change: 'add' },
+          // No name, as a state normally has: it is labeled by its computed caption.
+          { id: 'admin', when: { role: 'admin' }, mockup: 'mockups/home-admin.html', change: 'add' },
           { id: 'new', name: 'New', when: { role: 'member' }, mockup: 'mockups/home-new.html', today: 'mockups/home-new.today.html', change: 'change' },
           { id: 'old', name: 'Old', when: { role: 'visitor' }, mockup: 'mockups/home-old.html', change: 'remove', reason: 'retired' },
           { id: 'draft', name: 'Draft', when: { role: 'x' }, mockup: 'mockups/home-draft.html', change: 'add' },
@@ -453,7 +455,7 @@ test('a built section lands the changes of the states it shows', () => {
   assert.equal(stateOf('old'), undefined);
   assert.equal(existsSync(join(data, 'mockups/home-old.html')), false);
   assert.deepEqual(book.decisions.map(({ id, ...d }) => d), [
-    { date: '2026-11-12', about: ['SCR-HOME.old'], by: 'build', title: 'Old', body: 'retired', kind: 'removed' },
+    { date: '2026-11-12', about: ['SCR-HOME.old'], by: 'build', title: 'HomeScreen · Visitor · Old', body: 'retired', kind: 'removed' },
   ]);
   assert.match(book.decisions[0].id, /^DEC-/);
   // A state shown only by a drafting section keeps its markers.
@@ -466,10 +468,11 @@ test('a built section lands the changes of the states it shows', () => {
   assert.equal(accepted['SCR-HOME.new'].change, undefined);
   assert.equal(accepted['SCR-HOME.new'].mockup, '<p>new</p>');
   assert.equal(Object.hasOwn(accepted, 'SCR-HOME.old'), false);
+  // Each labeled by its screen, its role and its caption; a state with no name is never labeled ''.
   assert.deepEqual(readHistory(data).changelog[0].landed, [
-    { id: 'SCR-HOME.admin', kind: 'added', text: 'Admin' },
-    { id: 'SCR-HOME.new', kind: 'changed', text: 'New' },
-    { id: 'SCR-HOME.old', kind: 'removed', text: 'Old' },
+    { id: 'SCR-HOME.admin', kind: 'added', text: 'HomeScreen · Admin' },
+    { id: 'SCR-HOME.new', kind: 'changed', text: 'HomeScreen · Member · New' },
+    { id: 'SCR-HOME.old', kind: 'removed', text: 'HomeScreen · Visitor · Old' },
   ]);
 });
 

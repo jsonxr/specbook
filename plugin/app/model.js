@@ -674,6 +674,71 @@
     return cap;
   }
 
+  // A role's label: the book's, "Anyone" for anyone, else its id.
+  function roleLabel(book, id) {
+    var hit = rolesOf(book).filter(function (r) { return r.id === id; })[0];
+    if (hit) { return hit.label || id; }
+    return id === 'anyone' ? 'Anyone' : String(id);
+  }
+
+  // A state in plain words, for a label that cannot hold a pill: "<screen name> · <role labels> · <caption text>", e.g.
+  // "TodosScreen · User · No todos". With no role and no text it ends in the state's id; '' when the key is not a state.
+  function stateLabel(book, key) {
+    var hit = screenIndex(book).states[key];
+    if (!hit) { return ''; }
+    var cap = stateCaption(book, key);
+    var words = cap.roles.map(function (r) { return roleLabel(book, r); }).concat(cap.text ? [cap.text] : []);
+    if (!words.length) { words = [String(hit.state.id)]; }
+    return [hit.screen.name || hit.screen.id].concat(words).join(' · ');
+  }
+
+  // A variable by id, for words about a `when`: role; on a known screen, the screen's own list (its inline declarations
+  // included); else the book's variables, then any screen's inline declaration. null when none is found.
+  function variableFor(book, screenId, id) {
+    if (id === 'role') { return resolveVariable(book, 'role'); }
+    var screen = screenId ? screenIndex(book).screens[screenId] : null;
+    if (screen) {
+      var own = variablesIn(book, screen).filter(function (v) { return v.id === id; })[0];
+      if (own) { return own; }
+    }
+    var found = resolveVariable(book, id);
+    if (found) { return found; }
+    screensOf(book).forEach(function (sc) {
+      (Array.isArray(sc && sc.variables) ? sc.variables : []).forEach(function (d) {
+        if (!found && d && typeof d === 'object' && d.id === id) { found = resolveVariable(book, d); }
+      });
+    });
+    return found;
+  }
+
+  // A `when` in words: "Role: User, Data: No todos"; a list of roles reads "Visitor / Admin". screenId may be null (a
+  // reviewed value does not say its screen).
+  function whenText(book, screenId, when) {
+    var w = when && typeof when === 'object' ? when : {};
+    return Object.keys(w).map(function (k) {
+      var v = variableFor(book, screenId, k);
+      var value = function (x) { return k === 'role' ? roleLabel(book, x) : v ? valueLabel(v, x) : String(x); };
+      return (v ? v.label : k) + ': ' + (Array.isArray(w[k]) ? w[k].map(value).join(' / ') : value(w[k]));
+    }).join(', ');
+  }
+
+  // A screen's variables list in words: "Role, Data, Field"; one not declared reads as its id.
+  function variablesText(book, list) {
+    return (Array.isArray(list) ? list : []).map(function (e) {
+      var v = resolveVariable(book, e);
+      return v ? v.label : String(e && typeof e === 'object' ? e.id : e);
+    }).join(', ');
+  }
+
+  // A screen's undrawn entries in words: "Role: User, Filter: Completed (FLT-36VG): <note>", joined by "; ".
+  function undrawnText(book, screenId, list) {
+    return (Array.isArray(list) ? list : []).map(function (u) {
+      if (!u || typeof u !== 'object') { return ''; }
+      var about = Array.isArray(u.about) && u.about.length ? ' (' + u.about.join(', ') + ')' : '';
+      return whenText(book, screenId, u.when) + about + (u.note ? ': ' + u.note : '');
+    }).join('; ');
+  }
+
   // Every combination a screen accounts for: each state (drawn, same as another, or absent), then each `undrawn` entry
   // (a combination its requirements imply that has no picture), in that order.
   function coverage(book, screenId) {
@@ -914,6 +979,10 @@
     variablesOf: variablesOf,
     stateCaption: stateCaption,
     whenCaption: whenCaption,
+    stateLabel: stateLabel,
+    whenText: whenText,
+    variablesText: variablesText,
+    undrawnText: undrawnText,
     coverage: coverage,
     offPageKeys: offPageKeys,
     screenOrder: screenOrder,

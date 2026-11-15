@@ -131,10 +131,6 @@
     if (!cap.roles.length && !cap.text && hasOwn(screens().states, key)) { cap.text = screens().states[key].state.id; }
     return cap;
   }
-  // A caption in words, for titles and labels that cannot hold a pill: "User", "User · No todos", "All".
-  function captionWords(cap) {
-    return cap.roles.map(function (r) { return roleInfo(r).label; }).concat(cap.text ? [cap.text] : []).join(' · ');
-  }
   // A role's pill, in the role's color.
   function rolePill(id) {
     var r = roleInfo(id);
@@ -147,11 +143,11 @@
     var words = [name, cap.text].filter(function (x) { return x; }).join(' · ');
     return cap.roles.map(rolePill).join(' ') + (cap.roles.length && words ? ' ' : '') + esc(words);
   }
-  // "<screen name>" for a screen id, "<screen name> · <caption in words>" for a state key; the key itself when it is
-  // gone. Plain text, for titles and note labels.
+  // "<screen name>" for a screen id, "<screen name> · <roles> · <caption>" for a state key (SpecModel.stateLabel); the
+  // key itself when it is gone. Plain text, for titles and note labels.
   function screenLabel(key) {
     var ix = screens();
-    if (hasOwn(ix.states, key)) { return ix.states[key].screen.name + ' · ' + captionWords(captionOf(key)); }
+    if (hasOwn(ix.states, key)) { return window.SpecModel.stateLabel(state.book, key); }
     return hasOwn(ix.screens, key) ? ix.screens[key].name : key;
   }
   // The same drawn, with the state's role pills: "[User] TodosScreen · No todos". HTML.
@@ -302,45 +298,6 @@
     var html = listField(v[f] || [], newer[f] || [], f === 'shows' ? showLabel : screenEntryLabel);
     return '<p class="rv-field rv-mock"><span>' + (f === 'shows' ? 'Shows now:' : 'Screens now:') + '</span> ' + (html || 'none') + '</p>';
   }
-  // A variable by id for a reviewed value, which does not say its screen: role, a book variable, or one a screen
-  // declares inline; null when none is found.
-  function variableNamed(id) {
-    if (id === 'role') { return { label: 'Role', values: [] }; }
-    var found = null;
-    (state.book.variables || []).forEach(function (d) { if (!found && d && d.id === id) { found = d; } });
-    (state.book.screens || []).forEach(function (sc) {
-      (Array.isArray(sc.variables) ? sc.variables : []).forEach(function (d) { if (!found && d && typeof d === 'object' && d.id === id) { found = d; } });
-    });
-    return found;
-  }
-  // A `when` in words, for a review: "Role: User, Data: No todos"; a list of roles reads "Visitor / Admin".
-  function whenWords(when) {
-    var w = when && typeof when === 'object' ? when : {};
-    return Object.keys(w).map(function (k) {
-      var v = variableNamed(k);
-      var value = function (x) {
-        if (k === 'role') { return roleInfo(x).label; }
-        var hit = v && (v.values || []).filter(function (y) { return y && y.id === x; })[0];
-        return hit ? hit.label || x : String(x);
-      };
-      return (v ? v.label || k : k) + ': ' + (Array.isArray(w[k]) ? w[k].map(value).join(' / ') : value(w[k]));
-    }).join(', ');
-  }
-  // A screen's variables list in words, for a review: "Role, Data, Field".
-  function variablesWords(list) {
-    return (Array.isArray(list) ? list : []).map(function (e) {
-      var v = e && typeof e === 'object' ? e : variableNamed(e);
-      return v ? v.label || v.id || String(e) : String(e);
-    }).join(', ');
-  }
-  // A screen's undrawn entries in words, for a review: "Role: User, Filter: Completed (FLT-36VG)", one after another.
-  function undrawnWords(list) {
-    return (Array.isArray(list) ? list : []).map(function (u) {
-      if (!u || typeof u !== 'object') { return ''; }
-      var about = Array.isArray(u.about) && u.about.length ? ' (' + u.about.join(', ') + ')' : '';
-      return whenWords(u.when) + about + (u.note ? ': ' + u.note : '');
-    }).join('; ');
-  }
   // A version of an item, compared with the one before it (prev; null for the first version shown).
   function versionHtml(kind, v, prev) {
     var p = prev || {};
@@ -357,7 +314,7 @@
     if (kind === 'state') {
       var stTag = function (m) { return m ? '<span class="tag chg-tag">' + esc(MARKER[m] || m) + '</span>' : ''; };
       return line('rv-text', '', diffField(cmp('name'), v.name, esc)) +
-        line('rv-field', 'When:', diffField(prev ? whenWords(p.when) : undefined, whenWords(v.when), esc)) +
+        line('rv-field', 'When:', diffField(prev ? window.SpecModel.whenText(state.book, null, p.when) : undefined, window.SpecModel.whenText(state.book, null, v.when), esc)) +
         line('rv-field', 'Also:', diffField(cmp('also'), v.also, esc)) +
         line('rv-field', 'Same as:', diffField(cmp('sameAs'), v.sameAs, esc)) +
         line('rv-field', 'Never shown:', diffField(cmp('absent'), v.absent, esc)) +
@@ -370,8 +327,8 @@
         line('rv-field', 'Kind:', diffField(cmp('kind'), v.kind, esc)) +
         line('rv-field', 'File:', diffField(cmp('file'), v.file, esc)) +
         line('rv-field', 'Intro:', diffField(cmp('intro'), v.intro)) +
-        line('rv-field', 'Variables:', diffField(prev ? variablesWords(p.variables) : undefined, variablesWords(v.variables), esc)) +
-        line('rv-field', 'Not drawn:', diffField(prev ? undrawnWords(p.undrawn) : undefined, undrawnWords(v.undrawn), esc));
+        line('rv-field', 'Variables:', diffField(prev ? window.SpecModel.variablesText(state.book, p.variables) : undefined, window.SpecModel.variablesText(state.book, v.variables), esc)) +
+        line('rv-field', 'Not drawn:', diffField(prev ? window.SpecModel.undrawnText(state.book, null, p.undrawn) : undefined, window.SpecModel.undrawnText(state.book, null, v.undrawn), esc));
     }
     return line('rv-text', '', diffField(cmp('title'), v.title, esc)) + line('rv-field', 'Intro:', diffField(cmp('intro'), v.intro)) +
       line('rv-field', 'Shows:', listField(prev ? p.shows || [] : undefined, v.shows, showLabel));
@@ -942,7 +899,7 @@
     keys.forEach(function (key) {
       var r = reviewOf(key);
       var v = r.accepted || {};
-      var what = r.kind === 'req' ? v.text : r.kind === 'screen' || r.kind === 'state' ? (r.kind === 'screen' ? 'Screen “' + esc(v.name || key) : 'State “' + esc(v.name || whenWords(v.when) || key)) + '”' : esc(v.title || key);
+      var what = r.kind === 'req' ? v.text : r.kind === 'screen' || r.kind === 'state' ? (r.kind === 'screen' ? 'Screen “' + esc(v.name || key) : 'State “' + esc(v.name || window.SpecModel.whenText(state.book, null, v.when) || key)) + '”' : esc(v.title || key);
       var li = el('li', { id: key, class: 'chg-gone' }, '<span class="rid chg">−</span><div><del class="was">' + (what || '') + '</del> <span class="sid">' + esc(key) + '</span></div>');
       markReview(li, key);
       tgtAttrs(li, key, key + ' (removed)', what || '', key);

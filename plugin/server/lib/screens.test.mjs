@@ -209,6 +209,34 @@ test('whenCaption captions a combination that has no state, as stateCaption woul
   assert.deepEqual(M.whenCaption(book, 'SCR-NOPE', { role: 'member' }), { roles: [], text: '' });
 });
 
+test('stateLabel names a state in plain words: screen, role labels, caption; never empty', () => {
+  const book = varBook();
+  assert.equal(M.stateLabel(book, 'SCR-HOME.member'), 'HomeScreen · Member · Not shared yet');
+  assert.equal(M.stateLabel(book, 'SCR-HOME.header'), 'HomeScreen · Member');
+  assert.equal(M.stateLabel(book, 'SCR-HOME.everyone'), 'HomeScreen · Anyone');
+  assert.equal(M.stateLabel(book, 'SCR-HOME.never'), 'HomeScreen · Visitor · Admin · Server unreachable');
+  assert.equal(M.stateLabel(book, 'SCR-TABS.people'), 'Tabs · People');
+  // No role and no text: the state's id.
+  book.screens[1].states.push({ id: 'blank', when: {}, mockup: 'mockups/tabs-blank.html' });
+  assert.equal(M.stateLabel(book, 'SCR-TABS.blank'), 'Tabs · blank');
+  assert.equal(M.stateLabel(book, 'SCR-NOPE.x'), '');
+});
+
+test('whenText, variablesText and undrawnText put variables in words, the screen\'s own first when it is known', () => {
+  const book = varBook();
+  assert.equal(M.whenText(book, 'SCR-HOME', { role: 'admin', sharing: 'notshared', connection: 'offline' }), 'Role: Admin, Sharing: Not shared yet, Connection: Offline');
+  // Without the screen: the book's variables, then any screen's inline one; unknown ones read as ids.
+  assert.equal(M.whenText(book, null, { sharing: 'shared', data: 'empty', tab: 'people', mood: 'odd' }), 'Sharing: Shared, Data: Empty, Tab: People, mood: odd');
+  assert.equal(M.whenText(book, null, { role: ['visitor', 'anyone'] }), 'Role: Visitor / Anyone');
+  // A screen's inline variable wins over a book variable of the same id.
+  book.screens[0].variables.push({ id: 'data', label: 'Groups', values: [{ id: 'empty', label: 'No groups' }] });
+  assert.equal(M.whenText(book, 'SCR-HOME', { data: 'empty' }), 'Groups: No groups');
+  assert.equal(M.whenText(book, null, { data: 'empty' }), 'Data: Empty');
+  assert.equal(M.whenText(book, null, undefined), '');
+  assert.equal(M.variablesText(book, ['role', book.screens[0].variables[1], 'connection', 'nope']), 'Role, Sharing, Connection, nope');
+  assert.equal(M.undrawnText(book, 'SCR-HOME', book.screens[0].undrawn), 'Role: Admin, Sharing: Not shared yet (R1): No groups yet; Role: Visitor');
+});
+
 test('coverage: one entry per state, then per undrawn entry, in order', () => {
   const book = varBook();
   const rows = M.coverage(book, 'SCR-HOME');
