@@ -59,7 +59,9 @@ and prints one JSON line; an error goes to stderr with exit code 1.
    section into `built` when all its changes are proven; a section with removals also needs every requirement that
    stays proven, and only then is each removal applied and a `removed` decision written. Any other section goes back
    to `drafting` with its unproven changes and removals intact (`summary.md` lists the unproven ids). **Finish also
-   lands the state changes of every section it turns built**, with no test needed: an `add` or `change` state drops
+   lands the state changes of every section it turns built**, with no test needed, for every state that section's
+   Accept gate covers (the states it shows, the states they are `sameAs`, the component states their pictures
+   place): an `add` or `change` state drops
    `change` and `today` (and today's picture file is deleted, in the book and in the state's accepted copy, so no
    review opens); a `remove` state is deleted, a `removed` decision naming its key is written, and sections and
    requirements stop naming it. A removal something still depends on (another state is `sameAs` it, or a picture
