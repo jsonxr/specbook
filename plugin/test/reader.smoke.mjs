@@ -687,6 +687,22 @@ try {
     await page.keyboard.press('Escape');
   });
 
+  await check('every dropdown in the header ends in the toolbar\'s chevron', async () => {
+    await open();
+    await page.waitForSelector('.share-pill .share-start', { timeout: 3000 });
+    const bad = await page.evaluate(() => ['#view-btn', '#claude-btn', '.share-pill .share-start'].map(s => {
+      const b = document.querySelector(s);
+      if (!b) { return `${s} is missing`; }
+      const chevs = b.querySelectorAll('svg path[d="M6 9l6 6 6-6"]');
+      const r = chevs.length === 1 ? chevs[0].closest('svg').getBoundingClientRect() : null;
+      if (!r || Math.round(r.width) !== 18 || Math.round(r.height) !== 18) { return `${s} has ${chevs.length} chevrons${r ? ` of ${r.width}x${r.height}` : ''}`; }
+      return b.textContent.includes('▾') ? `${s} still says ▾` : null;
+    }).filter(Boolean));
+    if (bad.length) {
+      throw new Error(bad.join('; '));
+    }
+  });
+
   await check('Share asks for a pin, Start shares, and the menu then has the link, this computer\'s address, who is here and only Stop sharing', async () => {
     await open();
     // The book does not share itself: the pill offers to.
@@ -736,11 +752,12 @@ try {
       local: !!document.querySelector('.share-menu .share-local'),
       oneLine: (() => { const u = document.querySelector('.share-menu .share-url'); return u && u.getBoundingClientRect().height < parseFloat(getComputedStyle(u).fontSize) * 2.2; })(),
       fields: document.querySelectorAll('.share-menu input').length,
-      label: document.querySelector('.share-pill .share-more')?.textContent,
+      label: document.querySelector('.share-pill .share-more')?.textContent.trim(),
+      chev: document.querySelectorAll('.share-pill .share-more svg path[d="M6 9l6 6 6-6"]').length,
       acts: [...document.querySelectorAll('.share-menu .share-acts button')].map(b => b.textContent),
       people: [...document.querySelectorAll('.share-menu .share-people li')].map(li => li.textContent),
     }));
-    if (menu.input !== link || !menu.copy || menu.fields !== 0 || menu.local || !menu.oneLine || menu.label !== 'Share ▾' || menu.acts.join() !== 'Stop sharing' || !menu.people.some(t => t.startsWith('Ana'))) {
+    if (menu.input !== link || !menu.copy || menu.fields !== 0 || menu.local || !menu.oneLine || menu.label !== 'Share' || menu.chev !== 1 || menu.acts.join() !== 'Stop sharing' || !menu.people.some(t => t.startsWith('Ana'))) {
       throw new Error(`the share menu is wrong: ${JSON.stringify(menu)}`);
     }
     // A reloaded tab hears who is reading already (Ana says no new hello): her face is back.

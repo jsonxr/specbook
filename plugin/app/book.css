@@ -544,6 +544,12 @@ body.followed::after { content: ""; position: fixed; inset: 0; border: 3px solid
 .tool-badge { position: absolute; top: -5px; right: -6px; font: 700 10px var(--sans); background: var(--note); color: #222; border-radius: 8px; padding: 0 5px; border: 2px solid var(--surface); }
 .tool-badge[hidden] { display: none; }
 #share-slot { display: flex; align-items: center; }
+/* Every dropdown in the header ends in the toolbar's chevron: muted in View and Share, Claude's color in Claude. */
+.chev { display: inline-flex; flex: none; color: var(--muted); }
+.chev svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#view-btn, .share-start, .share-more { display: inline-flex; align-items: center; gap: 4px; }
+.claude-btn .chev { color: inherit; }
+.claude-btn .chev svg { fill: none; }
 .claude-btn { font: 700 14px var(--sans); color: var(--claude, #d97757); background: #2a1c16; border: 1px solid #5c3a2c; border-radius: 9px; padding: 6px 12px; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 7px; }
 .claude-btn svg { fill: currentColor; }
 .claude-btn.busy svg { animation: claude-pulse 1.2s infinite; }
@@ -587,7 +593,7 @@ body.guest #claude-menu { display: none; }
   /* Every menu in the bar hangs from the bar (sticky, so positioned), full width less a margin, never off the screen. */
   .share-pill, .bar .menu-wrap { position: static; }
   .share-menu, .bar .bar-menu { top: 100%; left: 8px; right: 8px; width: auto; min-width: 0; max-width: none; max-height: calc(100dvh - 140px); overflow-y: auto; }
-  .claude-btn span:not(.claude-busy) { display: none; }
+  .claude-btn span:not(.claude-busy):not(.chev) { display: none; }
   main { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
   /* A shared book's status chip sits above the toolbar, not under it. */
   body .share-chip { bottom: calc(63px + env(safe-area-inset-bottom)); }

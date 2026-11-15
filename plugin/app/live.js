@@ -189,6 +189,20 @@
     }
     if (bar && !chip.isConnected) { bar.appendChild(chip); }
   }
+  // The toolbar's down arrow, which ends every dropdown in the header (index.html draws the same for View and Claude).
+  function chevron() {
+    var NS = 'http://www.w3.org/2000/svg';
+    var wrap = document.createElement('span');
+    wrap.className = 'chev';
+    wrap.setAttribute('aria-hidden', 'true');
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('width', '18'); svg.setAttribute('height', '18');
+    var path = document.createElementNS(NS, 'path');
+    path.setAttribute('d', 'M6 9l6 6 6-6');
+    svg.appendChild(path);
+    wrap.appendChild(svg);
+    return wrap;
+  }
   function initials(n) { return (String(n || '?').trim().charAt(0) || '?').toUpperCase(); }
   function hostState() { return guest ? 'live' : Host.state(); }
   // The plain link: it never carries the pin.
@@ -241,7 +255,7 @@
     } else if (st === 'off' && !connectingNow) {
       // Not shared: Share opens the menu, where the owner chooses a pin and presses Start.
       var b = document.createElement('button');
-      b.type = 'button'; b.className = 'bar-btn share-start'; b.textContent = 'Share';
+      b.type = 'button'; b.className = 'bar-btn share-start'; b.textContent = 'Share'; b.appendChild(chevron());
       b.title = 'Share this book: anyone with the link can read it and leave notes';
       b.setAttribute('aria-expanded', String(menuOpen));
       b.addEventListener('click', function (e) { e.stopPropagation(); menuOpen = !menuOpen; render(); });
@@ -278,9 +292,9 @@
         });
         pill.appendChild(faces);
       }
-      // Share ▾ opens the menu: the link and Copy, who is here, and (for the owner) the pin and the share's controls.
+      // Share opens the menu: the link and Copy, who is here, and (for the owner) the pin and the share's controls.
       var more = document.createElement('button');
-      more.type = 'button'; more.className = 'share-more'; more.textContent = 'Share ▾';
+      more.type = 'button'; more.className = 'share-more'; more.textContent = 'Share'; more.appendChild(chevron());
       more.title = 'The link: anyone with it can read the book and leave notes';
       more.setAttribute('aria-expanded', String(menuOpen));
       more.addEventListener('click', function (e) { e.stopPropagation(); menuOpen = !menuOpen; render(); });
