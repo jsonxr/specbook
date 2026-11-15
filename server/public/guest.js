@@ -65,8 +65,10 @@
   var chip = document.createElement('div');
   chip.className = 'share-chip';
   chip.setAttribute('role', 'status');
-  function status(text, bad) {
+  // The chip says what is wrong (or that it is connecting); once the book is live it hides, keeping its text.
+  function status(text, bad, quiet) {
     chip.textContent = text;
+    chip.hidden = !!quiet;
     chip.classList.toggle('bad', !!bad);
     if (!chip.isConnected) { document.body.appendChild(chip); }
   }
@@ -138,7 +140,9 @@
   function fail(text, final) { var e = new Error(text); e.final = !!final; return e; }
   function connect() {
     return fetch('/api/rooms/' + ROOM).then(function (r) {
-      if (r.status === 404) { throw fail('This share has ended. Ask for a new link.', true); }
+      // Ended, or expired while the owner's book was closed (the owner's next open brings the same link back).
+      if (r.status === 410) { throw fail('This share has ended. Ask for a new link.', true); }
+      if (r.status === 404) { throw fail('This share isn\u2019t open right now. Reload this page once the owner has the book open, or ask for a new link.', true); }
       return r.ok ? r.json() : { host: true };
     }).then(function (room) {
       roomProtocol = Math.min(PROTOCOL, Number(room.protocol) || 1);
@@ -320,7 +324,7 @@
         // Disconnected is how a host that went away first shows; a new connection is cheap if it was only a blip.
         if (['failed', 'closed', 'disconnected'].indexOf(ch.pc.connectionState) >= 0) { onLost(); }
       });
-      status('Live · ' + me.name);
+      status('Live · ' + me.name, false, true);
       settleWaiters(ch, null);
       peerState('live');
       if (loaded) { changedHandlers.forEach(function (fn) { fn(); }); } else { loadBook(); }

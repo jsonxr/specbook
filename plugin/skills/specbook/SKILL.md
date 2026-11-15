@@ -93,7 +93,7 @@ For `design`, `build`, `evidence`, `media` and `revise`, **REQUIRED SUB-SKILL:**
 ### init
 
 1. `node ${CLAUDE_PLUGIN_ROOT}/server/init.mjs --project <repo root> [--data <dir>] [--title "<App>"]`. It
-   copies the starter, creates the media folders, appends the git-ignore lines (`requests/`, `.server.json`,
+   copies the starter, creates the media folders, appends the git-ignore lines (`requests/`, `.server.json`, `.share.json`,
    captured media and `*.tmp` files under the data folder; each line only if missing) and
    mints ids. It refuses to overwrite an existing book.
 2. **REQUIRED SUB-SKILL:** `specbook:design` for the whole app, replacing the starter's example chapters and

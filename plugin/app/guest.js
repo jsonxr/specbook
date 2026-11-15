@@ -12,8 +12,29 @@
   function ours(url) {
     return url.origin === location.origin && /^\/(api|data|app)\//.test(url.pathname) && !/^\/api\/rooms\//.test(url.pathname);
   }
+  // The host answers a guest's 16th waiting request with 429 busy (IN_FLIGHT in host.js), and a book loads every
+  // mockup at once, so requests wait their turn here: at most SENDING at a time.
+  var SENDING = 8;
+  var sending = 0;
+  var waiting = [];
+  function next() {
+    while (sending < SENDING && waiting.length) {
+      var job = waiting.shift();
+      sending++;
+      share.request(job.method, job.path, job.body).then(job.resolve, job.reject).then(function () {
+        sending--;
+        next();
+      });
+    }
+  }
+  function request(method, path, body) {
+    return new Promise(function (resolve, reject) {
+      waiting.push({ method: method, path: path, body: body, resolve: resolve, reject: reject });
+      next();
+    });
+  }
   function viaHost(method, path, body) {
-    return share.request(method, path, body).then(function (res) {
+    return request(method, path, body).then(function (res) {
       var empty = res.status === 204 || res.status === 304 || res.status < 200;
       return new Response(empty ? null : res.bytes, { status: res.status, headers: { 'content-type': res.type } });
     });
@@ -79,7 +100,7 @@
   share.onChanged(function () { if (window.SpecBook && window.SpecBook.poll) { window.SpecBook.poll(); } });
 
   function text(path) {
-    return share.request('GET', path).then(function (res) {
+    return request('GET', path).then(function (res) {
       if (res.status !== 200) { throw new Error('Could not load ' + path + ' from the host (' + res.status + ').'); }
       return new TextDecoder().decode(res.bytes);
     });

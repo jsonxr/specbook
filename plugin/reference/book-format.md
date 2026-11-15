@@ -90,7 +90,7 @@ or from a note).
     "n1k2": { "item": "ONB-8KAB", "text": "It doesn't say why…", "status": "draft | sent | answered | frozen",
               "created": "ISO", "reply": "Claude's answer when it made no change", "causes": ["DIR-4K7M"],
               "closedFor": ["ONB-8KAB"], "target": "…", "section": "…",
-              "pin": { "rx": 0.4, "ry": 0.2, "dx": 90, "dy": -70, "element": { "mockup": "…", "selector": "…", "text": "…", "html": "…" } } }
+              "pin": { "rx": 0.4, "ry": 0.2, "ax": 120, "ay": 9, "ch": 14, "cx": 3, "cy": 9, "dx": 90, "dy": -70, "element": { "mockup": "…", "selector": "…", "text": "…", "html": "…" } } }
   },
   "tries": { "ONB-8KAB": [ { "value": { "text": "…" }, "frozenAt": "ISO", "notes": ["n1k2"] } ] },
   "opened": { "ONB-8KAB": "ISO time the review opened" },
@@ -109,7 +109,11 @@ or from a note).
 - **Note statuses.** `draft`: written, not sent; the page may edit and move it. `sent`: in a Revise request, read-only.
   `answered`: the Revise that carried it was filed; read-only, shown on the review until Change or Accept. `frozen`: kept
   with a try or a history entry; read-only. Only the page's `draft` notes are written by the page; the server keeps
-  every other note as stored. A note's `item` is the key it was dropped on; `target`/`section` and `pin` keep its spot.
+  every other note as stored. A note's `item` is the key it was dropped on; `target`/`section` and `pin` keep its spot. In `pin`, `ch` is
+  the letter of the target's shown text it was dropped on, and `cx`, `cy` the pixels from that letter's top-left, so
+  the pin stays on that word wherever the line wraps; `ax`, `ay` are the pixels from the target's top-left (exact on
+  a mockup); `rx`, `ry`, fractions of the target's box, are the fallback for notes made before them. `dx`, `dy` place
+  the sticky from the pin.
 - **Causes.** A note dropped on a section or frame is often answered by changes to other items. `causes` lists the
   keys of those items (written by `review.mjs link`); the note shows in the review stack of its own item and of each
   cause. `closedFor` lists keys whose review was accepted while the note was still open on others, so it stops

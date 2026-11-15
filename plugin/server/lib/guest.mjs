@@ -84,10 +84,12 @@ export function checkGuestNotes(notes, guest) {
       guests++;
       if (note.authorKey === guest.key) {
         theirs++;
-        if (typeof note.text === 'string' && note.text.length > GUEST_TEXT) {
-          throw Object.assign(new Error('Note too long'), { code: 'bad-note' });
-        }
       }
+    }
+    // A note this guest wrote, or changed last, is held to a note's length.
+    const wrote = note && note.status === 'draft' && (note.authorKey === guest.key || note.lastByKey === guest.key);
+    if (wrote && typeof note.text === 'string' && note.text.length > GUEST_TEXT) {
+      throw Object.assign(new Error('Note too long'), { code: 'bad-note' });
     }
   }
   if (theirs > GUEST_DRAFTS || guests > ALL_GUEST_DRAFTS) {
@@ -125,12 +127,12 @@ export function mergeGuestNotes(stored, sent, guest) {
 }
 
 // The notes to store after a per-note save (live sharing): `changes` maps a note id to its new draft (already cleaned)
-// or null to delete it. `writer` is { guest, name, key? }. The owner may change any draft; a guest only their own, or a
-// new id, which becomes theirs. A note past draft (sent to Claude, answered) is never changed. Saves are applied one
+// or null to delete it. `writer` is { guest, name, key? }. Everyone in the book may change or delete any draft (they
+// are collaborating); a new note keeps who started it. A note past draft (sent to Claude, answered) is never changed. Saves are applied one
 // after another as they arrive, so a change to one note never drops another's: the later change to the same note
 // wins, and `lastBy` says who made it.
-// Ids the writer may not change are left alone and listed in `skipped` (when given), so the page knows they were not
-// saved.
+// Ids that may not change (past draft) are left alone and listed in `skipped` (when given), so the page knows they
+// were not saved.
 export function applyNoteChanges(stored, changes, writer, skipped = []) {
   const out = { ...stored };
   for (const [id, next] of Object.entries(changes)) {
@@ -138,7 +140,7 @@ export function applyNoteChanges(stored, changes, writer, skipped = []) {
       continue;
     }
     const was = Object.hasOwn(stored, id) ? stored[id] : null;
-    if ((was && was.status !== 'draft') || (writer.guest && was && was.authorKey !== writer.key)) {
+    if (was && was.status !== 'draft') {
       skipped.push(id);
       continue;
     }
@@ -152,7 +154,7 @@ export function applyNoteChanges(stored, changes, writer, skipped = []) {
         note[k] = was[k];
       }
     }
-    if (writer.guest) {
+    if (writer.guest && !was) {
       note.author = writer.name;
       note.authorKey = writer.key;
     }

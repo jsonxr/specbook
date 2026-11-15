@@ -16,12 +16,12 @@ test('a live message goes to everyone but its sender', () => {
   assert.deepEqual(R.relayTargets('host', ['a', 'b']), ['a', 'b']);
 });
 
-test('only the owner, or the note\'s own guest, may send a draft of it', () => {
+test('anyone in the book may send a draft of any note, as they may edit it', () => {
   const notes = { n1: { authorKey: 'k2' }, n2: { authorKey: 'k1' }, n3: {} };
   assert.equal(R.mayDraft({ host: true }, 'n1', notes), true);
-  assert.equal(R.mayDraft({ key: 'k1' }, 'n1', notes), false);
+  assert.equal(R.mayDraft({ key: 'k1' }, 'n1', notes), true);
   assert.equal(R.mayDraft({ key: 'k1' }, 'n2', notes), true);
-  assert.equal(R.mayDraft({ key: 'k1' }, 'n3', notes), false);
+  assert.equal(R.mayDraft({ key: 'k1' }, 'n3', notes), true);
   assert.equal(R.mayDraft({ key: 'k1' }, 'brand-new', notes), true);
   assert.equal(R.mayDraft({ key: 'k1' }, '__proto__', notes), false);
 });

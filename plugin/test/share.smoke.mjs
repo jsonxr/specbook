@@ -42,6 +42,10 @@ appendFileSync(join(data, 'mockups', 'todos-list-1.html'), '<img class="probe" s
 const bookFile = join(data, 'book.json');
 const bookJson = JSON.parse(readFileSync(bookFile, 'utf8'));
 bookJson.settings = { ...(bookJson.settings ?? {}), shareBroker: BROKER };
+// More mockups than the host answers for one guest at once, as a real book has.
+const due = bookJson.chapters.flatMap(c => c.sections).find(s => s.id === 'due');
+due.frames = Array.from({ length: 30 }, (_, i) => ({ id: `later-due-${i + 1}`, caption: `Extra ${i + 1}`, mockup: `mockups/extra-${i + 1}.html` }));
+due.frames.forEach((f, i) => writeFileSync(join(data, f.mockup), `<div class="phone"><p>Extra ${i + 1}</p></div>`));
 writeFileSync(bookFile, JSON.stringify(bookJson, null, 2));
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -130,8 +134,25 @@ try {
       throw new Error(`${e.message}\nchip: ${await guest.evaluate(() => document.querySelector('.share-chip')?.textContent)}\nbody: ${(await guest.evaluate(() => document.body.innerHTML)).slice(0, 400)}`);
     });
     await guest.waitForFunction(() => /Live · Ann/.test(document.querySelector('.share-chip')?.textContent ?? ''), null, { timeout: 5000 });
+    if (await guest.locator('.share-chip').isVisible()) {
+      throw new Error('the status chip still shows once the guest is live');
+    }
     if (await guest.evaluate(() => location.hash) !== '') {
       throw new Error('the link key stayed in the address');
+    }
+  });
+
+  await check('a guest sees every mockup with the book\'s stylesheet, however many the book has', async () => {
+    const seen = page => page.evaluate(() => [...document.querySelectorAll('[data-mockup]')].map(h => ({
+      path: h.dataset.mockup,
+      css: h.shadowRoot.querySelector('style').textContent.length,
+      missing: !!h.shadowRoot.querySelector('.phone') === false,
+    })));
+    const mine = await seen(owner);
+    const theirs = await seen(guest);
+    const bad = theirs.filter(m => m.missing || m.css !== mine[0].css);
+    if (theirs.length !== mine.length || mine.length < 30 || bad.length) {
+      throw new Error(`owner ${mine.length} mockups (css ${mine[0]?.css}), guest ${theirs.length}; wrong: ${JSON.stringify(bad.slice(0, 3))}`);
     }
   });
 
@@ -179,18 +200,19 @@ try {
     const r = h.getBoundingClientRect();
     return { x: r.left + Math.min(200, r.width / 2), y: r.top + r.height / 2 };
   });
-  const comment = async (page, text) => {
+  // `dx` moves the click along the heading, off a pin already there.
+  const comment = async (page, text, dx = 0) => {
     await page.keyboard.press('c');
     await page.waitForSelector('body.commenting');
     const at = await spot(page);
-    await page.mouse.click(at.x, at.y);
-    await page.waitForSelector('.note-pop.composer textarea');
+    await page.mouse.click(at.x + dx, at.y);
+    await page.waitForSelector('.sticky.editing textarea');
     await page.keyboard.type(text);
     await page.keyboard.press('Enter');
     await page.keyboard.press('Escape');
   };
 
-  await check('a guest\'s note is saved as theirs, and the owner sees it with their name', async () => {
+  await check('a guest\'s note is saved as theirs, and the owner sees it, with no name on it', async () => {
     await comment(guest, 'From Ann over WebRTC');
     const saved = await waitFor(() => Object.values(review().notes).find(n => n.text === 'From Ann over WebRTC'), 5000, 'review.json to hold the guest note');
     if (saved.author !== 'Ann' || !saved.authorKey) {
@@ -203,58 +225,152 @@ try {
     await owner.waitForFunction(() => document.querySelectorAll('.share-pill .face').length === 2, null, { timeout: 5000 }).catch(async e => {
       throw new Error(`${e.message}: ${await owner.evaluate(() => document.querySelector('.share-pill')?.outerHTML)}`);
     });
-    await owner.waitForFunction(() => [...document.querySelectorAll('.sticky .st-by')].some(e => e.textContent === 'Ann'), null, { timeout: 8000 });
-  });
-
-  await check('a guest\'s typing shows in the owner\'s page before it is saved', async () => {
-    await guest.keyboard.press('c');
-    await guest.waitForSelector('body.commenting');
-    const at = await spot(guest);
-    await guest.mouse.click(at.x + 40, at.y);
-    await guest.waitForSelector('.note-pop.composer textarea');
-    await guest.keyboard.type('Typing live', { delay: 20 });
-    await owner.waitForFunction(() => [...document.querySelectorAll('.sticky.ghost')].some(g => g.querySelector('.gh-text')?.textContent === 'Typing live' && /Ann is typing/.test(g.querySelector('.gh-by')?.textContent ?? '')), null, { timeout: 3000 }).catch(async e => {
-      throw new Error(`${e.message}\nghosts: ${await owner.evaluate(() => [...document.querySelectorAll('.sticky.ghost')].map(g => g.outerHTML).join('\n'))}\npeople: ${JSON.stringify(await owner.evaluate(() => window.SpecLive.people()))}\nguest composer: ${await guest.evaluate(() => document.querySelector('.note-pop.composer textarea')?.value)}`);
-    });
-    if (Object.values(review().notes).some(n => n.text === 'Typing live')) {
-      throw new Error('the draft was saved before it was posted');
+    await owner.waitForFunction(() => [...document.querySelectorAll('.sticky:not([hidden]) textarea')].some(t => t.value === 'From Ann over WebRTC'), null, { timeout: 8000 });
+    if (await owner.locator('.sticky .st-by').count()) {
+      throw new Error('a sticky names who wrote it');
     }
-    await guest.keyboard.press('Escape');
-    await guest.keyboard.press('Escape');
   });
 
-  await check('the owner\'s note reaches the guest within a second, with the owner\'s name, and the guest cannot change it', async () => {
-    await comment(owner, 'From the owner');
+  // The sticky with this text on a page: where it is, whether it shows, and whether its pin is turned by its arrow.
+  const stickyOf = (page, text) => page.evaluate(t => {
+    const st = [...document.querySelectorAll('.sticky')].find(x => x.querySelector('textarea').value === t);
+    if (!st) {
+      return null;
+    }
+    const k = /^Note (\d+) /.exec(st.getAttribute('aria-label') ?? '')?.[1];
+    const pin = k && [...document.querySelectorAll('.pin')].find(p => (p.getAttribute('aria-label') || '').startsWith(`Note ${k} on`));
+    return { left: parseFloat(st.style.left), top: parseFloat(st.style.top), hidden: st.hidden, turned: !!pin?.dataset.rot, ghosts: document.querySelectorAll('.sticky.ghost').length };
+  }, text);
+  // The middle of a sticky's left edge, scrolled into view.
+  const stickySpot = (page, text) => page.evaluate(t => {
+    const x = [...document.querySelectorAll('.sticky')].find(e => e.querySelector('textarea').value === t);
+    x.scrollIntoView({ block: 'center', behavior: 'instant' });
+    const r = x.getBoundingClientRect();
+    return { x: r.left + 20, y: r.top + r.height / 2 };
+  }, text);
+
+  await check('a guest\'s typing and moving show on the owner\'s sticky as they happen, arrow and all', async () => {
+    // Ann edits her note (a click selects it, a second edits it): the owner sees each word on the note's own sticky.
+    const box = await stickySpot(guest, 'From Ann over WebRTC');
+    await guest.mouse.click(box.x, box.y);
+    await guest.mouse.click(box.x, box.y);
+    await guest.waitForSelector('.sticky.editing textarea');
+    await guest.keyboard.type(' live', { delay: 30 });
+    await owner.waitForFunction(() => [...document.querySelectorAll('.sticky:not([hidden]) textarea')].some(t => t.value === 'From Ann over WebRTC live'), null, { timeout: 3000 });
+    const typed = await stickyOf(owner, 'From Ann over WebRTC live');
+    if (typed.hidden || !typed.turned || typed.ghosts) {
+      throw new Error(`the owner's sticky while Ann types: ${JSON.stringify(typed)}`);
+    }
+    await guest.keyboard.press('Enter');
+    // Ann drags it 120 pixels right: the owner's sticky follows before she lets go.
+    const before = await stickyOf(owner, 'From Ann over WebRTC live');
+    const at = await stickySpot(guest, 'From Ann over WebRTC live');
+    await guest.mouse.move(at.x, at.y);
+    await guest.mouse.down();
+    await guest.mouse.move(at.x + 60, at.y, { steps: 4 });
+    await guest.mouse.move(at.x + 120, at.y, { steps: 4 });
+    await owner.waitForFunction(([t, left]) => {
+      const x = [...document.querySelectorAll('.sticky')].find(e => e.querySelector('textarea').value === t);
+      return x && parseFloat(x.style.left) > left + 100;
+    }, ['From Ann over WebRTC live', before.left], { timeout: 3000 }).catch(async e => {
+      throw new Error(`${e.message}: before ${JSON.stringify(before)}, now ${JSON.stringify(await stickyOf(owner, 'From Ann over WebRTC live'))}, Ann's ${JSON.stringify(await stickyOf(guest, 'From Ann over WebRTC live'))}`);
+    });
+    const moving = await stickyOf(owner, 'From Ann over WebRTC live');
+    await guest.mouse.up();
+    if (moving.hidden || !moving.turned || moving.ghosts) {
+      throw new Error(`the owner's sticky while Ann moves it: ${JSON.stringify(moving)}`);
+    }
+  });
+
+  await check('the owner\'s note reaches the guest within a second, and the guest can change it', async () => {
+    await comment(owner, 'From the owner', 80);
     const t0 = Date.now();
-    await guest.waitForFunction(name => [...document.querySelectorAll('.sticky')].some(s => s.querySelector('textarea')?.value === 'From the owner' && s.classList.contains('not-mine') && s.querySelector('.st-by')?.textContent === name), ownerName, { timeout: 4000 });
+    await guest.waitForFunction(() => [...document.querySelectorAll('.sticky:not([hidden])')].some(s => s.querySelector('textarea')?.value === 'From the owner'), null, { timeout: 4000 });
     if (Date.now() - t0 > 1000) {
       throw new Error(`the owner's note took ${Date.now() - t0} ms to reach the guest`);
     }
-    // A forged save of the owner's note (as a modified page would send) is ignored by the server.
-    const changed = await guest.evaluate(async () => {
-      const b = await (await fetch('/api/book')).json();
-      const notes = {};
-      for (const [id, n] of Object.entries(b.review.notes)) {
-        if (n.status === 'draft') {
-          notes[id] = { ...n, text: n.author ? n.text : 'hijacked' };
-        }
-      }
-      return (await fetch('/api/notes', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rev: b.review.rev, notes }) })).status;
+    // Everyone collaborates on every note: Ann edits the owner's.
+    const at = await stickySpot(guest, 'From the owner');
+    await guest.mouse.click(at.x, at.y);
+    await guest.mouse.click(at.x, at.y);
+    await guest.waitForSelector('.sticky.editing textarea', { timeout: 3000 }).catch(async e => {
+      throw new Error(`${e.message}\nat the click: ${await guest.evaluate(p => document.elementFromPoint(p.x, p.y)?.outerHTML.slice(0, 300), at)}\nlocked: ${await guest.evaluate(() => document.body.classList.contains('locked-notes'))}`);
     });
-    if (changed !== 200) {
-      throw new Error(`the save answered ${changed}`);
-    }
-    if (Object.values(review().notes).some(n => n.text === 'hijacked')) {
-      throw new Error('a guest changed the owner\'s note');
-    }
+    await guest.keyboard.type(', and Ann');
+    await guest.keyboard.press('Enter');
+    await waitFor(() => Object.values(review().notes).some(n => n.text === 'From the owner, and Ann'), 5000, 'review.json to hold Ann\'s change to the owner\'s note');
+    await owner.waitForFunction(() => [...document.querySelectorAll('.sticky textarea')].some(t => t.value === 'From the owner, and Ann'), null, { timeout: 5000 });
   });
 
-  await check('a forged draft of the owner\'s note never shows on the owner\'s page', async () => {
-    const id = Object.entries(review().notes).find(([, n]) => n.text === 'From the owner')[0];
-    await guest.evaluate(id => window.SpecShare.send({ kind: 'draft', note: id, item: 'TOD-001', target: 'TOD-001', rx: 0, ry: 0, text: 'forged' }), id);
-    await sleep(1000);
-    if (await owner.evaluate(() => [...document.querySelectorAll('.sticky.ghost .gh-text')].some(e => e.textContent === 'forged'))) {
-      throw new Error('the owner\'s page showed a guest\'s draft of the owner\'s note');
+  await check('a note\'s pin points at the same words for the owner and a guest, whatever their window width', async () => {
+    // The owner's heading has Mark ready beside it and the guest's does not: the pins still sit on the same letters.
+    const offsets = page => page.evaluate(() => [...document.querySelectorAll('#todos-list > h3 .pin')].map(x => [x.offsetLeft, x.offsetTop, x.getAttribute('aria-label')]).sort((p, q) => p[0] - q[0] || p[1] - q[1]));
+    const mine = await offsets(owner), theirs = await offsets(guest);
+    if (!mine.length || JSON.stringify(mine) !== JSON.stringify(theirs)) {
+      throw new Error(`pins on the heading: owner ${JSON.stringify(mine)}, guest ${JSON.stringify(theirs)}; stored ${JSON.stringify(Object.values(review().notes).filter(n => n.status === 'draft').map(n => [n.text, n.pin]))}; heading text owner ${JSON.stringify(await owner.evaluate(() => document.querySelector('#todos-list > h3').textContent))} guest ${JSON.stringify(await guest.evaluate(() => document.querySelector('#todos-list > h3').textContent))}`);
+    }
+    // A note on a word in a requirement, read in a narrower window where the line wraps elsewhere.
+    await owner.keyboard.press('c');
+    await owner.waitForSelector('body.commenting');
+    const at = await owner.evaluate(() => {
+      const walker = document.createTreeWalker(document.querySelector('main'), NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const i = n.data.indexOf('keeps that place');
+        if (i >= 0) {
+          n.parentElement.scrollIntoView({ block: 'center', behavior: 'instant' });
+          const r = document.createRange();
+          r.setStart(n, i + 6);
+          r.setEnd(n, i + 10);
+          const b = r.getBoundingClientRect();
+          return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+        }
+      }
+      return null;
+    });
+    if (!at) {
+      throw new Error('no requirement says "keeps that place"');
+    }
+    await owner.mouse.click(at.x, at.y);
+    await owner.waitForSelector('.sticky.editing textarea');
+    await owner.keyboard.type('On that word');
+    await owner.keyboard.press('Enter');
+    await owner.keyboard.press('Escape');
+    await guest.setViewportSize({ width: 700, height: 900 });
+    await guest.waitForFunction(() => [...document.querySelectorAll('.sticky:not(.ghost):not([hidden]) textarea')].some(t => t.value === 'On that word'), null, { timeout: 15000 });
+    // The word under the pin's point of the note with this text.
+    const wordUnder = page => page.evaluate(text => {
+      const st = [...document.querySelectorAll('.sticky:not(.ghost)')].find(s => s.querySelector('textarea').value === text);
+      const label = /^Note (\d+) /.exec(st?.getAttribute('aria-label') ?? '');
+      if (!label) {
+        return `no shown sticky (${st ? `hidden ${st.hidden}, label ${st.getAttribute('aria-label')}` : 'none'})`;
+      }
+      const k = label[1];
+      const pin = [...document.querySelectorAll('.pin')].find(p => (p.getAttribute('aria-label') || '').startsWith(`Note ${k} on`));
+      pin.scrollIntoView({ block: 'center', behavior: 'instant' });
+      // The pin's point: its box's bottom-left corner (bottom-right when flipped), whatever way it is turned.
+      const t = pin.parentElement.getBoundingClientRect();
+      const x = t.left + pin.parentElement.clientLeft + pin.offsetLeft + (pin.classList.contains('flip') ? pin.offsetWidth : 0);
+      const y = t.top + pin.parentElement.clientTop + pin.offsetTop + pin.offsetHeight;
+      document.body.classList.add('probe-hide');
+      const style = document.createElement('style');
+      style.textContent = '.probe-hide .pin, .probe-hide .note-layer { visibility: hidden !important; }';
+      document.head.appendChild(style);
+      const c = document.caretRangeFromPoint(x, y);
+      style.remove();
+      document.body.classList.remove('probe-hide');
+      if (!c || c.startContainer.nodeType !== 3) {
+        return null;
+      }
+      const s = c.startContainer.data;
+      let a = c.startOffset, b = c.startOffset;
+      while (a > 0 && /\w/.test(s[a - 1])) { a--; }
+      while (b < s.length && /\w/.test(s[b])) { b++; }
+      return s.slice(a, b);
+    }, 'On that word');
+    const words = [await wordUnder(owner), await wordUnder(guest)];
+    await guest.setViewportSize({ width: 1280, height: 900 });
+    if (words[0] !== 'that' || words[1] !== 'that') {
+      throw new Error(`the pin points at "${words[0]}" for the owner and "${words[1]}" for a guest 700 pixels wide`);
     }
   });
 
@@ -313,7 +429,7 @@ try {
     await owner.waitForFunction(() => document.querySelectorAll('.share-pill .face').length === 2, null, { timeout: 8000 });
   });
 
-  await check('the same guest on the same device in a new tab is not asked their name, and the older tab is disconnected', async () => {
+  await check('the same guest in a second tab is not asked their name, both tabs stay live, and they are one face', async () => {
     const second = await guestCtx.newPage();
     second.on('pageerror', e => errors.push(`guest2: ${e.message}`));
     try {
@@ -322,23 +438,31 @@ try {
       if (await second.locator('.share-join input').count()) {
         throw new Error('the second tab asked for a name again');
       }
-      await guest.waitForSelector('.share-kicked', { timeout: 5000 });
-      await owner.waitForFunction(() => window.SpecHost.people().length === 2, null, { timeout: 5000 });
-      await sleep(2000);
-      if (await guest.evaluate(() => /Live/.test(document.querySelector('.share-chip')?.textContent ?? ''))) {
-        throw new Error('the disconnected tab connected again by itself');
+      await sleep(1500);
+      const first = await guest.evaluate(() => ({ live: /Live/.test(document.querySelector('.share-chip')?.textContent ?? ''), kicked: !!document.querySelector('.share-kicked') }));
+      if (!first.live || first.kicked) {
+        throw new Error(`the first tab was let go: ${JSON.stringify(first)}`);
       }
-      // Use this tab instead: it takes over, and the other is the one disconnected now.
-      await guest.click('.share-kicked button');
-      await guest.waitForFunction(() => /Live · Ann/.test(document.querySelector('.share-chip')?.textContent ?? ''), null, { timeout: 20000 });
-      await second.waitForSelector('.share-kicked', { timeout: 5000 });
-      await owner.waitForFunction(() => window.SpecHost.people().length === 2, null, { timeout: 5000 });
+      const people = await owner.evaluate(() => window.SpecHost.people().length);
+      const faces = await owner.evaluate(() => document.querySelectorAll('.share-pill .face').length);
+      if (people !== 2 || faces !== 2) {
+        throw new Error(`two tabs of Ann made ${people} people and ${faces} faces`);
+      }
     } finally {
-      await second.close();
+      await second.close({ runBeforeUnload: true });
+    }
+    // Closing one tab leaves Ann here, live in the other.
+    await sleep(1500);
+    const still = await owner.evaluate(() => window.SpecHost.people().map(p => p.name));
+    if (!still.includes('Ann')) {
+      throw new Error(`closing one of Ann's tabs took her out: ${JSON.stringify(still)}`);
+    }
+    if (!(await guest.evaluate(() => /Live/.test(document.querySelector('.share-chip')?.textContent ?? '')))) {
+      throw new Error('the first tab is not live after the second closed');
     }
   });
 
-  await check('another guest cannot clear a ghost of someone else\'s note', async () => {
+  await check('another guest cannot clear what someone else is typing in a note', async () => {
     const bob = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
     bob.on('pageerror', e => errors.push(`bob: ${e.message}`));
     try {
@@ -346,12 +470,14 @@ try {
       await bob.goto(link);
       await bob.waitForFunction(() => /Live · Bob/.test(document.querySelector('.share-chip')?.textContent ?? ''), null, { timeout: 20000 });
       await owner.waitForFunction(() => window.SpecHost.people().length === 3, null, { timeout: 5000 });
-      await guest.evaluate(() => window.SpecShare.send({ kind: 'draft', note: 'ann-ghost-1', item: 'TOD-001', target: 'TOD-001', rx: 0, ry: 0, text: 'Ann is writing' }));
-      await owner.waitForFunction(() => [...document.querySelectorAll('.sticky.ghost .gh-text')].some(e => e.textContent === 'Ann is writing'), null, { timeout: 3000 });
-      await bob.evaluate(() => window.SpecShare.send({ kind: 'typing', note: 'ann-ghost-1', on: false }));
+      const [id, n] = Object.entries(review().notes).find(([, x]) => x.text.startsWith('From Ann over WebRTC'));
+      await guest.evaluate(([nid, x]) => window.SpecShare.send({ kind: 'draft', note: nid, item: x.item, target: x.target, rx: x.pin.rx, ry: x.pin.ry, text: 'Ann is writing' }), [id, n]);
+      const shows = () => owner.evaluate(() => [...document.querySelectorAll('.sticky:not([hidden]) textarea')].some(t => t.value === 'Ann is writing'));
+      await owner.waitForFunction(() => [...document.querySelectorAll('.sticky:not([hidden]) textarea')].some(t => t.value === 'Ann is writing'), null, { timeout: 3000 });
+      await bob.evaluate(nid => window.SpecShare.send({ kind: 'typing', note: nid, on: false }), id);
       await sleep(2000);
-      if (!(await owner.evaluate(() => [...document.querySelectorAll('.sticky.ghost .gh-text')].some(e => e.textContent === 'Ann is writing')))) {
-        throw new Error('Bob cleared the ghost of Ann\'s note');
+      if (!(await shows())) {
+        throw new Error('Bob cleared what Ann is typing');
       }
     } finally {
       // Closed as a person closes a tab, so it says goodbye.
@@ -400,6 +526,49 @@ try {
     }
   });
 
+  await check('restarting the book\'s server keeps the link, and the guest reconnects', async () => {
+    await serve('--stop');
+    await serve('--port', String(PORT), '--detach');
+    await waitFor(async () => {
+      const v = await fetch(`${OWNER}api/share`).then(r => r.json(), () => null);
+      return v && v.state === 'live';
+    }, 20000, 'the share to be live again');
+    if ((await (await fetch(`${OWNER}api/share`)).json()).url !== link) {
+      throw new Error('the link changed when the server restarted');
+    }
+    await guest.waitForFunction(() => /Live · Ann/.test(document.querySelector('.share-chip')?.textContent ?? ''), null, { timeout: 20000 });
+  });
+
+  await check('a room\'s token renews it; another token cannot take it; once ended it stays ended', async () => {
+    const open = body => fetch(`${BROKER}/api/rooms`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const first = await (await open({ hours: 1, protocol: 2 })).json();
+    const renewed = await open({ hours: 2, protocol: 2, room: first.room, hostToken: first.hostToken });
+    const r = await renewed.json();
+    if (renewed.status !== 200 || r.room !== first.room || r.hostToken !== first.hostToken || !(Date.parse(r.expiresAt) > Date.parse(first.expiresAt))) {
+      throw new Error(`renew: ${renewed.status} ${JSON.stringify(r)} after ${JSON.stringify(first)}`);
+    }
+    const taken = await open({ hours: 2, room: first.room, hostToken: 'x'.repeat(32) });
+    if (taken.status !== 409) {
+      throw new Error(`another token got ${taken.status}`);
+    }
+    await fetch(`${BROKER}/api/rooms/${first.room}/end`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: first.hostToken }) });
+    const back = await open({ hours: 1, protocol: 2, room: first.room, hostToken: first.hostToken });
+    if (back.status !== 409) {
+      throw new Error(`an ended room was opened again: ${back.status}`);
+    }
+    const asked = await fetch(`${BROKER}/api/rooms/${first.room}`);
+    if (asked.status !== 410) {
+      throw new Error(`an ended room answers ${asked.status}, not 410`);
+    }
+    // A room nobody ended (expired, or never there) is opened under the id its host asks for.
+    const fresh = { room: 'kept-room-' + Date.now().toString(36).padStart(12, '0'), hostToken: 'h'.repeat(32) };
+    const made = await open({ hours: 1, protocol: 2, ...fresh });
+    const m = await made.json();
+    if (made.status !== 201 || m.room !== fresh.room || m.hostToken !== fresh.hostToken) {
+      throw new Error(`reopen: ${made.status} ${JSON.stringify(m)}`);
+    }
+  });
+
   await check('New link ends the old link', async () => {
     const before = errors.length;
     await owner2.evaluate(() => window.SpecHost.newLink());
@@ -408,9 +577,9 @@ try {
       const v = await (await fetch(`${OWNER}api/share`)).json();
       return v.state === 'live' && v.url && v.url !== link;
     }, 10000, 'a new link');
-    // The guest asking for its ended room is answered 404, as it should be: not a page error.
+    // The guest asking for its ended room is answered 410, as it should be: not a page error.
     for (let i = errors.length - 1; i >= before; i--) {
-      if (/^guest: Failed to load resource: .*404/.test(errors[i])) { errors.splice(i, 1); }
+      if (/^guest: Failed to load resource: .*(404|410)/.test(errors[i])) { errors.splice(i, 1); }
     }
   });
 

@@ -9,7 +9,9 @@ the guest, encrypted end to end; this server never sees or stores them. The hand
 `#` in the link, which browsers never send to a server, so this server cannot join a share either. (That holds for this code: the
 guest page comes from here, so an altered deployment could read the key. Run your own.) Only a page on the
 owner's machine (an `http://localhost` origin) may open a room from a browser. A room lasts until it expires (at most
-24 hours) or its host ends it (`POST /api/rooms/<room>/end` with the host token); while the host tab is closed, guests
+24 hours) or its host ends it (`POST /api/rooms/<room>/end` with the host token). Its host keeps the link by opening
+the room again with `{ room, hostToken }`: a live room is renewed, and one that expired is opened again under the same
+id. An ended room never is: for a week its address answers 410, so its guests are told it ended; while the host tab is closed, guests
 wait on their socket and hear `host-online` when it opens again: only in a room a host has opened, three at most from
 one address, and for an hour at most (then the socket closes with 4408 and the guest page asks for a reload). The host tab and the guests also pass live messages
 (presence, typing, following) over their own connection, never through this server.

@@ -9,6 +9,7 @@ const HEADERS = [HEADER, '# spec book (served by the specbook plugin): requests,
 export const IGNORED = [
   '<rel>/requests/',
   '<rel>/.server.json',
+  '<rel>/.share.json',
   '<rel>/media/*/*',
   '!<rel>/media/*/.gitkeep',
   '<rel>/**/*.tmp',

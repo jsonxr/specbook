@@ -11,6 +11,7 @@
 <body>
 <header class="bar" role="toolbar" aria-label="Design bar">
   <strong id="book-title" class="bar-title">Spec book</strong>
+  <button type="button" id="where" class="bar-where" aria-expanded="false" aria-controls="toc-nav" title="Contents"><span id="where-text">Contents</span><span class="bar-where-caret" aria-hidden="true">▾</span></button>
   <div class="menu-wrap view-wrap">
     <button type="button" id="view-btn" class="bar-btn ghost" aria-expanded="false" aria-controls="view-menu" title="What the book shows">View ▾</button>
     <div id="view-menu" class="bar-menu" hidden>
@@ -25,6 +26,8 @@
     </div>
   </div>
   <div class="tools" role="group" aria-label="Review">
+    <button type="button" id="toc-btn" class="tool toc-tool" aria-expanded="false" aria-controls="toc-nav" title="Contents" aria-label="Contents"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg></button>
+    <span class="tool-sep toc-tool" aria-hidden="true"></span>
     <button type="button" id="mode" class="tool tool-cmt" aria-pressed="false" aria-keyshortcuts="C" title="Comment · C" aria-label="Comment (C): click the book to drop a note"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M3 21V12a9 9 0 1 1 9 9z"/></svg></button>
     <span class="tool-sep" aria-hidden="true"></span>
     <button type="button" id="prev-chg" class="tool" aria-keyshortcuts="K" title="Previous change · K" aria-label="Previous change (K)"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg></button>
@@ -47,7 +50,8 @@
 </header>
 <div id="build-banner" class="build-banner" role="status" hidden></div>
 <div class="layout">
-  <nav class="side" aria-label="Contents"><div id="toc"></div></nav>
+  <nav class="side" id="toc-nav" aria-label="Contents"><div id="toc"></div></nav>
+  <div id="toc-backdrop" class="toc-backdrop" hidden></div>
   <main id="main"><p class="loading">Loading the book…</p></main>
 </div>
 <aside id="notes-panel" class="notes-panel" aria-labelledby="np-title" tabindex="-1" hidden>

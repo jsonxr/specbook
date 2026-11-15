@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acceptItem, currentItems, readReview, writeReviewNotes } from './lib/review.mjs';
+import { IGNORED } from './lib/gitignore.mjs';
 import { recordCall, startBuild } from './lib/builds.mjs';
 
 const SERVE = join(dirname(fileURLToPath(import.meta.url)), 'serve.mjs');
@@ -573,6 +574,16 @@ test('page-sent draft notes are whitelisted: stray fields stripped, bad shapes 4
   assert.equal((await api('PUT', '/api/notes', { rev, notes: { b: { ...note, pin: { ...note.pin, element: 'el' } } } })).status, 200);
 });
 
+test('a pin keeps its place in pixels and on a letter of its target\'s text; half of either, or a bad one, is a 400', async () => {
+  const pin = { rx: 0.1, ry: 0.2, ax: 30.5, ay: 4, ch: 12, cx: 2.5, cy: 9 };
+  assert.equal((await api('PUT', '/api/notes', { rev: 0, notes: { a: { ...note, pin } } })).status, 200);
+  assert.deepEqual(readReview(data).notes.a.pin, pin);
+  const rev = readReview(data).rev;
+  for (const bad of [{ rx: 0, ry: 0, ax: 1 }, { rx: 0, ry: 0, ch: 3, cx: 1 }, { rx: 0, ry: 0, ch: -1, cx: 0, cy: 0 }, { rx: 0, ry: 0, ch: 1.5, cx: 0, cy: 0 }, { rx: 0, ry: 0, ax: 'a', ay: 0 }]) {
+    assert.deepEqual(await api('PUT', '/api/notes', { rev, notes: { b: { ...note, pin: bad } } }), { status: 400, body: { error: 'bad-note' } }, JSON.stringify(bad));
+  }
+});
+
 test('a draft note keeps its page target and section, and its pin may come without a sticky offset', async () => {
   const placed = { ...note, target: 'c-d-v1', section: 'c-d', pin: { rx: 0.1, ry: 0.2 } };
   assert.equal((await api('PUT', '/api/notes', { rev: 0, notes: { a: placed } })).status, 200);
@@ -932,6 +943,70 @@ test('Stop sharing lasts until the book is reopened', async () => {
   await idle();
 });
 
+test('the link outlasts the server: a restart keeps the room (on disk, git-ignored) and does not end it; Stop forgets it', async () => {
+  const calls = [];
+  const fake = createServer((req, res) => { calls.push(req.url); res.writeHead(204); res.end(); });
+  await new Promise(r => fake.listen(0, '127.0.0.1', r));
+  const broker = `http://127.0.0.1:${fake.address().port}`;
+  const dir = mkdtempSync(join(tmpdir(), 'specbook-keep-'));
+  const book = freshBook();
+  book.settings = { shareBroker: broker };
+  writeFileSync(join(dir, 'book.json'), JSON.stringify(book));
+  const p = 5000 + Math.floor(Math.random() * 900);
+  const at = `http://127.0.0.1:${p}`;
+  const start = async () => {
+    const c = spawn(process.execPath, [SERVE, '--data', dir, '--port', String(p)], { stdio: 'ignore' });
+    for (let i = 0; i < 100 && !(await fetch(`${at}/api/health`).then(r => r.ok, () => false)); i++) {
+      await new Promise(r => setTimeout(r, 50));
+    }
+    return c;
+  };
+  const listen = async tab => {
+    const ctl = new AbortController();
+    const reader = (await fetch(`${at}/api/share/events?tab=${tab}`, { signal: ctl.signal })).body.getReader();
+    let heard = '';
+    const deadline = Date.now() + 3000;
+    while (!heard.includes('event: start')) {
+      if (Date.now() > deadline) { throw new Error(`no start; heard ${heard}`); }
+      heard += new TextDecoder().decode((await reader.read()).value);
+    }
+    return { heard, close: () => ctl.abort() };
+  };
+  const post = (path, body) => fetch(at + path, { method: 'POST', headers: { 'content-type': 'application/json', origin: at }, body: JSON.stringify(body) });
+  let c = await start();
+  try {
+    let tab = await listen('tab-keep-0001');
+    assert.equal((await post('/api/share/live', { ...liveBody('tab-keep-0001'), url: `${broker}/s/${ROOM.room}#${ROOM.secret}` })).status, 200);
+    assert.ok(existsSync(join(dir, '.share.json')), 'the room is written to .share.json');
+    assert.ok(IGNORED.includes('<rel>/.share.json'), '.share.json is git-ignored');
+    tab.close();
+    const exited = new Promise(done => c.on('exit', done));
+    c.kill('SIGTERM');
+    await exited;
+    assert.deepEqual(calls.filter(u => /\/end$/.test(u)), [], 'stopping the server does not end the room');
+    c = await start();
+    tab = await listen('tab-keep-0002');
+    assert.match(tab.heard, new RegExp(`"room":\\{"room":"${ROOM.room}","hostToken":"${ROOM.hostToken}","secret":"${ROOM.secret}"`));
+    // A share server that cannot be reached does not cost the link.
+    assert.equal((await post('/api/share/failed', { tab: 'tab-keep-0002', error: 'offline' })).status, 200);
+    tab.close();
+    for (let i = 0; i < 50 && (await (await fetch(`${at}/api/share`, { headers: { origin: at } })).json()).tabs !== 0; i++) {
+      await new Promise(r => setTimeout(r, 20));
+    }
+    tab = await listen('tab-keep-0003');
+    assert.match(tab.heard, new RegExp(`"room":\\{"room":"${ROOM.room}"`));
+    await post('/api/share/live', { ...liveBody('tab-keep-0003'), url: `${broker}/s/${ROOM.room}#${ROOM.secret}` });
+    // Stop sharing (and New link) end the room and forget it.
+    await post('/api/share/stop', {});
+    assert.ok(!existsSync(join(dir, '.share.json')), 'Stop removes .share.json');
+    tab.close();
+  } finally {
+    c.kill();
+    fake.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('settings.share false keeps a book from sharing until asked', async () => {
   sharedBook({ share: false });
   const tab = await listenAs('tab-off-0001');
@@ -959,11 +1034,12 @@ test('per-note saves never drop another\'s change, and say who changed a note la
   assert.equal(typeof notes.hers.lastBy, 'string');
   assert.ok(c.body.rev > a.body.rev);
   assert.equal((await api('PUT', '/api/notes', { changes: [] })).status, 400);
+  // A guest may delete the owner's draft too: everyone in the book collaborates on every note.
   const d = await asGuest('PUT', '/api/notes', { changes: { own: null } });
   assert.equal(d.status, 200);
-  assert.deepEqual(d.body.skipped, ['own']);
+  assert.deepEqual(d.body.skipped, []);
   assert.deepEqual(c.body.skipped, []);
-  assert.ok(readReview(data).notes.own);
+  assert.equal(readReview(data).notes.own, undefined);
 });
 
 test('the book names its owner for guests', async () => {

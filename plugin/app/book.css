@@ -9,9 +9,11 @@
 * { box-sizing: border-box; }
 html { overflow-x: clip; }
 html, body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 var(--sans); }
+/* Nothing past the right edge scrolls the page sideways (on a phone it would also zoom the book out). */
+body { overflow-x: clip; }
 a { color: var(--accent); }
 code { font: 13px var(--mono); }
-main { padding: 28px max(20px, 3vw) 140px max(20px, 4vw); max-width: 1500px; }
+main { padding: 28px max(20px, 3vw) 140px max(20px, 4vw); max-width: 1500px; min-width: 0; } /* a grid item: nothing inside may widen the column */
 .loading { color: var(--muted); }
 .cover { border-bottom: 1px solid var(--line); padding-bottom: 26px; max-width: 78ch; }
 .eyebrow { font: 500 13px var(--mono); color: var(--accent); letter-spacing: .08em; margin: 0 0 6px; text-transform: uppercase; }
@@ -196,8 +198,37 @@ body.locked-notes .sticky, body.locked-notes .pin { cursor: default; }
 .sb-secs a { color: var(--muted); text-decoration: none; padding: 2px 0; font-size: 13px; }
 .sb-secs a:hover { color: var(--ink); }
 .chapter, .bk-sec, .reqs li { scroll-margin-top: 70px; }
+.sb-chl.sb-here, .sb-secs a.sb-here { color: var(--ink); }
+/* "Where am I" and the contents sheet: a narrow screen has no sidebar, so the bar names the section in view, and it
+   (or the strip's Contents button) opens the contents as a sheet from the bottom. Wide screens never show either. */
+.bar-where, .bar .toc-tool, .toc-backdrop { display: none; }
+/* A guest's status chip (the guest page's) speaks only when something is wrong: once the book is drawn here, the
+   connection is live, so a plain "Live · name" chip hides. (The guest page hides it too; this covers an older one.) */
+body .share-chip:not(.bad) { display: none; }
+@media (max-width: 860px) {
+  .bar-title { display: none; }
+  .bar > * { flex-shrink: 0; }
+  .bar .bar-spacer { display: none; }
+  #view-btn { white-space: nowrap; }
+  .bar-where { display: flex; align-items: center; justify-content: flex-start; gap: 4px; min-width: 0; flex: 1 1 auto; text-align: left; background: none; border: 0; padding: 6px 4px;
+    color: var(--ink); font: 600 15px var(--sans); cursor: pointer; border-radius: 7px; }
+  .bar .bar-where { flex-shrink: 1; }
+  .bar-where:hover { background: #2c2f34; }
+  #where-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar-where-caret { color: var(--muted); font-size: 12px; }
+  .bar .tool.toc-tool { display: grid; }
+  .bar .tool-sep.toc-tool { display: block; }
+  body.toc-open { overflow: hidden; }
+  body.toc-open .side { display: block; position: fixed; left: 0; right: 0; top: auto; bottom: 0; height: auto; max-height: 75vh; z-index: 91;
+    border-right: 0; border-top: 1px solid var(--line); border-radius: 14px 14px 0 0; padding: 26px 16px calc(24px + env(safe-area-inset-bottom));
+    box-shadow: 0 -14px 40px rgba(0, 0, 0, .6); overscroll-behavior: contain; font-size: 15px; }
+  body.toc-open .side::before { content: ''; position: absolute; top: 9px; left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: var(--line); }
+  body.toc-open .sb-secs a { padding: 6px; margin: 0 -6px; font-size: 14px; border-radius: 6px; }
+  .sb-chl.sb-here, .sb-secs a.sb-here { background: var(--surface); }
+  body.toc-open .toc-backdrop:not([hidden]) { display: block; position: fixed; inset: 0; z-index: 90; background: rgba(0, 0, 0, .45); }
+}
 
-/* notes: Figma-style comment pins, one composer or card at a time, and a notes panel. All overlay: nothing here
+/* notes: Figma-style comment pins, stickies that are their own editors, and a notes panel. All overlay: nothing here
    moves the book. */
 body.commenting main, body.commenting main * {
   cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26' viewBox='0 0 26 26'%3E%3Cpath d='M2 24V13A11 11 0 1 1 13 24Z' fill='%23ffd479' stroke='%23222' stroke-width='1.6' stroke-linejoin='round'/%3E%3Cpath d='M8.5 11h9M8.5 15h6' stroke='%23222' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 2 24, crosshair !important;
@@ -228,10 +259,9 @@ body.commenting main .pin, body.commenting main .pin * { cursor: pointer !import
 .sticky { position: absolute; width: max-content; max-width: 260px; padding: 9px 13px; color: #241d05; background: var(--note); border-radius: 12px;
   box-shadow: 0 6px 18px rgba(0,0,0,.5); cursor: grab; touch-action: none; }
 .sticky[hidden] { display: none; }
-.st-del { position: absolute; top: -9px; right: -9px; width: 22px; height: 22px; border-radius: 50%; border: 0; padding: 0;
-  font: 700 14px/22px var(--sans); color: var(--note); background: #241d05; cursor: pointer; opacity: 0; z-index: 1; }
-.sticky:hover .st-del, .sticky.editing .st-del, .st-del:focus-visible { opacity: 1; }
-body.locked-notes .st-del { display: none; }
+/* Selected (a click or tap): Delete or Backspace removes it; on a touch screen a long press does. */
+.sticky.selected:not(.editing) { box-shadow: 0 0 0 2px #17181a, 0 0 0 4px var(--accent), 0 6px 18px rgba(0,0,0,.5); }
+.sticky:not(.editing) { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .sticky.dragging { z-index: 1; cursor: grabbing; box-shadow: 0 12px 28px rgba(0,0,0,.6); }
 .sticky.editing { cursor: auto; box-shadow: 0 0 0 2px #17181a, 0 0 0 4px var(--note), 0 6px 18px rgba(0,0,0,.5); }
 .st-size, .sticky textarea { font: 600 15px/1.4 var(--sans); white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -239,20 +269,9 @@ body.locked-notes .st-del { display: none; }
 .sticky textarea { position: absolute; inset: 0; width: 100%; height: 100%; padding: 9px 13px; margin: 0; border: 0; border-radius: inherit;
   resize: none; overflow: hidden; background: transparent; color: inherit; cursor: inherit; }
 .sticky textarea:focus { outline: none; }
+.sticky textarea::placeholder { color: inherit; opacity: .55; }
 .sticky textarea[readonly] { user-select: none; pointer-events: none; }
 .pin-n { display: block; }
-.note-pop { position: absolute; width: 300px; background: var(--surface); border: 1px solid var(--note); border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(0,0,0,.5); padding: 10px 12px 12px; }
-.pop-head { display: flex; gap: 8px; align-items: center; margin: 0 0 8px; }
-.pop-label { font: 600 12px var(--mono); color: var(--note); overflow-wrap: anywhere; }
-.note-pop textarea { display: block; width: 100%; min-height: 60px; max-height: 50vh; resize: none; font: 15px/1.4 var(--sans); color: var(--ink);
-  background: #2a2d32; border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
-.note-pop textarea:focus { outline: 2px solid var(--note); outline-offset: -1px; }
-.pop-btns { display: flex; gap: 8px; margin-top: 8px; align-items: center; justify-content: flex-end; }
-.pop-hint { flex: 1; color: var(--muted); font-size: 12px; }
-.pop-btns button { font: 600 14px var(--sans); border: 0; border-radius: 8px; padding: 6px 14px; cursor: pointer; background: var(--note); color: #222; }
-.pop-btns button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
-.pop-btns .pop-del:hover { color: #ff7b72; border-color: #ff7b72; }
 .notes-panel { position: fixed; z-index: 58; top: var(--barh, 56px); right: 0; bottom: 0; width: min(380px, 100vw); overflow-y: auto; overflow-x: hidden;
   background: var(--side); border-left: 1px solid var(--line); box-shadow: -12px 0 30px rgba(0,0,0,.35); padding: 0 16px 24px; font-size: 14px; }
 .notes-panel:focus { outline: none; }
@@ -448,16 +467,8 @@ body.coverage .reqs li.unproven:has(.ev-chip.failed) > :not(.pin) { opacity: 1; 
    the owner's alone, so they are not drawn. The server refuses them for guests anyway. */
 body.guest .bar-group.claude, body.guest #np-send, body.guest .rv-acts, body.guest .stage-btn, body.guest .edit-ctl,
 body.guest .add-req, body.guest .req-form, body.guest .build-banner button, body.guest #review-panel { display: none !important; }
-.sticky .st-by { display: block; margin-top: 4px; font: 600 11px/1.2 var(--sans, 'IBM Plex Sans', sans-serif); color: #6b5a14; }
-.sticky.not-mine .st-del { display: none; }
-.sticky.not-mine { cursor: default; }
-@media (hover: none) { .st-del { opacity: 1; } }
 
 /* Live sharing: someone else's note as they write it (read-only, over or instead of the saved sticky). */
-.sticky.ghost { pointer-events: none; outline: 2px dashed rgba(0, 0, 0, .35); outline-offset: -4px; }
-.sticky.ghost .gh-text { white-space: pre-wrap; word-break: break-word; min-height: 1.4em; }
-.sticky.ghost .gh-by { font-style: italic; }
-.sticky.ghost .gh-pin { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: var(--note); box-shadow: 0 0 0 2px #222; }
 
 /* Live sharing: the share pill (faces and Copy link), its menu, following and being followed. */
 .share-pill { position: relative; display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); padding: 2px 2px 2px 4px; }
@@ -540,10 +551,42 @@ body.guest #claude-menu { display: none; }
 @media (max-width: 700px) {
   .bar { gap: 8px; padding: 8px 10px; backdrop-filter: none; background: var(--side); } /* a filter would pin .tools to the bar */
   .bar .view-wrap #view-btn { padding: 6px 8px; }
-  .tools { position: fixed; left: 50%; bottom: max(10px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 70; box-shadow: 0 10px 28px rgba(0, 0, 0, .55); }
-  .notes-panel { width: 100vw; bottom: 60px; }
+  /* The review strip is the phone's bottom toolbar: full width, every button a 44 by 44 point target (Apple's
+     minimum), spread evenly, clear of the home indicator. */
+  .tools { position: fixed; left: 0; right: 0; bottom: 0; z-index: 70; justify-content: space-around; gap: 0; border-width: 1px 0 0; border-radius: 0;
+    padding: 4px max(4px, env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom)) max(4px, env(safe-area-inset-left)); box-shadow: 0 -6px 18px rgba(0, 0, 0, .35); }
+  .tools .tool { flex: 0 0 44px; width: 44px; height: 44px; border-radius: 10px; }
+  .tools .tool svg { width: 22px; height: 22px; }
+  .tools .tool-badge { top: 3px; right: 1px; }
+  .tools .tool-pos { min-width: 0; padding: 0 2px; font-size: 13px; }
+  .tools .tool-sep { height: 24px; margin: 0; }
+  .notes-panel { width: 100vw; bottom: calc(53px + env(safe-area-inset-bottom)); }
   .share-copy { padding: 5px 6px; }
+  .share-solo { display: none; }
   .claude-btn span:not(.claude-busy) { display: none; }
-  main { padding-bottom: 70px; }
+  main { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
+  /* A guest's status chip (the guest page's) sits above the toolbar, not under it. */
+  body .share-chip { bottom: calc(63px + env(safe-area-inset-bottom)); }
+  /* A requirement's screenshots go under its text, so the text and its test pills keep the width. */
+  .reqs li.has-shot { grid-template-columns: 64px minmax(0, 1fr); }
+  .reqs li.has-shot > .ev-shots { grid-column: 2; flex-direction: row; flex-wrap: wrap; }
 }
+/* Narrow (where the contents sidebar hides): notes are cards in a list under their item, joined by a 1px line to a 3px
+   dot on their spot, so they cover almost no text. book.js narrow(). */
+.note-list { list-style: none; margin: 6px 0 12px; padding: 0; display: flex; flex-direction: column; align-items: flex-start;
+  gap: 8px; flex-basis: 100%; grid-column: 1 / -1; }
+.reqs li.note-list { display: flex; padding-left: 74px; }
+/* Cards and dots sit above the lines (the note layer is 57), so a line never crosses a card or hides its dot. */
+/* fit-content, not the floating sticky's max-content: a card's long line must wrap, never widen the book. */
+.note-list .sticky { position: relative; left: auto; top: auto; width: fit-content; max-width: 100%; z-index: 58; cursor: pointer; touch-action: manipulation; }
+.note-list .sticky.editing { cursor: auto; }
+@media (max-width: 860px) {
+  .pin:not(.pin-sent), .pin.flip:not(.pin-sent) { z-index: 58; width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px; border-radius: 50%; transform: none !important;
+    box-shadow: none; }
+  .note-arrows path { stroke-width: 1; }
+  .pin .pin-n { display: none; }
+  .pin.open:not(.pin-sent) { box-shadow: 0 0 0 3px rgba(255, 212, 121, .45); }
+}
+/* Long paths and ids wrap rather than widen the page (on a phone that would zoom the whole book out). */
+main code { overflow-wrap: anywhere; }
 @media print { .tools, #claude-menu, .view-wrap { display: none; } }

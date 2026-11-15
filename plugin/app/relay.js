@@ -12,7 +12,7 @@
   }
 
   // A guest's id among the people in the book: a short hash of their key and their device, so the same person on the
-  // same device is one person (a newer tab replaces the older), and on another device another. The key itself makes
+  // same device is one person (however many tabs they open), and on another device another. The key itself makes
   // notes theirs, so it is never shown to anyone else.
   function peerIdOf(key, device) {
     return crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(key) + '\n' + String(device || '')))
@@ -30,14 +30,13 @@
     return ids.filter(function (id) { return id !== from; });
   }
 
-  // Whether a sender may show others a draft of this note: the owner any note; a guest a note of their own, or a new
-  // one nobody else has drafted (`claims`, id -> the first drafter's peer id, is kept by the host and filled here).
-  // `sender` is { host: true } or { key, id }; `notes` the owner's notes, which carry each guest note's authorKey.
+  // Whether a sender may show others a draft of this note: anyone, any saved note (everyone in the book edits every
+  // note); a new one only if nobody else has drafted it under that id (`claims`, id -> the first drafter's peer id, is
+  // kept by the host and filled here). `sender` is { host: true } or { key, id }; `notes` the owner's notes.
   function mayDraft(sender, id, notes, claims) {
     if (typeof id !== 'string' || id === '__proto__' || !id) { return false; }
     if (sender && sender.host) { return true; }
-    var n = Object.prototype.hasOwnProperty.call(notes || {}, id) ? notes[id] : null;
-    if (n) { return !!(sender && sender.key && n.authorKey === sender.key); }
+    if (Object.prototype.hasOwnProperty.call(notes || {}, id)) { return true; }
     if (!claims) { return true; }
     var who = sender && sender.id;
     if (Object.prototype.hasOwnProperty.call(claims, id) && claims[id] !== who) { return false; }

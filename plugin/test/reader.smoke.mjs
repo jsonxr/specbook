@@ -31,6 +31,8 @@ cpSync(join(PLUGIN, 'starter'), data, { recursive: true });
   const bookFile = join(data, 'book.json');
   const b = JSON.parse(readFileSync(bookFile, 'utf8'));
   b.settings = { ...(b.settings ?? {}), share: false };
+  // A long path among the sources, as real books have: it must wrap on a phone.
+  b.sources = [...(b.sources ?? []), { label: 'SMS program (planned)', path: 'docs/specs/notifications/design-sms-program-and-other-long-names.md' }];
   writeFileSync(bookFile, JSON.stringify(b, null, 2));
 }
 
@@ -120,7 +122,10 @@ try {
     await page.waitForSelector('body.commenting');
     const at = await headingSpot();
     await page.mouse.click(at.x, at.y);
-    await page.waitForSelector('.note-pop.composer textarea');
+    await page.waitForSelector('.sticky.editing textarea');
+    if (await page.locator('.note-pop').count()) {
+      throw new Error('a separate form opened for the new note; the sticky itself should take the text');
+    }
     await page.keyboard.type('Make the list denser');
     await page.keyboard.press('Enter');
     await page.keyboard.press('Escape');
@@ -270,8 +275,8 @@ try {
     await page.waitForSelector('body.commenting');
     await page.mouse.click(at.x, at.y);
     await page.waitForFunction(() => document.querySelector('#filters-bar h3 .pill')?.textContent === 'Ready', null, { timeout: 3000 });
-    if (await page.locator('.note-pop.composer').count() !== 0) {
-      throw new Error('a click on Mark ready in comment mode opened a composer');
+    if (await page.locator('.sticky.editing').count() !== 0) {
+      throw new Error('a click on Mark ready in comment mode started a note');
     }
     await page.keyboard.press('Escape');
     const book = JSON.parse(readFileSync(join(data, 'book.json'), 'utf8'));
@@ -392,15 +397,15 @@ try {
     await page.waitForSelector('body.commenting');
     const at = await headingSpot();
     await page.mouse.click(at.x, at.y);
-    await page.waitForSelector('.note-pop.composer textarea');
+    await page.waitForSelector('.sticky.editing textarea');
     await page.keyboard.type('Typed while building');
     buildCli('finish', '--build', id);
-    // The reader sees the build end on its next poll, and must not draw the book again under the open composer.
+    // The reader sees the build end on its next poll, and must not draw the book again under the note being written.
     await waitFor(async () => (await fetch(`${URL}api/claude`).then(r => r.json())).state === 'idle', 5000, 'the build to be over');
     await sleep(4000);
-    const typed = await page.evaluate(() => document.querySelector('.note-pop.composer textarea')?.value);
+    const typed = await page.evaluate(() => document.querySelector('.sticky.editing textarea')?.value);
     if (typed !== 'Typed while building') {
-      throw new Error(`the composer's text was lost when the build ended: ${JSON.stringify(typed)}`);
+      throw new Error(`the note's text was lost when the build ended: ${JSON.stringify(typed)}`);
     }
     await page.keyboard.press(' ');
     await page.keyboard.type('and after');
@@ -449,9 +454,10 @@ try {
     await open();
     await page.keyboard.press('c');
     await page.waitForSelector('body.commenting');
+    // Beside the first note's pin: a click on a pin does not start a note.
     const at = await headingSpot();
-    await page.mouse.click(at.x, at.y);
-    await page.waitForSelector('.note-pop.composer textarea');
+    await page.mouse.click(at.x + 60, at.y);
+    await page.waitForSelector('.sticky.editing textarea');
     await page.keyboard.type('Reword the first requirement');
     await page.keyboard.press('Enter');
     await page.keyboard.press('Escape');
@@ -518,7 +524,7 @@ try {
     await page.locator(`li#${changed.id}`).scrollIntoViewIfNeeded();
     const box = await page.locator(`li#${changed.id}`).boundingBox();
     await page.mouse.click(box.x + box.width / 2, box.y + 10);
-    await page.waitForSelector('.note-pop.composer textarea');
+    await page.waitForSelector('.sticky.editing textarea');
     await page.keyboard.type('Say what happens offline');
     await page.keyboard.press('Enter');
     await waitFor(() => Object.values(readNotesFile().notes).some(n => n.text === 'Say what happens offline' && n.item === changed.id), 3000, 'review.json to hold the Change note on its item');
@@ -531,10 +537,18 @@ try {
     if (await page.locator(`.rv-acts[data-key="${changed.id}"] .rv-accept`).count() !== 0) {
       throw new Error('Accept is offered while a note on the item is unsent');
     }
-    // The sticky's × deletes the note, and Accept comes back.
-    const sticky = page.locator('.sticky', { hasText: 'Say what happens offline' });
-    await sticky.hover();
-    await sticky.locator('.st-del').click();
+    // A click selects the sticky (it shows so), and Delete removes it; Accept comes back. There is no ×.
+    if (await page.locator('.st-del').count()) {
+      throw new Error('stickies still carry a × to delete them');
+    }
+    const on = await page.evaluate(() => {
+      const x = [...document.querySelectorAll('.sticky')].find(e => e.querySelector('textarea').value === 'Say what happens offline');
+      const r = x.getBoundingClientRect();
+      return { x: r.left + 20, y: r.top + r.height / 2 };
+    });
+    await page.mouse.click(on.x, on.y);
+    await page.waitForSelector('.sticky.selected:not(.editing)', { timeout: 3000 });
+    await page.keyboard.press('Backspace');
     await waitFor(() => !Object.values(readNotesFile().notes).some(n => n.text === 'Say what happens offline'), 3000, 'the deleted note to leave review.json');
     await page.waitForSelector(`.rv-acts[data-key="${changed.id}"] .rv-accept`, { timeout: 5000 });
   });
@@ -620,6 +634,29 @@ try {
     await page.keyboard.press('Escape');
   });
 
+  await check('the down arrow goes on to the next change each time it is pressed', async () => {
+    await open();
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+    // Where the page comes to rest after a smooth scroll.
+    const settled = () => page.evaluate(() => new Promise(done => {
+      let last = window.scrollY, still = 0;
+      const tick = () => {
+        still = window.scrollY === last ? still + 1 : 0;
+        last = window.scrollY;
+        if (still >= 6) { done(last); } else { setTimeout(tick, 50); }
+      };
+      setTimeout(tick, 50);
+    }));
+    const ys = [];
+    for (let i = 0; i < 3; i++) {
+      await page.locator('#next-chg').click();
+      ys.push(await settled());
+    }
+    if (!(ys[0] < ys[1] && ys[1] < ys[2])) {
+      throw new Error(`pressing down three times stopped at ${ys.join(', ')}`);
+    }
+  });
+
   await check('a save that fails (the connection dropped) is tried again', async () => {
     let failed = 0;
     await page.route('**/api/notes', route => {
@@ -633,8 +670,8 @@ try {
       await page.keyboard.press('c');
       await page.waitForSelector('body.commenting');
       const at = await headingSpot();
-      await page.mouse.click(at.x + 20, at.y);
-      await page.waitForSelector('.note-pop.composer textarea');
+      await page.mouse.click(at.x + 110, at.y);
+      await page.waitForSelector('.sticky.editing textarea');
       await page.keyboard.type('Saved after a failure');
       await page.keyboard.press('Enter');
       await page.keyboard.press('Escape');
@@ -646,6 +683,166 @@ try {
       for (let i = errors.length - 1; i >= 0; i--) {
         if (/ERR_FAILED/.test(errors[i])) { errors.splice(i, 1); }
       }
+    }
+  });
+
+  // How wide the book is laid out (main, whose overflow the page clips) against the screen.
+  const bookWidth = () => page.evaluate(() => [Math.ceil(document.querySelector('main').getBoundingClientRect().right), document.documentElement.clientWidth]);
+
+  await check('on a phone-width screen nothing scrolls sideways', async () => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    try {
+      await open();
+      await page.waitForTimeout(300);
+      const w = await bookWidth();
+      if (w[0] > w[1]) {
+        throw new Error(`the book is ${w[0]} pixels wide on a ${w[1]}-pixel screen`);
+      }
+    } finally {
+      await page.setViewportSize({ width: 1400, height: 900 });
+    }
+  });
+
+  await check('on a narrow screen notes are cards under their item, with a dot on the spot, and never move', async () => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    try {
+      await open();
+      // A note dropped on a word of a requirement.
+      await page.keyboard.press('c');
+      await page.waitForSelector('body.commenting');
+      const at = await page.evaluate(() => {
+        const walker = document.createTreeWalker(document.querySelector('main'), NodeFilter.SHOW_TEXT);
+        for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+          const i = n.data.indexOf('keeps that place');
+          if (i >= 0) {
+            n.parentElement.scrollIntoView({ block: 'center', behavior: 'instant' });
+            const r = document.createRange();
+            r.setStart(n, i + 6);
+            r.setEnd(n, i + 10);
+            const b = r.getBoundingClientRect();
+            return { x: b.left + b.width / 2, y: b.top + b.height / 2, id: n.parentElement.closest('li').id };
+          }
+        }
+        return null;
+      });
+      await page.mouse.click(at.x, at.y);
+      await page.waitForSelector('.note-list .sticky.editing textarea', { timeout: 3000 });
+      // A long line: it must wrap in its card, not widen the book.
+      await page.keyboard.type('On a phone, this note runs long enough that on one line it would be far wider than the screen');
+      await page.keyboard.press('Enter');
+      await page.keyboard.press('Escape');
+      const seen = await page.evaluate(id => {
+        const st = [...document.querySelectorAll('.sticky')].find(x => x.querySelector('textarea').value.startsWith('On a phone'));
+        const list = st && st.closest('.note-list');
+        const pin = document.getElementById(id).querySelector('.pin');
+        const r = pin && pin.getBoundingClientRect();
+        return { inList: !!list, after: list ? list.previousElementSibling && list.previousElementSibling.id : null, dot: r ? [Math.round(r.width), Math.round(r.height)] : null, line: [...document.querySelectorAll('.note-arrows path')].some(p => p.getAttribute('d')) };
+      }, at.id);
+      if (!seen.inList || seen.after !== at.id || JSON.stringify(seen.dot) !== '[3,3]' || !seen.line) {
+        throw new Error(`on a phone: ${JSON.stringify(seen)}`);
+      }
+      const w = await bookWidth();
+      if (w[0] > w[1]) {
+        throw new Error(`with a long note the book is ${w[0]} pixels wide on a ${w[1]}-pixel screen`);
+      }
+      const saved = await waitFor(() => Object.values(readNotesFile().notes).find(n => n.text.startsWith('On a phone')), 3000, 'review.json to hold the note');
+      if ('dx' in saved.pin || 'dy' in saved.pin) {
+        throw new Error(`a narrow screen saved a sticky position: ${JSON.stringify(saved.pin)}`);
+      }
+    } finally {
+      await page.setViewportSize({ width: 1400, height: 900 });
+    }
+    // Wide again: the same note is a floating sticky with its arrow.
+    await page.waitForFunction(() => {
+      const st = [...document.querySelectorAll('.sticky')].find(x => x.querySelector('textarea').value.startsWith('On a phone'));
+      return st && !st.closest('.note-list') && !st.hidden;
+    }, null, { timeout: 3000 });
+  });
+
+  await check('on a phone a long press on a note deletes it', async () => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    try {
+      await open();
+      const ok = await page.evaluate(async () => {
+        const st = [...document.querySelectorAll('.note-list .sticky')].find(x => x.querySelector('textarea').value.startsWith('On a phone'));
+        if (!st) { return 'no card'; }
+        st.scrollIntoView({ block: 'center', behavior: 'instant' });
+        const r = st.getBoundingClientRect();
+        const at = { clientX: r.left + 20, clientY: r.top + r.height / 2, pointerId: 7, pointerType: 'touch', isPrimary: true, bubbles: true, button: 0 };
+        st.dispatchEvent(new PointerEvent('pointerdown', at));
+        await new Promise(done => setTimeout(done, 800));
+        st.dispatchEvent(new PointerEvent('pointerup', at));
+        return 'pressed';
+      });
+      if (ok !== 'pressed') {
+        throw new Error(ok);
+      }
+      await waitFor(() => !Object.values(readNotesFile().notes).some(n => n.text.startsWith('On a phone')), 3000, 'the long-pressed note to leave review.json');
+    } finally {
+      await page.setViewportSize({ width: 1400, height: 900 });
+    }
+  });
+
+  await check('on a phone the bar says where you are, and it opens the contents as a sheet that jumps and closes', async () => {
+    if (await page.locator('#where').isVisible()) {
+      throw new Error('the "where am I" label shows on a desktop');
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    try {
+      await open();
+      // Earlier checks leave "show only changes" on, which hides the unchanged sections.
+      if ((await page.locator('#changes-btn').getAttribute('aria-pressed')) === 'true') {
+        await page.locator('#changes-btn').click();
+      }
+      await page.waitForSelector('#todos-add', { state: 'visible', timeout: 3000 });
+      await page.evaluate(() => document.getElementById('todos-add').scrollIntoView({ behavior: 'instant' }));
+      await page.waitForFunction(() => /Adding a todo/.test(document.getElementById('where')?.textContent ?? ''), null, { timeout: 3000 }).catch(async e => {
+        throw new Error(`${e.message}: the label says ${JSON.stringify(await page.evaluate(() => document.getElementById('where')?.textContent))}}`);
+      });
+      await page.locator('#where').click();
+      await page.waitForSelector('body.toc-open .side', { state: 'visible', timeout: 3000 });
+      const here = await page.evaluate(() => document.querySelector('.side .sb-here')?.getAttribute('href'));
+      if (here !== '#todos-add') {
+        throw new Error(`the contents mark ${here} as where you are`);
+      }
+      await page.locator('.side a[href="#filters-bar"]').click();
+      await page.waitForFunction(() => !document.body.classList.contains('toc-open'), null, { timeout: 3000 });
+      await page.waitForFunction(() => /The filter bar/.test(document.getElementById('where').textContent), null, { timeout: 3000 });
+      // The strip's Contents button opens it too, and Esc closes it.
+      await page.locator('#toc-btn').click();
+      await page.waitForSelector('body.toc-open', { timeout: 3000 });
+      await page.keyboard.press('Escape');
+      await page.waitForFunction(() => !document.body.classList.contains('toc-open'), null, { timeout: 3000 });
+    } finally {
+      await page.setViewportSize({ width: 1400, height: 900 });
+    }
+    if (await page.locator('#toc-btn').isVisible()) {
+      throw new Error('the Contents button shows on a desktop');
+    }
+  });
+
+  await check('on a phone every button in the bottom strip is at least 44 by 44 points, and the strip fits the screen', async () => {
+    try {
+      for (const width of [375, 320]) {
+        await page.setViewportSize({ width, height: 700 });
+        await open();
+        const bad = await page.evaluate(() => {
+          const out = [];
+          const strip = document.querySelector('.tools').getBoundingClientRect();
+          if (strip.left < 0 || strip.right > innerWidth) { out.push(`the strip runs ${strip.left}..${strip.right} on a ${innerWidth} screen`); }
+          const boxes = [...document.querySelectorAll('.tools button')].filter(b => b.offsetParent).map(b => [b.id, b.getBoundingClientRect()]);
+          for (const [id, r] of boxes) {
+            if (r.width < 44 || r.height < 44) { out.push(`${id} is ${r.width}x${r.height}`); }
+          }
+          for (let i = 1; i < boxes.length; i++) {
+            if (boxes[i][1].left < boxes[i - 1][1].right - 0.5) { out.push(`${boxes[i][0]} overlaps ${boxes[i - 1][0]}`); }
+          }
+          return out;
+        });
+        if (bad.length) { throw new Error(`at ${width}: ${bad.join('; ')}`); }
+      }
+    } finally {
+      await page.setViewportSize({ width: 1400, height: 900 });
     }
   });
 

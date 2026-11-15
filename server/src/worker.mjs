@@ -6,7 +6,9 @@
 //   GET  /s/<room>                 the guest page (public/guest.html): asks a name, connects, loads the reader
 //   GET  /guest.js                 its script
 //   POST /api/rooms                { hours, protocol } -> { room, hostToken, expiresAt }   (the host tab; CORS for localhost)
-//   GET  /api/rooms/<room>          { host, protocol }: whether the room exists, its host is there, and its protocol
+//                                  { ..., room, hostToken }: renews that room, or opens it again under its id
+//   GET  /api/rooms/<room>          { host, protocol, keeps }: whether the room exists, its host is there, its protocol,
+//                                  and that this server renews and reopens rooms (open() with { room, hostToken })
 //   POST /api/rooms/<room>/end      { token }: ends the room (the host's local server, or its tab)
 //   GET  /api/rooms/<room>/host    WebSocket, ?token=hostToken
 //   GET  /api/rooms/<room>/guest   WebSocket; while the host is away it waits, and hears host-online when it comes
@@ -76,6 +78,11 @@ function randomId(bytes) {
   return btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+// A host token, as open() makes them (24 random bytes, base64url).
+const HOST_TOKEN = /^[A-Za-z0-9_-]{32}$/;
+// How long an ended room's address keeps saying it ended.
+const ENDED_KEPT_MS = 7 * 86400_000;
+
 function sameToken(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) {
     return false;
@@ -113,11 +120,15 @@ export class Broker extends DurableObject {
     }
     const room = await this.room(m[1]);
     if (!room) {
+      // Ended by its host (New link, Stop): 410, so its guests are told it ended, not that it is closed for now.
+      if (validId(m[1]) && (await this.ctx.storage.get(`ended:${m[1]}`))) {
+        return json(410, { error: 'ended' });
+      }
       return json(404, { error: 'no-room' });
     }
     // Whether the room still exists, and whether its host is there.
     if (!m[2]) {
-      return json(200, { host: this.ctx.getWebSockets(`host:${m[1]}`).length > 0, protocol: room.protocol ?? 1 });
+      return json(200, { host: this.ctx.getWebSockets(`host:${m[1]}`).length > 0, protocol: room.protocol ?? 1, keeps: true });
     }
     // The host ends its room: its tab on New link or Stop, or its local server when it stops.
     if (m[2] === 'end') {
@@ -133,7 +144,7 @@ export class Broker extends DurableObject {
       if (!sameToken(body.token, room.hostToken)) {
         return json(403, { error: 'bad-token' });
       }
-      await this.close(m[1]);
+      await this.close(m[1], true);
       return new Response(null, { status: 204 });
     }
     // The host's ICE servers (it asks once a share, with its token). A guest gets TURN only over its socket, once, and
@@ -201,25 +212,44 @@ export class Broker extends DurableObject {
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
 
+  // Opens a room. With { room, hostToken }, the host keeps its link: its room is renewed (200), or opened again under
+  // the same id once it expired or was ended (201); a room held under another token is not given up (409).
   async open(request) {
     const ip = request.headers.get('cf-connecting-ip') ?? 'local';
     const now = Date.now();
-    const rate = countRoom(await this.ctx.storage.get(`ip:${ip}`), now);
-    await this.ctx.storage.put(`ip:${ip}`, rate.next);
-    if (!rate.ok) {
-      return json(429, { error: 'too-many-rooms' });
-    }
     let body = {};
     try {
       body = await request.json();
     } catch {
       // no body: the default length
     }
-    const id = randomId(16);
-    const room = { hostToken: randomId(24), expiresAt: now + roomHours(body.hours) * 3600_000, created: now, protocol: roomProtocol(body.protocol) };
+    const until = now + roomHours(body.hours) * 3600_000;
+    const keep = validId(body.room) && typeof body.hostToken === 'string' && HOST_TOKEN.test(body.hostToken);
+    if (keep && (await this.ctx.storage.get(`ended:${body.room}`))) {
+      return json(409, { error: 'ended' });
+    }
+    if (keep) {
+      const held = await this.room(body.room);
+      if (held) {
+        if (!sameToken(body.hostToken, held.hostToken)) {
+          return json(409, { error: 'taken' });
+        }
+        const renewed = { ...held, expiresAt: Math.max(held.expiresAt, until) };
+        await this.ctx.storage.put(`room:${body.room}`, renewed);
+        await this.schedule();
+        return json(200, { room: body.room, hostToken: held.hostToken, expiresAt: new Date(renewed.expiresAt).toISOString(), keeps: true });
+      }
+    }
+    const rate = countRoom(await this.ctx.storage.get(`ip:${ip}`), now);
+    await this.ctx.storage.put(`ip:${ip}`, rate.next);
+    if (!rate.ok) {
+      return json(429, { error: 'too-many-rooms' });
+    }
+    const id = keep ? body.room : randomId(16);
+    const room = { hostToken: keep ? body.hostToken : randomId(24), expiresAt: until, created: now, protocol: roomProtocol(body.protocol) };
     await this.ctx.storage.put(`room:${id}`, room);
     await this.schedule();
-    return json(201, { room: id, hostToken: room.hostToken, expiresAt: new Date(room.expiresAt).toISOString() });
+    return json(201, { room: id, hostToken: room.hostToken, expiresAt: new Date(room.expiresAt).toISOString(), keeps: true });
   }
 
   // STUN always; a TURN credential too while the room, the caller's address and the day are all under their caps.
@@ -296,7 +326,7 @@ export class Broker extends DurableObject {
       return;
     }
     if (msg.type === 'end') {
-      await this.close(me.room);
+      await this.close(me.room, true);
       return;
     }
     const out = fromHost(msg);
@@ -332,9 +362,13 @@ export class Broker extends DurableObject {
     await this.webSocketClose(ws, 1011);
   }
 
-  // Ends a room: every socket in it is closed and it is forgotten.
-  async close(id) {
+  // Ends a room: every socket in it is closed and it is forgotten. One its host ended stays ended: it is not opened
+  // again under its id, and for a week its address says so (410).
+  async close(id, ended = false) {
     await this.ctx.storage.delete(`room:${id}`);
+    if (ended) {
+      await this.ctx.storage.put(`ended:${id}`, Date.now() + ENDED_KEPT_MS);
+    }
     for (const tag of [`host:${id}`, `guest:${id}`]) {
       for (const s of this.ctx.getWebSockets(tag)) {
         try {
@@ -397,6 +431,11 @@ export class Broker extends DurableObject {
     for (const [key, r] of await this.ctx.storage.list({ prefix: 'room:' })) {
       if (r.expiresAt <= now) {
         await this.close(key.slice('room:'.length));
+      }
+    }
+    for (const [key, until] of await this.ctx.storage.list({ prefix: 'ended:' })) {
+      if (until <= now) {
+        await this.ctx.storage.delete(key);
       }
     }
     for (const [key, w] of await this.ctx.storage.list({ prefix: 'ip:' })) {

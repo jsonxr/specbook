@@ -16,7 +16,7 @@ import { createServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { createRequire } from 'node:module';
 import { execFileSync, spawn } from 'node:child_process';
-import { createReadStream, existsSync, readFileSync, readdirSync, realpathSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs';
 import { dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acceptItem, addNote, changeItem, currentSnapshot, forgetItem, readHistory, readReview, sendNotes, stampOpened, writeReviewNotes } from './lib/review.mjs';
@@ -466,6 +466,18 @@ function cleanDraft(note, keys) {
       throw badRequest('bad-note');
     }
     out.pin = { rx: pin.rx, ry: pin.ry };
+    // Optional, each group whole or absent: pixels from the target's top-left (ax, ay); a letter of the target's text
+    // (ch, its index) and pixels from that letter's top-left (cx, cy).
+    for (const group of [['ax', 'ay'], ['ch', 'cx', 'cy']]) {
+      const given = group.filter(k => pin[k] !== undefined);
+      if (!given.length) {
+        continue;
+      }
+      if (given.length !== group.length || !group.every(k => isNum(pin[k])) || (group[0] === 'ch' && !(Number.isInteger(pin.ch) && pin.ch >= 0))) {
+        throw badRequest('bad-note');
+      }
+      group.forEach(k => { out.pin[k] = pin[k]; });
+    }
     if (offset.length) {
       out.pin.dx = pin.dx;
       out.pin.dy = pin.dy;
@@ -519,10 +531,31 @@ function mergeNotes(stored, sent) {
 
 // Sharing. The book is shared whenever an owner tab is open (unless book.json says settings.share: false): every
 // owner tab holds /api/share/events, and the one listening (one per book, by a Web Lock in app/host.js) is asked to
-// host. That tab does the WebRTC; this server only remembers its room (id, host token, link key) in memory, so a
-// reloaded or reopened tab reuses it and the link lasts as long as this server runs. Nothing is written to disk.
+// host. That tab does the WebRTC; this server remembers its room (id, host token, link key) in .share.json (git-ignored),
+// so a reloaded or reopened tab, and this server after a restart, reuse it: the link stays the same until the owner
+// asks for a New link or stops sharing. The tab renews the room at the share server, or opens it again under the same
+// id once it has expired there.
+const SHAREFILE = join(DATA, '.share.json');
+const ROOM_ID = /^[A-Za-z0-9_-]{16,64}$/;
 const shareTabs = new Map(); // tab id -> its events response, newest last
-let share = { state: 'idle', room: null, stopped: false };
+let share = { state: 'idle', room: readSavedRoom(), stopped: false };
+function readSavedRoom() {
+  const r = readJson(SHAREFILE, null);
+  const ok = r && typeof r === 'object' && ROOM_ID.test(r.room ?? '') && typeof r.hostToken === 'string' && /^[A-Za-z0-9_-]{43}$/.test(r.secret ?? '') &&
+    typeof r.url === 'string';
+  return ok ? { room: r.room, hostToken: r.hostToken, secret: r.secret, url: r.url, expiresAt: String(r.expiresAt ?? '') } : null;
+}
+function saveRoom(room) {
+  try {
+    if (room) {
+      writeJsonAtomic(SHAREFILE, room);
+    } else {
+      rmSync(SHAREFILE, { force: true });
+    }
+  } catch {
+    // kept in memory only: the link lasts until this server stops
+  }
+}
 function sendEvent(tab, event, data) {
   const res = shareTabs.get(tab);
   if (res) {
@@ -582,7 +615,6 @@ function endRoomAtBroker(room, tries = END_RETRY_MS.length + 1) {
   return attempt(0);
 }
 const SHARE_TAB = /^[A-Za-z0-9_-]{8,64}$/;
-const ROOM_ID = /^[A-Za-z0-9_-]{16,64}$/;
 
 // The owner's first name, which guests see on the owner's face and notes: git's user.name for the project.
 const OWNER_NAME = (() => {
@@ -618,13 +650,9 @@ try {
   // no file watching here: pages still see changes on their next poll
 }
 
-// Stopping this server ends its share's room, so the link stops working with it.
+// Stopping this server leaves its share's room alone: the next server takes it up from .share.json, so the link lasts.
 for (const signal of ['SIGTERM', 'SIGINT']) {
-  process.on(signal, () => {
-    const room = share.room;
-    share = { state: 'idle', room: null, stopped: false };
-    endRoomAtBroker(room, 1).finally(() => process.exit(0));
-  });
+  process.on(signal, () => process.exit(0));
 }
 
 const server = createServer(async (req, res) => {
@@ -753,6 +781,7 @@ const server = createServer(async (req, res) => {
           sendEvent(share.tab, 'stop', {});
         }
         endRoomAtBroker(share.room);
+        saveRoom(null);
         share = { state: 'idle', room: null, stopped: true, stoppedTabs: new Set(shareTabs.keys()), tab: null };
         json(res, 200, shareView());
         return;
@@ -761,12 +790,14 @@ const server = createServer(async (req, res) => {
         const tab = share.tab ?? [...shareTabs.keys()].at(-1);
         if (!tab) {
           endRoomAtBroker(share.room);
+          saveRoom(null);
           share = { ...share, room: null };
           json(res, 409, { error: 'no-tab' });
           return;
         }
         sendEvent(tab, 'end-room', {});
         endRoomAtBroker(share.room);
+        saveRoom(null);
         share = { ...share, room: null, stopped: false, stoppedTabs: null };
         askToHost(tab);
         json(res, 202, shareView());
@@ -784,11 +815,16 @@ const server = createServer(async (req, res) => {
           throw badRequest('bad-share');
         }
         share = { ...share, state: 'live', room: { room: body.room, hostToken: body.hostToken, secret: body.secret, url: body.url, expiresAt: String(body.expiresAt ?? '') }, guests: [] };
+        saveRoom(share.room);
       } else if (kind === 'guests') {
         share = { ...share, guests: Array.isArray(body.guests) ? body.guests.filter(g => typeof g === 'string').slice(0, 50).map(g => g.slice(0, 40)) : [] };
+      } else if (kind === 'failed') {
+        // The tab could not reach the share server: the room is kept, so the link still works once it can.
+        share = { ...share, state: 'idle', tab: null, error: String(body.error ?? 'The share could not start.').slice(0, 300) };
       } else {
-        // The tab could not open a room, or its room is gone (expired or ended): the next start makes a new one.
-        share = { ...share, state: 'idle', room: null, tab: null, error: kind === 'failed' ? String(body.error ?? 'The share could not start.').slice(0, 300) : null };
+        // The room was ended elsewhere (or taken under its id): the next start makes a new one.
+        saveRoom(null);
+        share = { ...share, state: 'idle', room: null, tab: null, error: null };
       }
       json(res, 200, shareView());
       return;

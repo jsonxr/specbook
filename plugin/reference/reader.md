@@ -13,9 +13,14 @@ The page `serve` opens, in detail. The `specbook` skill points here.
   - **✦ Claude ▾**, a menu holding **Revise** and **Build**, each saying what Claude will do (see "The Claude group").
     While Claude works, the button reads "✦ Claude · Building…".
 
-  On a phone (under 700 px) the review strip sits at the bottom of the screen, and the Requests pane fills the screen
-  above it.
+  On a phone (under 700 px) the review strip is the bottom toolbar: full width, above the home indicator, with every
+  button at least 44 by 44 points (Apple's minimum touch target). The Requests pane fills the screen above it.
 - **Sidebar** on the left: the table of contents only, chapters and their numbered sections, sticky under the bar.
+
+  On a narrow screen (860 px or less) the sidebar hides. In place of the book's title, the bar names the chapter or
+  section in view, and the review strip starts with a **Contents** button. Either one opens the contents as a sheet
+  from the bottom, scrolled to the section in view. Tapping an entry jumps there and closes the sheet; the backdrop,
+  Esc or a swipe down closes it too. A wide screen shows neither.
 - **The book**: a cover, then chapters. A chapter has an eyebrow ("Chapter 03"), a title, a status pill and an
   intro. Each section has a § number, title, a stage pill, intro, a list of requirements, then every screen
   ("frame") it describes side by side, each captioned with a colored role tag. Recordings play under their
@@ -45,13 +50,16 @@ The page `serve` opens, in detail. The `specbook` skill points here.
 - **Notes** work like Figma's comments, as an overlay that never moves the book. **Comment** in the bar (or
   **C**, except while typing) turns comment mode on: the cursor becomes a speech bubble, whatever a note would
   attach to gets a dashed yellow outline, and a click on the book, inside a mockup if need be, drops a numbered
-  pin at that exact spot (stored relative to whatever was clicked, so it follows layout changes) and opens a
-  composer beside it. Enter posts, Shift+Enter makes a new line; Cancel, Esc or posting nothing removes the pin.
+  pin at that exact spot (stored relative to whatever was clicked, so it follows layout changes) and a sticky
+  beside it, ready to type in: the sticky is the note's only form. It is saved as it is typed, and others in a shared
+  book see it as it is written. Enter or Esc finishes, Shift+Enter makes a new line; finishing with nothing typed
+  removes the pin.
   The click never follows links, plays videos or ticks boxes, and the mode stays on so several notes can be dropped
-  in a row; Esc closes an open composer first, then leaves the mode. A posted note stays up as a **sticky**: a
+  in a row; a click on the book while a sticky is being written only finishes it, and Esc leaves the mode. A note
+  stays up as its **sticky**: a
   rounded yellow callout holding only the note's text, sized to it (up to a width, then it wraps), joined by a
   line to its pin, which turns to make the arrowhead (its head on the line, its point on the spot, its number
-  upright). Click a sticky to edit it (Enter or Esc finishes; emptying it deletes the note); the **×** at its corner (on hover or while editing) deletes it; a press on a sticky
+  upright). A click selects a sticky (a blue ring); a click on the selected one edits it (Enter or Esc finishes; emptying it deletes the note). **Delete** or Backspace removes the selected note, and Esc or a click elsewhere lets it go; on a touch screen a **long press** deletes a note; a press on a sticky
   being edited ends the edit and moves it instead, so a second click never re-enters editing. Drag a sticky to
   move it; it is stored as an offset from its pin, so it travels with the pin when the layout moves, and is kept
   inside the page's width. A new sticky goes to the right of its pin (left if there is no room), below any sticky
@@ -59,8 +67,10 @@ The page `serve` opens, in detail. The `specbook` skill points here.
   into the pin's head, with no border between them. Pins are numbered in book order. Drag a pin to re-aim it, and whatever it lands on (requirement, screen, section title,
   call, decision) becomes the note's subject; the sticky stays where it is and only the arrow re-aims. A note on a
   mockup also records the mockup element under its point (file, selector, text, clipped html), re-read when the
-  pin is moved, and sends it to Claude as the item's `element`. One composer is open at a time, kept inside
-  the window, and nothing scrolls.
+  pin is moved, and sends it to Claude as the item's `element`. Dropping a note never scrolls the page.
+  **On a narrow screen** (860 px or less, where the contents sidebar hides), the same notes show as cards in a list
+  under the item they are on, in book order, each joined by a 1 px line to a 3 px dot on its spot. A tap selects a card and a tap on the selected card edits it; a long press deletes it; nothing is dragged, and a narrow screen never saves where a sticky sits, so
+  it ignores and never changes a desktop's placement. Resizing the window switches between the two.
   Pins print with their numbers, followed by a printed list of the notes (the bar, sidebar, stickies and panel do
   not print). Notes, with where their stickies sit, are saved with the book (in `review.json`), not
   in the browser: another browser or a restart still shows them. Only a **draft** note is editable and movable; once
@@ -96,7 +106,7 @@ What the user can change depends on what Claude is doing. The server enforces it
 
 When Claude goes back to idle the reader fetches the book again, since Claude has changed it. It saves any note
 edit still waiting first, keeps notes changed on the page and not yet saved, and while a note is being written (a
-composer, a sticky or a Notes panel box has the cursor) it draws the book again only once the writing ends. A revise
+sticky or a Notes panel box has the cursor) it draws the book again only once the writing ends. A revise
 sets the notes it was sent to `answered`; drafts added during a build wait for the next Revise.
 
 ## Following a build
@@ -177,13 +187,17 @@ The handshake is signed with the key after `#` in the link, so a share server ru
 book nor join; the guest page comes from the share server, so use one you run or trust.
 The reader itself reaches the guest from your tab, so a new reader needs no new share server.
 
-- A guest names themself once; the guest page remembers the name, and an id for the device, in that browser. Their
-  notes show their name, and yours show your first name (git's `user.name`).
+- A guest names themself once; the guest page remembers the name, and an id for the device, in that browser. The
+  name shows on their face in the share pill; notes carry no names.
+- **Everyone edits every note.** A guest can write, edit, move and delete any draft note, yours included, as you can
+  theirs; a note sent to Claude stays read-only for everyone. A pin points at the same letters for every reader, on any
+  screen size.
 - **One tab per person and device.** A guest who opens the link again in another tab of the same browser is the same
   person: the newer tab takes over, and the older one shows **Disconnected**, with **Use this tab instead** (which
   takes it back). It never reconnects by itself. Another device is another face.
-- **Live.** Everyone in the book appears as a colored face in the share pill, with a pen while they type. A note's text
-  shows for everyone as it is typed ("Ana is typing…"), and a saved change reaches every screen at once.
+- **Live.** Everyone in the book appears as a colored face in the share pill, with a pen while they type. A note being
+  typed or moved shows on everyone's screen as it happens, on the note's own sticky with its arrow, and a saved change
+  reaches every screen at once.
 - **Following.** Click a face to follow that person: your window goes where theirs does (the same item, on any screen
   size) and takes their view (Show only changes, Mockups or Screenshots, Recordings, Coverage). A chip says
   "Following Ana · scroll or type to stop". Scrolling, clicking into the book, typing, or clicking the face again
@@ -195,10 +209,13 @@ The reader itself reaches the guest from your tab, so a new reader needs no new 
   requirement edits. To ask for new wording, they drop a note saying what it should say; you act on it. Your tab
   (`app/host.js`) and the server both refuse everything else (403 `guest`).
 - You may still edit or delete any note. A Revise carries a collaborator's notes with `by: <name>`.
-- **The link lasts as long as the book's server runs**, across reloads: the server remembers the room (in memory,
-  never on disk). Closing your tab pauses the share: guests see "The book isn't open right now" and reconnect by
-  themselves when it is open again within an hour (after that, a reload). Stopping the server, **New link**, **Stop sharing** or the room's expiry (24 hours)
-  ends the link.
+- **The link stays the same until you ask for a new one**, across reloads, server restarts and days: the server keeps
+  the room in `.share.json` in the data folder (git-ignored; it holds the link's key), and your tab renews it at the
+  share server while it is open. A room expires there 24 hours after its last renewal; the next time you open the
+  book, your tab opens it again under the same id, so the old link works again. Closing your tab pauses the share:
+  guests see "The book isn't open right now" and reconnect by themselves when it is open again within an hour (after
+  that, a reload). Only **New link** and **Stop sharing** end the link: use **New link** to cut off anyone who should
+  no longer have it. An ended link says so ("This share has ended") and is never opened again.
 - Live messages (presence, typing, following) go only between your tab and the guests; your tab passes each guest's on
   to the others and drops a draft (or a typing signal) for a note that is not the sender's, and any frame over 16 KB or past 40 a
   second. The share server never sees them.
@@ -217,7 +234,7 @@ may only read and `PUT /api/notes`; anything else is 403 `guest`.
 | Endpoint | Does |
 | --- | --- |
 | `GET /api/book` | `{ book, media, evidence, review, changelog, historyCounts, claude, viewer }`; reading stamps `opened`/`where` for new reviews (not while Claude is busy, and never over a write made since it read) |
-| `PUT /api/notes { changes }` | Saves only the notes a page changed: `{ id: note }` or `{ id: null }` to delete, applied on the notes stored now, so concurrent saves of different notes all land; the owner may change any draft, a guest only their own (others' ids are ignored); a changed note gets `lastBy` (who made the change) and `lastByKey` (never sent to guests, who get `lastMine`); the reply lists `skipped` ids; 400 `bad-note`, 409 `locked` |
+| `PUT /api/notes { changes }` | Saves only the notes a page changed: `{ id: note }` or `{ id: null }` to delete, applied on the notes stored now, so concurrent saves of different notes all land; anyone in the book may change or delete any draft (a note keeps who started it); a changed note gets `lastBy` (who made the change) and `lastByKey` (never sent to guests, who get `lastMine`); the reply lists `skipped` ids (notes past draft); 400 `bad-note`, 409 `locked` |
 | `PUT /api/notes { rev, notes }` | The whole-map save older pages use: the page's **draft** notes replace the stored drafts; stored non-draft notes win; from a guest, only that guest's own drafts change; 400 `bad-note`, 409 `stale` or `locked` |
 | `POST /api/accept { key }` | Writes the history entry, sets the accepted copy to the server's current value, clears the key's tries and notes; 404 `not-under-review`, 400 `bad-accept` |
 | `POST /api/change { key, note }` | Freezes a try and adds the draft note; 400 `note-required` or `bad-change`, 404 `not-under-review` |
@@ -230,7 +247,7 @@ may only read and `PUT /api/notes`; anything else is 403 `guest`.
 | `GET /api/share/events?tab=<id>` | The owner tab that holds the book's lock listens here; on connecting it is sent `start { broker, hours, room }` (the remembered room, or null for a new one) unless `settings.share` is false; later `stop`, `end-room` and `changed` |
 | `POST /api/share` | Asks the newest listening tab to host (a book with `settings.share: false`, or after Stop); 409 `no-broker` (an invalid `settings.shareBroker`) or `no-tab` |
 | `GET /api/share` | `{ state, url, expiresAt, guests, error, tabs, room, stopped }` |
-| `POST /api/share/live { tab, room, hostToken, secret, url, expiresAt }` | The hosting tab's room, which the server remembers |
+| `POST /api/share/live { tab, room, hostToken, secret, url, expiresAt }` | The hosting tab's room, which the server remembers (in `.share.json`) |
 | `POST /api/share/guests\|failed\|ended { tab, … }` | The hosting tab's reports |
 | `POST /api/share/new-link` | The tab ends the room and opens a new one (202) |
 | `POST /api/share/stop` | Ends the room; the book shares again when a tab next opens |

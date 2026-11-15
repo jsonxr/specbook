@@ -65,15 +65,20 @@
     return Object.keys(share.peers).map(function (k) { return share.peers[k]; }).filter(function (p) { return p.joined && p.id; });
   }
   function ownerName() { return (window.SpecBook && window.SpecBook.me && window.SpecBook.me().name) || 'Owner'; }
+  // One person may have the book open in several tabs (the same guest key and device): they are one face.
+  function guestsOnce() {
+    var seen = {};
+    return joinedPeers().filter(function (p) { if (seen[p.id]) { return false; } seen[p.id] = true; return true; });
+  }
   function people() {
     var R = window.SpecRelay;
     var out = [{ id: 'host', name: ownerName(), color: R.colorOf('host'), role: 'owner' }];
-    joinedPeers().forEach(function (p) { out.push({ id: p.id, name: p.name, color: R.colorOf(p.id), role: 'guest' }); });
+    guestsOnce().forEach(function (p) { out.push({ id: p.id, name: p.name, color: R.colorOf(p.id), role: 'guest' }); });
     return out;
   }
   function reportGuests() {
     if (!share) { return; }
-    post('/api/share/guests', { tab: TAB, guests: joinedPeers().map(function (p) { return p.name; }) }).catch(function () {});
+    post('/api/share/guests', { tab: TAB, guests: guestsOnce().map(function (p) { return p.name; }) }).catch(function () {});
     changedState();
   }
 
@@ -195,7 +200,6 @@
     peer.channel = ch;
     var open = {};
     ch.onmessage = function (e) {
-      if (peer.kicked) { return; }
       var f;
       try { f = JSON.parse(e.data); } catch (err) { return; }
       if (f && f.t === 'live') {
@@ -221,16 +225,7 @@
     // A channel the guest opened is often open already by the time it arrives here.
     var joined = function () {
       if (peer.joined) { return; }
-      // The same person on the same device in a newer tab: the older tab is told so and let go (it shows that it was
-      // disconnected, and does not reconnect by itself).
-      Object.keys(share.peers).forEach(function (k) {
-        var other = share.peers[k];
-        if (other === peer || other.id !== peer.id || other.kicked) { return; }
-        other.kicked = true;
-        other.joined = false;
-        try { other.channel.send(JSON.stringify({ t: 'kicked' })); } catch (e) { /* closing */ }
-        setTimeout(function () { drop(k, other); }, 300);
-      });
+      // The same person in another tab (or device) of theirs stays: both tabs are live, as one face.
       peer.joined = true;
       welcome(peer);
       reportGuests();
@@ -244,7 +239,8 @@
     delete share.peers[from];
     clearTimeout(peer.timer);
     try { peer.pc.close(); } catch (e) { /* closed */ }
-    if (peer.joined && peer.id) {
+    // They leave only when their last tab does.
+    if (peer.joined && peer.id && !joinedPeers().some(function (p) { return p.id === peer.id; })) {
       var bye = { t: 'live', kind: 'bye', from: peer.id };
       sendLive(bye, peer.id);
       toLive(bye);
@@ -337,13 +333,48 @@
         if (share !== s) { return; }
         fetch(s.broker + '/api/rooms/' + s.room).then(function (r) {
           if (share !== s) { return; }
-          if (r.status === 404) { gone(s); return; }
+          // Expired (or ended) there: open it again under the same id, so the link keeps working.
+          if (r.status === 404) { renew(s, function () { connectBroker(1000); }); return; }
+          if (r.status === 410) { gone(s); return; } // ended by its host
           connectBroker(Math.min(delay * 2, 15000));
         }, function () { if (share === s) { connectBroker(Math.min(delay * 2, 15000)); } });
       }, delay);
     };
   }
-  // The room expired or was ended elsewhere: the server forgets it, and asks for a new one.
+  // Opens a room at the share server; with `keep` ({ room, hostToken }), that same room: renewed, or opened again under
+  // its id. Resolves with { room, hostToken, expiresAt }; rejects with .status when the share server refused.
+  var HOURS = 24;
+  function openRoom(broker, keep) {
+    var body = { hours: HOURS, protocol: PROTOCOL };
+    if (keep) { body.room = keep.room; body.hostToken = keep.hostToken; }
+    return fetch(broker + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (r) {
+        if (!r.ok) {
+          return r.text().then(function (t) { var e = new Error('The share server refused to open a room (' + r.status + '): ' + t); e.status = r.status; throw e; });
+        }
+        return r.json();
+      });
+  }
+  // Keeps this share's room open at the share server (its link unchanged). `then`, when the room is missing there: it is
+  // opened again, then `then` runs; one that cannot be had back is gone.
+  var RENEW_MS = 6 * 3600 * 1000;
+  function renew(s, then) {
+    if (s.keeps === false) { if (then) { gone(s); } return; }
+    openRoom(s.broker, { room: s.room, hostToken: s.token }).then(function (room) {
+      if (share !== s) { return; }
+      // A share server too old to keep rooms opened a new one instead (left to expire there).
+      if (room.room !== s.room) { s.keeps = false; if (then) { gone(s); } return; }
+      s.keeps = true;
+      s.expiresAt = room.expiresAt;
+      if (s.live) { post('/api/share/live', { tab: TAB, room: s.room, hostToken: s.token, secret: s.secret, url: s.url, expiresAt: s.expiresAt }); }
+      if (then) { then(); }
+    }, function (e) {
+      if (share !== s) { return; }
+      if (e.status === 409) { gone(s); return; }
+      if (then) { setTimeout(then, 5000); } // unreachable for now: try again
+    });
+  }
+  // The room was ended elsewhere, or taken: the server forgets it, and asks for a new one.
   function gone(s) {
     if (share !== s) { return; }
     drop_share(false);
@@ -361,19 +392,30 @@
     drop_share(false);
     var mine = ++starting;
     setState('starting');
-    // The room the local server remembers: the same link as before this tab opened.
-    if (req.room && req.room.room) {
-      begin({ room: req.room.room, hostToken: req.room.hostToken, expiresAt: req.room.expiresAt }, req.room.secret, broker);
-      return;
-    }
-    fetch(broker + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ hours: req.hours, protocol: PROTOCOL }) })
-      .then(function (r) {
-        if (!r.ok) { return r.text().then(function (t) { throw new Error('The share server refused to open a room (' + r.status + '): ' + t); }); }
-        return r.json();
-      })
+    // The room the local server remembers: the same link as before, renewed (or opened again under its id). A share
+    // server that cannot keep it gives a new room, and so a new link.
+    var keep = req.room && req.room.room ? req.room : null;
+    var kept = keep ? { room: keep.room, hostToken: keep.hostToken, expiresAt: keep.expiresAt } : null; // `keeps` unknown
+    var opened = !keep ? openRoom(broker, null) : fetch(broker + '/api/rooms/' + keep.room).then(function (r) {
+      if (r.status === 410) { return 'ended'; }
+      return r.ok ? r.json() : null;
+    }).then(function (there) {
+      if (there === 'ended') { return openRoom(broker, null); }
+      // A share server too old to keep rooms (it does not say `keeps`): the remembered room is used while it lasts.
+      if (there && !there.keeps) { return { room: kept.room, hostToken: kept.hostToken, expiresAt: kept.expiresAt, keeps: false }; }
+      return openRoom(broker, keep).catch(function (e) {
+        if (e.status === 409) { return openRoom(broker, null); }
+        throw e;
+      });
+    }, function () {
+      // Unreachable for now: host the remembered room, and keep trying to reach it.
+      return kept;
+    });
+    opened
       .then(function (room) {
         if (mine !== starting || share) { return; }
-        begin(room, b64url(crypto.getRandomValues(new Uint8Array(32))), broker);
+        var same = keep && room.room === keep.room && room.hostToken === keep.hostToken;
+        begin(room, same ? keep.secret : b64url(crypto.getRandomValues(new Uint8Array(32))), broker);
       })
       .catch(function (e) {
         setState('off');
@@ -381,11 +423,10 @@
       });
   }
   function begin(room, secret, broker) {
-    share = { room: room.room, token: room.hostToken, expiresAt: room.expiresAt, secret: secret, broker: broker, peers: {}, claims: {}, live: false,
+    share = { room: room.room, token: room.hostToken, expiresAt: room.expiresAt, keeps: room.keeps, secret: secret, broker: broker, peers: {}, claims: {}, live: false,
       url: broker + '/s/' + room.room + '#' + secret };
     var s = share;
-    var left = Date.parse(room.expiresAt) - Date.now();
-    if (left > 0) { s.timer = setTimeout(function () { gone(s); }, Math.min(left, 0x7fffffff)); }
+    s.timer = setInterval(function () { renew(s); }, RENEW_MS);
     connectBroker(1000);
   }
 
@@ -396,7 +437,7 @@
     var s = share;
     if (!s) { return; }
     share = null;
-    clearTimeout(s.timer);
+    clearInterval(s.timer);
     if (end) {
       fetch(s.broker + '/api/rooms/' + s.room + '/end', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: s.token }) }).catch(function () {});
     }

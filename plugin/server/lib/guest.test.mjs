@@ -55,6 +55,8 @@ test('a guest may keep only so many drafts, each of a note\'s length', () => {
   assert.throws(() => checkGuestNotes(many, ann), { code: 'too-many-notes' });
   assert.throws(() => checkGuestNotes({ a: { status: 'draft', text: 'x'.repeat(GUEST_TEXT + 1), authorKey: 'ann-key-1' } }, ann), { code: 'bad-note' });
   checkGuestNotes({ a: { status: 'draft', text: 'fine', authorKey: 'ann-key-1' }, o: { status: 'draft', text: 'x'.repeat(GUEST_TEXT + 1) } }, ann);
+  // Another's note the guest changed last is held to the same length.
+  assert.throws(() => checkGuestNotes({ o: { status: 'draft', text: 'x'.repeat(GUEST_TEXT + 1), lastByKey: 'ann-key-1' } }, ann), { code: 'bad-note' });
 });
 
 // Per-note saves (live sharing): each save carries only the notes it changed.
@@ -67,15 +69,18 @@ const stored = () => ({
   sent: { status: 'sent', text: 'gone to Claude', item: 'R1' },
 });
 
-test('a guest adds and edits only their own notes, and other ids are ignored', () => {
-  const out = applyNoteChanges(stored(), { hers: { text: 'ann 2', item: 'R1' }, fresh: { text: 'new', item: 'R1' }, bobs: { text: 'hijack', item: 'R1' }, mine: { text: 'hijack', item: 'R1' } }, ann);
+test('everyone in the book edits every draft; a note keeps who started it', () => {
+  const out = applyNoteChanges(stored(), { hers: { text: 'ann 2', item: 'R1' }, fresh: { text: 'new', item: 'R1' }, bobs: { text: 'ann tidied', item: 'R1' }, mine: { text: 'ann too', item: 'R1' } }, ann);
   assert.equal(out.hers.text, 'ann 2');
   assert.equal(out.hers.authorKey, 'ann-key-0001');
   assert.equal(out.fresh.author, 'Ann');
   assert.equal(out.fresh.authorKey, 'ann-key-0001');
   assert.equal(out.fresh.status, 'draft');
-  assert.equal(out.bobs.text, 'bob');
-  assert.equal(out.mine.text, 'owner');
+  assert.equal(out.bobs.text, 'ann tidied');
+  assert.equal(out.bobs.authorKey, 'bob-key-0001');
+  assert.equal(out.mine.text, 'ann too');
+  assert.equal(out.mine.authorKey, undefined);
+  assert.equal(out.mine.lastByKey, 'ann-key-0001');
 });
 
 test('the owner may edit a guest\'s note; it stays theirs and says who changed it last', () => {
@@ -98,11 +103,12 @@ test('who changed a note last is known by key, so two people of one name are not
   assert.equal(otherAnn.hers.lastMine, undefined);
 });
 
-test('null deletes only what the writer may delete, and notes past draft are never touched', () => {
-  const byAnn = applyNoteChanges(stored(), { hers: null, bobs: null, mine: null }, ann);
+test('null deletes any draft, and notes past draft are never touched', () => {
+  const byAnn = applyNoteChanges(stored(), { hers: null, bobs: null, mine: null, sent: null }, ann);
   assert.equal(byAnn.hers, undefined);
-  assert.ok(byAnn.bobs);
-  assert.ok(byAnn.mine);
+  assert.equal(byAnn.bobs, undefined);
+  assert.equal(byAnn.mine, undefined);
+  assert.equal(byAnn.sent.text, 'gone to Claude');
   const byOwner = applyNoteChanges(stored(), { bobs: null, sent: null, __proto__: null }, owner);
   assert.equal(byOwner.bobs, undefined);
   assert.equal(byOwner.sent.text, 'gone to Claude');
@@ -112,5 +118,5 @@ test('null deletes only what the writer may delete, and notes past draft are nev
 test('a save reports the ids it was not allowed to change, so the page does not think them saved', () => {
   const skipped = [];
   applyNoteChanges(stored(), { hers: { text: 'x', item: 'R1' }, bobs: { text: 'x', item: 'R1' }, mine: null, sent: { text: 'x', item: 'R1' } }, ann, skipped);
-  assert.deepEqual(skipped.sort(), ['bobs', 'mine', 'sent']);
+  assert.deepEqual(skipped.sort(), ['sent']);
 });

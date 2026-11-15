@@ -6,7 +6,7 @@
 //   hello    I am here (the host answers a guest's with a roster, and tells the others)
 //   roster   who is here: { you, people: [{ id, name, color, role }] } (host -> one guest)
 //   where    { anchor: { key, ry }, view }      at most every 100 ms while scrolling, and once after
-//   draft    { note, item, target, rx, ry, dx, dy, text }   a note as it is typed or moved
+//   draft    { note, item, target, rx, ry, ax, ay, ch, cx, cy, dx, dy, text }   a note as it is typed or moved
 //   typing   { note, on }
 //   follow   { leader }                          whom the sender follows (null: nobody)
 //   bye      the sender left
@@ -80,7 +80,7 @@
 
   // Notes as they are typed or moved.
   var typingNote = null, typingOff = null;
-  var sendDraft = throttle(function (d) { send({ kind: 'draft', note: d.note, item: d.item, target: d.target, rx: d.rx, ry: d.ry, dx: d.dx, dy: d.dy, text: d.text }); }, 50);
+  var sendDraft = throttle(function (d) { send({ kind: 'draft', note: d.note, item: d.item, target: d.target, rx: d.rx, ry: d.ry, ax: d.ax, ay: d.ay, ch: d.ch, cx: d.cx, cy: d.cy, dx: d.dx, dy: d.dy, text: d.text }); }, 50);
   Book.onNoteInput(function (id, d) {
     if (follow.leader) { setFollow({ type: 'typing' }); }
     sendDraft(d);

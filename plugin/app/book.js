@@ -1069,7 +1069,7 @@
       (b.lede ? '<p>' + b.lede + '</p>' : '') +
       (b.sources && b.sources.length ? '<p>' + b.sources.map(function (s) { return esc(s.label) + ': <code>' + esc(s.path) + '</code>'; }).join(' · ') + '</p>' : '') +
       '<div class="howto"><b>Making notes:</b> ' +
-      'Press <b>Comment</b> in the bar (or <b>C</b>), then click the exact spot you mean: a numbered pin drops there and a box opens to type in. Comment mode stays on until you press it again or Esc, so you can drop several in a row. Each note then stays up as a sticky, with its numbered pin as the arrowhead: click the sticky to edit it, drag it to move it, and click it to edit it (click again to stop editing and move it). Drag a pin to point it at something else. <b>Notes</b> lists them all, with exactly what Claude will receive. Notes are saved with the book. <b>Revise</b> sends them all to Claude, which works through them with you in the terminal. A sent note then shows in <b>Changes</b>, with the review of what it changed, until you accept it. <b>Build</b> builds every section marked Ready.</div>';
+      'Press <b>Comment</b> in the bar (or <b>C</b>), then click the exact spot you mean: a numbered pin drops there with a sticky beside it: type your note straight into it, and Enter finishes. Comment mode stays on until you press it again or Esc, so you can drop several in a row. Each note stays up as its sticky, with its numbered pin as the arrowhead: click a sticky to select it and again to edit it, drag it to move it, and press Delete to remove the selected one (a long press on a phone). Drag a pin to point it at something else. <b>Notes</b> lists them all, with exactly what Claude will receive. Notes are saved with the book. <b>Revise</b> sends them all to Claude, which works through them with you in the terminal. A sent note then shows in <b>Changes</b>, with the review of what it changed, until you accept it. <b>Build</b> builds every section marked Ready.</div>';
     main.appendChild(cover);
     main.appendChild(diffSummary(rv, removed['']));
     updateChangesBar();
@@ -1262,8 +1262,8 @@
   // A note is { text, target, rx, ry }. Its pin sits at (rx, ry): fractions of the target's box, and lives inside
   // the target, so it stays on the spot that was clicked when the layout moves and when the page is printed.
   // Notes are an overlay only: nothing here changes the layout of the book. Comment mode works like Figma's: with
-  // it on, a click on the book drops a pin and opens a composer beside it, and the mode stays on. A posted note
-  // stays up as a sticky, with an arrow to its pin. The sticky sits at (dx, dy): page pixels from the pin's point,
+  // it on, a click on the book drops a pin and a sticky beside it, ready to type in, and the mode stays on. A note
+  // stays up as that sticky, with an arrow to its pin. The sticky sits at (dx, dy): page pixels from the pin's point,
   // so it travels with the pin; dragging the sticky moves it, and clicking it edits it. Dragging a pin
   // re-aims it (the sticky stays put), and whatever it lands on becomes the note's target. The notes panel lists
   // every note in book order, with exactly what Revise will send. A note also keeps the id of its section, so it
@@ -1279,10 +1279,32 @@
   document.body.appendChild(printList);
   var pins = {};
   var stickies = {}; // id -> { box, ta, line }
-  var pop = null; // the open composer: { id, kind, box, ta }
-  var draft = null; // the id of a note being composed, which has no text until it is posted
+  var draft = null; // the id of a new note while its sticky has the cursor, which may have no text yet
   var commenting = false;
   var justDragged = false;
+  // A window too narrow for a sticky beside the text (where the contents sidebar hides) shows each note as a card in a
+  // list under the item it is on, with a small dot on its spot; it never moves a note or saves where its sticky sits.
+  var narrowQuery = window.matchMedia('(max-width: 860px)');
+  function narrow() { return narrowQuery.matches; }
+  var noteLists = {}; // target key -> its list of cards (narrow)
+  // A pin or sticky held down (being dragged, or about to be): the notes are not drawn again under the pointer.
+  var holding = false;
+  // The selected note: highlighted; Delete or Backspace removes it, Esc or a click elsewhere lets it go.
+  var selectedNote = null;
+  var LONG_PRESS = 550;
+  function selectNote(id) {
+    if (selectedNote && stickies[selectedNote]) { stickies[selectedNote].box.classList.remove('selected'); }
+    selectedNote = id && stickies[id] ? id : null;
+    if (selectedNote) { stickies[selectedNote].box.classList.add('selected'); }
+    drawSoon();
+  }
+  document.addEventListener('pointerdown', function (e) {
+    if (!selectedNote) { return; }
+    var s = stickies[selectedNote];
+    var pin = pins[selectedNote];
+    if ((s && s.box.contains(e.target)) || (pin && pin.contains(e.target))) { return; }
+    selectNote(null);
+  }, true);
   var hot = null;
   var panel = document.getElementById('notes-panel');
   var notesBtn = document.getElementById('notes-btn');
@@ -1295,27 +1317,8 @@
   function notesLocked() { return state.claude.state === 'revising'; }
   // Who is reading: the owner at their desk, or a guest of a shared book (see host.js and guest.js).
   function viewer() { return state.viewer || { guest: false }; }
-  // A guest may change only their own notes (the server marks them `mine`); the owner may change any.
-  function noteLocked(id) {
-    var n = state.notes[id];
-    return notesLocked() || !!(viewer().guest && n && !n.mine);
-  }
-  // Who wrote a note, when it is someone other than the reader: a guest's name, or "Host" for the owner's note on a
-  // guest's page.
-  function authorOf(n) {
-    if (!n) { return ''; }
-    var v = viewer();
-    if (v.guest) { return n.mine ? '' : (n.author || (state.owner && state.owner.name) || 'Owner'); }
-    return n.author || '';
-  }
-  // On the reader's own note, who else changed it last (the owner may edit a guest's note): their name, or ''.
-  function changedByOther(n) {
-    if (!n || !n.lastBy) { return ''; }
-    // By key, not name: two people may share a name. A guest is told only whether the last change was theirs.
-    var mine = viewer().guest ? !!n.mine : !n.authorKey;
-    var byMe = viewer().guest ? !!n.lastMine : n.lastByKey === 'owner';
-    return mine && !byMe ? n.lastBy : '';
-  }
+  // Everyone in the book edits every note (they are collaborating); notes lock only while Claude is revising them.
+  function noteLocked() { return notesLocked(); }
   function saveNotes() {
     if (notesLocked()) { return; }
     notesDirty = true;
@@ -1357,6 +1360,8 @@
     if (typeof n.section === 'string') { o.section = n.section; }
     if (typeof n.created === 'string') { o.created = n.created; }
     o.pin = { rx: isNum(n.rx) ? n.rx : 0, ry: isNum(n.ry) ? n.ry : 0.5 };
+    if (isNum(n.ax) && isNum(n.ay)) { o.pin.ax = n.ax; o.pin.ay = n.ay; }
+    if (isNum(n.ch) && isNum(n.cx) && isNum(n.cy)) { o.pin.ch = n.ch; o.pin.cx = n.cx; o.pin.cy = n.cy; }
     if (isNum(n.dx) && isNum(n.dy)) { o.pin.dx = n.dx; o.pin.dy = n.dy; }
     if (n.el) { o.pin.element = n.el; }
     return o;
@@ -1366,6 +1371,8 @@
     var o = { text: n.text || '', item: n.item, target: n.target || n.item, rx: isNum(p.rx) ? p.rx : 0, ry: isNum(p.ry) ? p.ry : 0.5 };
     if (n.section) { o.section = n.section; }
     if (isNum(p.dx) && isNum(p.dy)) { o.dx = p.dx; o.dy = p.dy; }
+    if (isNum(p.ax) && isNum(p.ay)) { o.ax = p.ax; o.ay = p.ay; }
+    if (isNum(p.ch) && isNum(p.cx) && isNum(p.cy)) { o.ch = p.ch; o.cx = p.cx; o.cy = p.cy; }
     if (p.element !== undefined) { o.el = p.element; }
     if (n.created) { o.created = n.created; }
     if (n.author) { o.author = n.author; }
@@ -1552,7 +1559,7 @@
     var stack = document.elementsFromPoint(clientX, clientY);
     for (var i = 0; i < stack.length; i++) {
       var e = stack[i];
-      if (e.closest('.note-layer, .pin, .bar, .side, .notes-panel, .ev-lightbox')) { continue; }
+      if (e.closest('.note-layer, .note-list, .pin, .bar, .side, .notes-panel, .ev-lightbox')) { continue; }
       var t = e.closest('.tgt');
       if (t) { return t; }
       // A review stack or an item's tools belong to the item above them.
@@ -1608,16 +1615,105 @@
   // Where on its item a pin sits, as fractions of the item's box. Notes from before drops were clamped can hold a
   // spot outside it; they are drawn on the item's nearest edge, so a pin never sits on a neighbor.
   function clamp01(v) { return typeof v === 'number' && !isNaN(v) ? Math.min(1, Math.max(0, v)) : 0; }
+  // Where a pin points, the same for every reader whatever their window and whatever controls they see. A note dropped
+  // on text keeps the letter it was dropped on (ch: its index among the target's shown letters) and the pixels from
+  // that letter's top-left (cx, cy), so it stays on that word when the line wraps elsewhere. Every note keeps the
+  // pixels from the target's top-left (ax, ay), which is exact for a mockup. rx and ry, fractions of the target's box,
+  // are for notes made before either.
+  var ANCHOR_KEYS = ['rx', 'ry', 'ax', 'ay', 'ch', 'cx', 'cy'];
+  var NOT_LETTERS = 'button, select, textarea, input, .pin, .note-layer';
+  function letterNodes(t) {
+    var out = [];
+    var walk = document.createTreeWalker(t, NodeFilter.SHOW_TEXT);
+    for (var node = walk.nextNode(); node; node = walk.nextNode()) {
+      var p = node.parentElement;
+      if (node.data.length && p && !p.closest(NOT_LETTERS) && p.getClientRects().length) { out.push(node); }
+    }
+    return out;
+  }
+  // The box of letter i of a text node (past its end: a zero-width box at the last letter's right edge).
+  function letterBox(node, i) {
+    var r = document.createRange();
+    if (i < node.data.length) {
+      r.setStart(node, i); r.setEnd(node, i + 1);
+      var rs = r.getClientRects();
+      return rs.length ? rs[0] : r.getBoundingClientRect();
+    }
+    r.setStart(node, Math.max(0, i - 1)); r.setEnd(node, i);
+    var b = r.getBoundingClientRect();
+    return { left: b.right, top: b.top, width: 0, height: b.height };
+  }
+  function caretAt(x, y) {
+    if (document.caretPositionFromPoint) {
+      var c = document.caretPositionFromPoint(x, y);
+      return c ? { node: c.offsetNode, offset: c.offset } : null;
+    }
+    if (document.caretRangeFromPoint) {
+      var r = document.caretRangeFromPoint(x, y);
+      return r ? { node: r.startContainer, offset: r.startOffset } : null;
+    }
+    return null;
+  }
+  // The letter of t under the window point (x, y), or null when the point is not on t's text.
+  function letterAnchor(t, x, y) {
+    var c = caretAt(x, y);
+    if (!c || !c.node || c.node.nodeType !== 3) { return null; }
+    var nodes = letterNodes(t), at = nodes.indexOf(c.node);
+    if (at < 0) { return null; }
+    // The caret falls between letters: the letter is the one whose box holds x.
+    var i = c.offset, box = letterBox(c.node, i);
+    if (i > 0 && x < box.left) { i--; box = letterBox(c.node, i); }
+    var cx = x - box.left, cy = y - box.top;
+    if (cy < -2 || cy > box.height + 2 || cx < -4 || cx > box.width + 4) { return null; }
+    var ch = i;
+    for (var k = 0; k < at; k++) { ch += nodes[k].data.length; }
+    return { ch: ch, cx: cx, cy: cy };
+  }
+  function letterPoint(t, a) {
+    var nodes = letterNodes(t), i = a.ch;
+    for (var k = 0; k < nodes.length; k++) {
+      var len = nodes[k].data.length;
+      if (i < len) {
+        var box = letterBox(nodes[k], i);
+        return { x: box.left + a.cx, y: box.top + a.cy };
+      }
+      i -= len;
+    }
+    return null;
+  }
   function anchorFor(t, pageX, pageY) {
     var r = t.getBoundingClientRect();
-    return { rx: (pageX - window.scrollX - r.left) / Math.max(1, r.width), ry: (pageY - window.scrollY - r.top) / Math.max(1, r.height) };
+    var x = pageX - window.scrollX, y = pageY - window.scrollY;
+    var a = { rx: clamp01((x - r.left) / Math.max(1, r.width)), ry: clamp01((y - r.top) / Math.max(1, r.height)),
+      ax: Math.max(0, Math.min(x - r.left, r.width)), ay: Math.max(0, Math.min(y - r.top, r.height)) };
+    var l = letterAnchor(t, x, y);
+    if (l) { a.ch = l.ch; a.cx = l.cx; a.cy = l.cy; }
+    return a;
   }
+  // Puts an anchor on a note (or a live draft), dropping what the old one had that the new one has not.
+  function setAnchor(n, a) {
+    ANCHOR_KEYS.forEach(function (k) { if (isNum(a[k])) { n[k] = a[k]; } else { delete n[k]; } });
+  }
+  // The page point a note's pin points at, or null when its target is not shown.
   function pointOf(n) {
     var t = anchorOf(n);
     // A target hidden by Changes mode has no box: its note is not drawn until it shows again.
     if (!t || !t.getClientRects().length) { return null; }
     var r = t.getBoundingClientRect();
-    return { x: r.left + window.scrollX + clamp01(n.rx) * r.width, y: r.top + window.scrollY + clamp01(n.ry) * r.height };
+    // On the note's own target, its letter, then its pixels; on a stand-in (its section), the fractions.
+    var own = t === byKey(n.target);
+    var p = own && isNum(n.ch) && isNum(n.cx) && isNum(n.cy) ? letterPoint(t, n) : null;
+    if (!p && own && isNum(n.ax) && isNum(n.ay)) { p = { x: r.left + Math.min(n.ax, r.width), y: r.top + Math.min(n.ay, r.height) }; }
+    if (!p) { p = { x: r.left + clamp01(n.rx) * r.width, y: r.top + clamp01(n.ry) * r.height }; }
+    return { x: p.x + window.scrollX, y: p.y + window.scrollY };
+  }
+  // Where a pin goes inside its target (its containing block is the target's padding box).
+  function placePin(pin, t, n) {
+    var p = pointOf(n);
+    if (!p) { return; }
+    var r = t.getBoundingClientRect();
+    pin.style.left = (p.x - window.scrollX - r.left - t.clientLeft) + 'px';
+    pin.style.top = (p.y - window.scrollY - r.top - t.clientTop) + 'px';
   }
   function grow(ta) { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; }
   function barBottom() { var b = document.querySelector('.bar'); return b ? b.offsetHeight + 8 : 0; }
@@ -1647,7 +1743,8 @@
       var it = { id: n.target, where: at ? at.dataset.label : n.target, about: t ? plain(t.dataset.quote) : '', note: n.text.trim() };
       it.noteId = id;
       if (n.el) { it.element = n.el; }
-      if (n.author) { it.by = n.author; }
+      // A collaborator's words (they wrote it, or changed it last) say whose they are, so Claude weighs them as such.
+      if (n.lastByKey && n.lastByKey !== 'owner') { it.by = n.lastBy || n.author || 'A collaborator'; } else if (n.author) { it.by = n.author; }
       return it;
     });
   }
@@ -1661,16 +1758,19 @@
       if (e.button !== 0) { return; }
       e.preventDefault(); e.stopPropagation();
       if (noteLocked(id)) { return; }
+      // A dot on a narrow screen is not dragged: it shows its card instead.
+      if (narrow()) { var sn = stickies[id]; if (sn) { sn.box.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } return; }
       // where the pointer holds the pin, from its point (the spot it marks), whichever way the pin is turned
       var at = pointOf(state.notes[id]) || { x: e.clientX + window.scrollX, y: e.clientY + window.scrollY };
       var gx = e.clientX - (at.x - window.scrollX), gy = e.clientY - (at.y - window.scrollY);
       var sx = e.clientX, sy = e.clientY, moved = false;
       var turn = pin.dataset.rot ? ' rotate(' + pin.dataset.rot + 'deg)' : '';
+      holding = true;
       try { pin.setPointerCapture(e.pointerId); } catch (err) { /* synthetic pointers cannot be captured */ }
       function move(ev) {
         if (!moved && Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) < 4) { return; }
         if (!moved) {
-          moved = true; closePop(false); pin.classList.add('dragging');
+          moved = true; pin.classList.add('dragging');
           if (stickies[id]) { stickies[id].line.setAttribute('d', ''); }
         }
         pin.style.transform = 'translate(' + (ev.clientX - sx) + 'px,' + (ev.clientY - sy) + 'px)' + turn;
@@ -1679,6 +1779,8 @@
         pin.removeEventListener('pointermove', move);
         pin.removeEventListener('pointerup', up);
         pin.removeEventListener('pointercancel', up);
+        holding = false;
+        resumeRefetch();
         if (!moved) { return; }
         justDragged = true;
         setTimeout(function () { justDragged = false; }, 0);
@@ -1695,9 +1797,8 @@
           n.target = t.dataset.key;
           n.item = t.dataset.item || t.dataset.key;
           setSection(n, t);
-          var a = anchorFor(t, px + window.scrollX, py + window.scrollY);
           // A drop beside an item (on its review stack, say) pins it to the item's nearest edge.
-          n.rx = Math.min(1, Math.max(0, a.rx)); n.ry = Math.min(1, Math.max(0, a.ry));
+          setAnchor(n, anchorFor(t, px + window.scrollX, py + window.scrollY));
           var me = mockupElementAt(t, px, py);
           if (me) { n.el = me; } else { delete n.el; }
           var np = pointOf(n);
@@ -1713,7 +1814,6 @@
     pin.addEventListener('click', function (e) {
       e.preventDefault(); e.stopPropagation();
       if (justDragged) { justDragged = false; return; }
-      if (pop && pop.id === id) { return; }
       // A click on a pin does nothing more: it is there to point, and to drag.
     });
     pin.addEventListener('mouseenter', function () { var t = anchorOf(state.notes[id]); if (t) { t.classList.add('note-hover'); } });
@@ -1724,14 +1824,13 @@
     var order = ordered(true);
     targets().forEach(function (t) { t.classList.remove('has-pin', 'note-target'); });
     Object.keys(pins).forEach(function (id) {
-      var pin = pins[id], n = state.notes[id];
+      var pin = pins[id], n = shownNote(id);
       var t = anchorOf(n);
       if (!t) { pin.remove(); return; }
       if (pin.parentNode !== t) { t.appendChild(pin); }
       t.classList.add('has-pin');
-      if (id !== draft) { t.classList.add('note-target'); }
-      pin.style.left = (clamp01(n.rx) * 100) + '%';
-      pin.style.top = (clamp01(n.ry) * 100) + '%';
+      t.classList.add('note-target');
+      placePin(pin, t, n);
       var k = order.indexOf(id);
       if (k >= 0) {
         if (!pin.firstChild) { pin.appendChild(el('span', { class: 'pin-n' })); }
@@ -1739,15 +1838,14 @@
         pin.setAttribute('aria-label', 'Note ' + (k + 1) + ' on ' + t.dataset.label);
         pin.title = 'Note ' + (k + 1) + '. Click to fold or show its note, drag to point it at something else.';
       }
-      pin.classList.toggle('open', !!(pop && pop.id === id));
-      // A pin with a sticky is turned by its arrow (drawArrow). Otherwise (while its note is being written) a pin that
-      // would hang past the window's right edge points from its other corner, so it never adds sideways scroll.
-      if (id === draft) { turnPin(id, null); }
+      pin.classList.toggle('open', !!(stickies[id] && (stickies[id].box.classList.contains('editing') || selectedNote === id)));
+      // A pin with a sticky is turned by its arrow (drawArrow). Otherwise a pin that would hang past the window's
+      // right edge points from its other corner, so it never adds sideways scroll.
       pin.classList.remove('flip');
       if (!pin.dataset.rot && pin.offsetParent && pin.getBoundingClientRect().right > document.documentElement.clientWidth - 2) { pin.classList.add('flip'); }
     });
+    document.querySelectorAll('.pin-sent').forEach(function (sp) { if (sp.sentNote) { placePin(sp, sp.parentElement, sp.sentNote); } });
     drawStickies();
-    if (pop) { placePop(); }
   }
   var drawQueued = false;
   function drawSoon() {
@@ -1763,24 +1861,35 @@
     var box = el('div', { class: 'sticky', role: 'group' });
     // The hidden copy of the text sizes the sticky to its words (up to a width, then it wraps); the textarea lies
     // over it, so typing grows the sticky as it goes.
-    box.innerHTML = '<div class="st-size" aria-hidden="true"></div><textarea rows="1" readonly></textarea>' +
-      '<button type="button" class="st-del" title="Delete this note" aria-label="Delete this note">\u00d7</button>';
+    box.innerHTML = '<div class="st-size" aria-hidden="true"></div><textarea rows="1" readonly></textarea>';
     var ta = box.querySelector('textarea');
-    var del = box.querySelector('.st-del');
-    var by = authorOf(state.notes[id]);
-    var changedBy = changedByOther(state.notes[id]);
-    if (by || changedBy) {
-      var tag = el('span', { class: 'st-by' });
-      tag.textContent = changedBy ? (by ? by + ' · ' : '') + changedBy + ' changed this note' : by;
-      box.appendChild(tag);
+    ta.placeholder = 'Add a note';
+    // A note is deleted by selecting it and pressing Delete (or Backspace), or on a touch screen by a long press.
+    var pressTimer = 0, longPressed = false;
+    function startLongPress(e) {
+      longPressed = false;
+      if (e.pointerType !== 'touch' || noteLocked(id)) { return; }
+      var sx = e.clientX, sy = e.clientY;
+      clearTimeout(pressTimer);
+      pressTimer = setTimeout(function () {
+        longPressed = true;
+        holding = false;
+        if (state.notes[id]) { removeNote(id); }
+        resumeRefetch();
+      }, LONG_PRESS);
+      function stop(ev) {
+        if (ev.type === 'pointermove' && Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) < 8) { return; }
+        clearTimeout(pressTimer);
+        box.removeEventListener('pointermove', stop);
+        box.removeEventListener('pointerup', stop);
+        box.removeEventListener('pointercancel', stop);
+      }
+      box.addEventListener('pointermove', stop);
+      box.addEventListener('pointerup', stop);
+      box.addEventListener('pointercancel', stop);
     }
-    if (viewer().guest && noteLocked(id) && !notesLocked()) { box.classList.add('not-mine'); }
-    // Deleting is a press on the ×, not part of a drag.
-    del.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
-    del.addEventListener('click', function (e) {
-      e.preventDefault(); e.stopPropagation();
-      if (!noteLocked(id) && state.notes[id]) { removeNote(id); }
-    });
+    // The system's own long-press menu would cover the note.
+    box.addEventListener('contextmenu', function (e) { if (!box.classList.contains('editing')) { e.preventDefault(); } });
     var line = document.createElementNS(SVG, 'path');
     arrows.appendChild(line);
     stickies[id] = { box: box, ta: ta, line: line };
@@ -1806,18 +1915,30 @@
     ta.addEventListener('blur', function () {
       ta.readOnly = true;
       box.classList.remove('editing');
-      if (!ta.value.trim() && state.notes[id]) { removeNote(id); }
+      // Finishing an edit lets the note go: selecting is a click on a note, not what writing one leaves behind.
+      if (selectedNote === id) { selectNote(null); }
+      if (draft === id) { draft = null; }
+      if (!ta.value.trim() && state.notes[id]) { removeNote(id); } else { drawSoon(); resumeRefetch(); }
+    });
+    // On a narrow screen a card is never dragged: a tap selects it, a tap on the selected card edits it.
+    box.addEventListener('click', function () {
+      if (!narrow() || box.classList.contains('editing')) { return; }
+      if (longPressed) { longPressed = false; return; }
+      if (selectedNote === id) { editSticky(id); } else { selectNote(id); }
     });
     box.addEventListener('pointerdown', function (e) {
       if (e.button !== 0) { return; }
+      if (narrow()) { startLongPress(e); return; }
       e.preventDefault();
       if (noteLocked(id)) { return; }
+      startLongPress(e);
       // A press on a sticky being edited ends the edit (keeping the text) and goes straight to moving it; a click
       // that does not drag leaves it ready to move rather than editing again.
       var wasEditing = box.classList.contains('editing');
       if (wasEditing) { ta.blur(); if (!state.notes[id]) { return; } }
       var sx = e.clientX, sy = e.clientY, moved = false;
       var ox = parseFloat(box.style.left) || 0, oy = parseFloat(box.style.top) || 0;
+      holding = true;
       try { box.setPointerCapture(e.pointerId); } catch (err) { /* synthetic pointers cannot be captured */ }
       function move(ev) {
         if (!moved && Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) < 4) { return; }
@@ -1832,7 +1953,11 @@
         box.removeEventListener('pointermove', move);
         box.removeEventListener('pointerup', up);
         box.removeEventListener('pointercancel', up);
-        if (!moved) { if (!wasEditing) { editSticky(id); } return; }
+        holding = false;
+        resumeRefetch();
+        if (longPressed) { longPressed = false; return; }
+        // A click selects the sticky; a click on the selected one edits it.
+        if (!moved) { if (!wasEditing) { if (selectedNote === id) { editSticky(id); } else { selectNote(id); } } return; }
         box.classList.remove('dragging');
         var n = state.notes[id], p = n ? pointOf(n) : null;
         if (p) {
@@ -1852,7 +1977,7 @@
     var s = stickies[id];
     if (!s) { return; }
     // a zero-width space keeps a trailing new line from collapsing
-    s.box.firstChild.textContent = s.ta.value + '\u200b';
+    s.box.firstChild.textContent = (s.ta.value || s.ta.placeholder) + '\u200b';
   }
   function editSticky(id) {
     var s = stickies[id];
@@ -1864,6 +1989,7 @@
   function dropSticky(id) {
     var s = stickies[id];
     if (!s) { return; }
+    if (selectedNote === id) { selectedNote = null; }
     turnPin(id, null);
     s.box.remove();
     s.line.remove();
@@ -1901,18 +2027,22 @@
     return { x: x, y: y };
   }
   function drawStickies() {
-    var order = ordered(false);
+    var order = ordered(true);
     Object.keys(stickies).forEach(function (id) { if (order.indexOf(id) < 0) { dropSticky(id); } });
+    if (narrow()) { drawCards(order); return; }
+    // Wide again: the cards float as stickies.
+    Object.keys(noteLists).forEach(function (key) { noteLists[key].remove(); delete noteLists[key]; });
     var vw = document.documentElement.clientWidth;
     var taken = [];
     var changed = false;
     order.forEach(function (id, k) {
-      var n = state.notes[id];
+      var n = shownNote(id);
       var p = pins[id] && pins[id].isConnected ? pointOf(n) : null;
       var s = stickies[id] || buildSticky(id);
+      if (s.box.parentNode !== layer) { layer.appendChild(s.box); }
       if (document.activeElement !== s.ta && s.ta.value !== n.text) { s.ta.value = n.text; }
       fitSticky(id);
-      var hide = !p || hasOwn(ghosts, id);
+      var hide = !p;
       s.box.hidden = hide;
       if (hide) { s.line.setAttribute('d', ''); return; }
       s.box.setAttribute('aria-label', 'Note ' + (k + 1) + ' on ' + labelFor(n));
@@ -1921,11 +2051,12 @@
       var w = s.box.offsetWidth, h = s.box.offsetHeight;
       if (typeof n.dx !== 'number') {
         var spot = defaultSpot(p, w, h, taken);
-        n.dx = spot.x - p.x; n.dy = spot.y - p.y;
+        n.dx = state.notes[id].dx = spot.x - p.x; n.dy = state.notes[id].dy = spot.y - p.y;
         changed = true;
       }
-      // Kept inside the page's width, so a sticky never adds sideways scroll or hides off screen.
-      var x = Math.max(8, Math.min(p.x + n.dx, vw - w - 8));
+      // Kept inside the page's width (with room for its × at the corner), so a sticky never adds sideways scroll or
+      // hides off screen.
+      var x = Math.max(8, Math.min(p.x + n.dx, vw - w - 12));
       var y = Math.max(0, p.y + n.dy);
       s.box.style.left = x + 'px';
       s.box.style.top = y + 'px';
@@ -1933,7 +2064,52 @@
       drawArrow(id);
     });
     if (changed) { saveNotes(); }
-    drawGhosts();
+  }
+  // Narrow: each note is a card in a list right after the item it is on, in book order, joined by a line to the dot on
+  // its spot. Nothing is moved that is already in place, so a card being written keeps the cursor.
+  function drawCards(order) {
+    var want = {};
+    order.forEach(function (id, k) {
+      var n = shownNote(id), t = anchorOf(n);
+      var s = stickies[id] || buildSticky(id);
+      if (document.activeElement !== s.ta && s.ta.value !== n.text) { s.ta.value = n.text; }
+      fitSticky(id);
+      turnPin(id, null);
+      var shown = !!(t && t.getClientRects().length && pins[id] && pins[id].isConnected);
+      s.box.hidden = !shown;
+      s.box.style.left = ''; s.box.style.top = '';
+      if (!shown) { s.line.setAttribute('d', ''); return; }
+      s.box.setAttribute('aria-label', 'Note ' + (k + 1) + ' on ' + labelFor(n));
+      s.ta.setAttribute('aria-label', 'Note ' + (k + 1) + ' text');
+      var key = t.dataset.key;
+      (want[key] = want[key] || { t: t, ids: [] }).ids.push(id);
+    });
+    Object.keys(want).forEach(function (key) {
+      var t = want[key].t, list = noteLists[key];
+      if (!list || list.dataset.in !== (t.parentNode && t.parentNode.tagName)) {
+        if (list) { list.remove(); }
+        var inList = t.parentNode && /^(OL|UL)$/.test(t.parentNode.tagName);
+        list = noteLists[key] = el(inList ? 'li' : 'div', { class: 'note-list' });
+        list.dataset.in = t.parentNode ? t.parentNode.tagName : '';
+      }
+      if (t.nextSibling !== list) { t.parentNode.insertBefore(list, t.nextSibling); }
+      want[key].ids.forEach(function (id, i) {
+        var box = stickies[id].box;
+        if (list.children[i] !== box) { list.insertBefore(box, list.children[i] || null); }
+      });
+    });
+    Object.keys(noteLists).forEach(function (key) { if (!want[key]) { noteLists[key].remove(); delete noteLists[key]; } });
+    order.forEach(function (id) { if (stickies[id] && !stickies[id].box.hidden) { drawCardLine(id); } });
+  }
+  // From the card's nearest edge straight to its spot, where the dot is.
+  function drawCardLine(id) {
+    var s = stickies[id], p = pointOf(shownNote(id));
+    if (!s || !p) { return; }
+    var r = s.box.getBoundingClientRect();
+    var x = r.left + window.scrollX, y = r.top + window.scrollY;
+    var rad = Math.min(STICKY_RADIUS, r.width / 2, r.height / 2);
+    var sx = Math.max(x + rad, Math.min(p.x, x + r.width - rad)), sy = Math.max(y, Math.min(p.y, y + r.height));
+    s.line.setAttribute('d', 'M' + sx.toFixed(1) + ' ' + sy.toFixed(1) + 'L' + p.x.toFixed(1) + ' ' + p.y.toFixed(1));
   }
   // From the nearest point of the sticky's edge to the pin, which is turned to make the arrowhead: its head sits on
   // the line and its point is on the spot the note is about.
@@ -1941,7 +2117,7 @@
   var PIN_HEAD = 11; // the head's radius (14), less a little, so the line runs into the head with no seam
   var STICKY_RADIUS = 12; // the sticky's corner radius (book.css)
   function drawArrow(id) {
-    var s = stickies[id], n = state.notes[id];
+    var s = stickies[id], n = shownNote(id);
     var p = n ? pointOf(n) : null;
     if (!s || !p || s.box.hidden) { return; }
     var x = parseFloat(s.box.style.left) || 0, y = parseFloat(s.box.style.top) || 0;
@@ -1969,93 +2145,6 @@
     setTimeout(function () { pin.classList.remove('flash'); }, 900);
   }
 
-  // The composer writes a new note; once posted, the note lives on as a sticky.
-  function openComposer(id) {
-    closePop(false);
-    var n = state.notes[id];
-    if (!n || !pins[id]) { return; }
-    var box = el('div', { class: 'note-pop composer', role: 'dialog' });
-    box.setAttribute('aria-label', 'New note on ' + labelFor(n));
-    box.innerHTML = '<p class="pop-head"><span class="pop-label"></span></p>' +
-      '<textarea rows="2"></textarea>' +
-      '<div class="pop-btns"><span class="pop-hint">Enter to post</span><button type="button" class="ghost pop-cancel">Cancel</button><button type="button" class="pop-post">Post</button></div>';
-    box.querySelector('.pop-label').textContent = labelFor(n);
-    var ta = box.querySelector('textarea');
-    ta.setAttribute('aria-label', 'New note on ' + labelFor(n));
-    ta.placeholder = 'Add a note';
-    ta.value = n.text || '';
-    layer.appendChild(box);
-    pop = { id: id, kind: 'composer', box: box, ta: ta };
-    grow(ta);
-    ta.addEventListener('input', function () {
-      grow(ta);
-      placePop();
-      noteInput(id, ta.value);
-    });
-    ta.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-        e.preventDefault();
-        post();
-      }
-    });
-    box.querySelector('.pop-post').addEventListener('click', post);
-    box.querySelector('.pop-cancel').addEventListener('click', function () { discard(); });
-    drawAll();
-    ta.focus({ preventScroll: true });
-    var end = ta.value.length;
-    ta.setSelectionRange(end, end);
-  }
-  // Beside the pin, inside the viewport: to the right, or flipped to the left; level with it, or flipped above.
-  function placePop() {
-    var pin = pins[pop.id];
-    if (!pin || !pin.isConnected) { return; }
-    var box = pop.box;
-    var r = pin.getBoundingClientRect();
-    var vw = document.documentElement.clientWidth - (panel.hidden ? 0 : panel.offsetWidth);
-    var vh = window.innerHeight;
-    var top = barBottom();
-    var w = box.offsetWidth, h = box.offsetHeight, gap = 8;
-    var x = r.right + gap, y = r.top;
-    if (x + w > vw - gap) { x = r.left - w - gap; }
-    if (x < gap) {
-      // no room on either side: sit under the pin, or above it
-      x = Math.max(gap, Math.min(r.left, vw - w - gap));
-      y = r.bottom + gap;
-      if (y + h > vh - gap) { y = r.top - h - gap; }
-    } else if (y + h > vh - gap) {
-      y = r.bottom - h;
-    }
-    y = Math.max(top, Math.min(y, vh - h - gap));
-    box.style.left = (x + window.scrollX) + 'px';
-    box.style.top = (y + window.scrollY) + 'px';
-  }
-  // Closing keeps what was typed: the composer's text is posted. An empty note is removed.
-  function closePop(refocus) {
-    if (!pop) { return; }
-    var p = pop;
-    pop = null;
-    p.box.remove();
-    var n = state.notes[p.id];
-    if (n) {
-      if (p.ta.value.trim()) { n.text = p.ta.value; } else { n.text = ''; }
-      if (p.id === draft) { draft = null; }
-      if (!n.text.trim()) { dropNote(p.id); } else { saveNotes(); }
-    }
-    refresh();
-    if (refocus && pins[p.id] && pins[p.id].isConnected) { pins[p.id].focus({ preventScroll: true }); }
-    resumeRefetch();
-  }
-  function post() {
-    if (!pop) { return; }
-    var id = pop.id;
-    closePop(false);
-    if (state.notes[id]) { flash(id); }
-  }
-  function discard() {
-    if (!pop) { return; }
-    pop.ta.value = '';
-    closePop(false);
-  }
   function dropNote(id) {
     if (pins[id]) { pins[id].remove(); delete pins[id]; }
     dropSticky(id);
@@ -2064,7 +2153,6 @@
     saveNotes();
   }
   function removeNote(id) {
-    if (pop && pop.id === id) { pop.box.remove(); pop = null; }
     dropNote(id);
     refresh();
     resumeRefetch();
@@ -2101,7 +2189,7 @@
         li.innerHTML = '<button type="button" class="np-go"><span class="np-num"></span><span class="np-where"></span></button>' +
           '<p class="np-about"></p><textarea rows="2"></textarea><div class="np-row"><button type="button" class="linkbtn np-del">Delete</button></div>';
         li.querySelector('.np-num').textContent = String(i + 1);
-        li.querySelector('.np-where').textContent = labelFor(n) + (authorOf(n) ? ' \u00b7 ' + authorOf(n) : '');
+        li.querySelector('.np-where').textContent = labelFor(n);
         li.querySelector('.np-go').setAttribute('aria-label', 'Go to note ' + (i + 1) + ' on ' + labelFor(n));
         var about = aboutFor(n);
         var ab = li.querySelector('.np-about');
@@ -2211,7 +2299,6 @@
     } else if (panel.contains(document.activeElement) || document.activeElement === document.body) {
       notesBtn.focus({ preventScroll: true });
     }
-    if (pop) { placePop(); }
   }
   notesBtn.addEventListener('click', function () { setPanel(panel.hidden); });
   document.getElementById('np-close').addEventListener('click', function () { setPanel(false); });
@@ -2220,7 +2307,6 @@
   function renderNotes() {
     var before = JSON.stringify(state.notes);
     migrate();
-    if (pop) { pop.box.remove(); pop = null; }
     draft = null;
     Object.keys(state.notes).forEach(function (id) { if (!(state.notes[id].text || '').trim()) { delete state.notes[id]; } });
     Object.keys(pins).forEach(function (id) { pins[id].remove(); });
@@ -2231,6 +2317,8 @@
     if (JSON.stringify(state.notes) !== before) { saveNotes(); }
   }
   window.addEventListener('resize', drawSoon);
+  // Narrow and wide lay notes out differently: switching redraws them.
+  if (narrowQuery.addEventListener) { narrowQuery.addEventListener('change', drawSoon); }
   // Mockups, screenshots and fonts settle after the first draw and move the pins; the stickies follow.
   if (window.ResizeObserver) { new ResizeObserver(drawSoon).observe(main); }
 
@@ -2254,7 +2342,7 @@
   function inBook(e) {
     var t = e.target;
     if (!t || !t.closest) { return false; }
-    return !t.closest('.bar, .side, .note-layer, .pin, .notes-panel, .ev-lightbox, .out, .build-banner, .stage-btn, .item-row, .add-req, .stage-msg, .rv-acts') && !!t.closest('main');
+    return !t.closest('.bar, .side, .note-layer, .note-list, .pin, .notes-panel, .ev-lightbox, .out, .build-banner, .stage-btn, .item-row, .add-req, .stage-msg, .rv-acts') && !!t.closest('main');
   }
   mode.addEventListener('click', function () { setCommenting(!commenting); });
   ['pointerdown', 'mousedown'].forEach(function (type) {
@@ -2270,12 +2358,14 @@
   document.addEventListener('click', function (e) {
     var t = e.target;
     if (justDragged) { justDragged = false; e.preventDefault(); e.stopPropagation(); return; }
-    if (t && t.closest && (t.closest('.note-pop') || t.closest('.pin'))) { return; }
+    if (t && t.closest && t.closest('.pin')) { return; }
     var book = inBook(e);
-    if (pop) {
-      // A click elsewhere closes the open composer or card, keeping what was typed. On the book it does nothing else.
-      closePop(false);
-      if (book && commenting) { e.preventDefault(); e.stopPropagation(); return; }
+    var act = document.activeElement;
+    if (book && commenting && act && act.tagName === 'TEXTAREA' && act.closest('.sticky')) {
+      // A click elsewhere while a sticky is being written finishes it, keeping what was typed, and does nothing else.
+      e.preventDefault(); e.stopPropagation();
+      act.blur();
+      return;
     }
     if (!commenting || !book) { return; }
     e.preventDefault(); e.stopPropagation();
@@ -2283,7 +2373,8 @@
     if (!tg) { return; }
     var a = anchorFor(tg, e.clientX + window.scrollX, e.clientY + window.scrollY);
     var id = newId();
-    state.notes[id] = { text: '', item: tg.dataset.item || tg.dataset.key, target: tg.dataset.key, rx: a.rx, ry: a.ry, created: new Date().toISOString() };
+    state.notes[id] = { text: '', item: tg.dataset.item || tg.dataset.key, target: tg.dataset.key, created: new Date().toISOString() };
+    setAnchor(state.notes[id], a);
     if (viewer().guest) { state.notes[id].author = viewer().name; state.notes[id].mine = true; }
     setSection(state.notes[id], tg);
     var me = mockupElementAt(tg, e.clientX, e.clientY);
@@ -2291,12 +2382,19 @@
     draft = id;
     buildPin(id);
     drawAll();
-    openComposer(id);
+    editSticky(id);
   }, true);
   document.addEventListener('keydown', function (e) {
     if (document.querySelector('.ev-lightbox')) { return; }
+    var inField = e.target && e.target.closest && e.target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNote && !inField) {
+      e.preventDefault();
+      if (!noteLocked(selectedNote) && state.notes[selectedNote]) { removeNote(selectedNote); }
+      return;
+    }
     if (e.key === 'Escape') {
-      if (pop) { e.preventDefault(); discard(); mode.focus({ preventScroll: true }); return; }
+      if (tocOpen()) { e.preventDefault(); setToc(false); return; }
+      if (selectedNote && !inField) { e.preventDefault(); selectNote(null); return; }
       if (!panel.hidden) { e.preventDefault(); setPanel(false); return; }
       if (!reviewPanel.hidden) { e.preventDefault(); setReviewPanel(false); return; }
       if (commenting) { e.preventDefault(); setCommenting(false); }
@@ -2367,8 +2465,7 @@
       // Anything being written is kept on the page, but the notes cannot change until Claude has worked through them.
       setCommenting(false);
       var act = document.activeElement;
-      if (act && act.tagName === 'TEXTAREA' && (layer.contains(act) || panel.contains(act))) { act.blur(); }
-      if (pop) { pop.box.remove(); pop = null; }
+      if (act && act.tagName === 'TEXTAREA' && (act.closest('.sticky') || panel.contains(act))) { act.blur(); }
       if (draft) { dropNote(draft); drawAll(); }
     }
     if (locked !== wasLocked && !panel.hidden) { renderPanel(); }
@@ -2438,7 +2535,6 @@
     msgEl.textContent = ok ? 'Server unreachable: copied instead. Paste it into Claude.' : 'Server unreachable: copy the text in the box and paste it into Claude.';
   }
   reviseBtn.addEventListener('click', function () {
-    closePop(false);
     if (reviseBtn.disabled) { return; }
     var its = items();
     var ids = ordered(false);
@@ -2724,7 +2820,6 @@
       (back || notesBtn).focus({ preventScroll: true });
     }
     showBanner();
-    if (pop) { placePop(); }
   }
   document.getElementById('rp-close').addEventListener('click', function () { setReviewPanel(false); });
 
@@ -2776,7 +2871,7 @@
         return fetch('/data/' + p, { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : null; }).then(function (t) { if (t !== null) { mockups[p] = t; } });
       });
       if (data.book.mockupCss) {
-        loads.push(fetch('/data/' + data.book.mockupCss, { cache: 'no-store' }).then(function (r) { return r.text(); }).then(function (t) { state.mockupCss = t; }));
+        loads.push(fetch('/data/' + data.book.mockupCss, { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : null; }).then(function (t) { if (t !== null) { state.mockupCss = t; } }));
       }
       var prevClaude = state.claude;
       var review = data.review || { rev: 0, accepted: {}, notes: {}, tries: {}, opened: {}, where: {} };
@@ -2817,14 +2912,14 @@
     });
   }
   // After Claude has changed the book: draw it again where the reader is. Notes waiting to be saved are sent first,
-  // and while a note is being written (a composer, a sticky or a panel box has the cursor) the book is not drawn
+  // and while a note is being written (a sticky or a panel box has the cursor) the book is not drawn
   // again: that waits until the writing ends (resumeRefetch).
   var refetchWaiting = false;
   function writingNote() {
-    if (pop) { return true; }
+    if (holding) { return true; }
     var act = document.activeElement;
     if (act && /^(INPUT|SELECT|TEXTAREA)$/.test(act.tagName) && act.closest && act.closest('.inline-editor')) { return true; }
-    return !!(act && act.tagName === 'TEXTAREA' && (layer.contains(act) || panel.contains(act)));
+    return !!(act && act.tagName === 'TEXTAREA' && (act.closest('.sticky') || panel.contains(act)));
   }
   function refetchBook() {
     if (writingNote()) { refetchWaiting = true; return Promise.resolve(); }
@@ -2897,13 +2992,12 @@
       if (!n || (n.status !== 'sent' && n.status !== 'answered')) { return; }
       var t = byKey(n.target) || byKey(n.item) || (n.section ? byKey(n.section) : null);
       if (!t) { return; }
-      var p = n.pin || {};
       var label = (n.status === 'answered' ? 'Answered' : 'Sent') + ' note: ' + (n.text || '');
       var pin = el('span', { class: 'pin pin-sent ' + n.status, role: 'img', 'aria-label': label, title: label });
-      pin.style.left = ((isNum(p.rx) ? p.rx : 0) * 100) + '%';
-      pin.style.top = ((isNum(p.ry) ? p.ry : 0.5) * 100) + '%';
       t.classList.add('has-sent-pin');
       t.appendChild(pin);
+      pin.sentNote = fromServer(n);
+      placePin(pin, t, pin.sentNote);
     });
   }
   showSent.addEventListener('change', function () { store('spec-book-sent', showSent.checked ? '1' : '0'); drawSentPins(); });
@@ -2951,14 +3045,15 @@
     drawSentPins();
     drawSoon();
   }
+  // A change gone to lands CHG_LAND pixels below the bar, so the next one is the first below that, not the one there.
+  var CHG_LAND = 12;
   // Scrolls to the next item under review below the top of the screen (the first one when `first`), and flashes it.
   function nextChange(first) {
-    var all = [].slice.call(main.querySelectorAll('.has-rv'))
-      .filter(function (e) { return e.getClientRects().length; });
+    var all = changeEls();
     if (!all.length) { return; }
     var top = barBottom() + 4;
-    var at = first ? all[0] : all.filter(function (e) { return e.getBoundingClientRect().top > top + 2; })[0] || all[0];
-    window.scrollTo({ top: at.getBoundingClientRect().top + window.scrollY - top - 12, behavior: 'smooth' });
+    var at = first ? all[0] : all.filter(function (e) { return e.getBoundingClientRect().top > top + CHG_LAND + 2; })[0] || all[0];
+    window.scrollTo({ top: at.getBoundingClientRect().top + window.scrollY - top - CHG_LAND, behavior: 'smooth' });
     at.classList.remove('chg-flash');
     void at.offsetWidth;
     at.classList.add('chg-flash');
@@ -3017,50 +3112,40 @@
   function noteInput(id, text, move) {
     var n = state.notes[id];
     if (!n) { return; }
-    var d = { note: id, item: n.item, target: n.target, rx: n.rx, ry: n.ry, text: String(text || '') };
+    var d = { note: id, item: n.item, target: n.target, text: String(text || '') };
+    setAnchor(d, n);
     if (move) { d.dx = move.dx; d.dy = move.dy; } else if (isNum(n.dx)) { d.dx = n.dx; d.dy = n.dy; }
     inputWatchers.forEach(function (fn) { try { fn(id, d); } catch (e) { /* live.js's problem */ } });
   }
-  // Someone else's note as they write it: drawn over (or instead of) the saved one, read-only, until it is saved or
-  // they stop.
-  var ghosts = {}; // note id -> { d, by, box }
-  function showDraft(id, d, by) {
-    if (!d || typeof id !== 'string') { return; }
-    var g = ghosts[id];
-    if (!g) {
-      var box = el('div', { class: 'sticky ghost', role: 'status' });
-      box.innerHTML = '<div class="gh-text"></div><span class="st-by gh-by"></span><span class="gh-pin" aria-hidden="true"></span>';
-      layer.appendChild(box);
-      g = ghosts[id] = { box: box };
-    }
-    g.d = d;
-    g.by = by || '';
-    g.box.querySelector('.gh-text').textContent = d.text || '\u200b';
-    g.box.querySelector('.gh-by').textContent = (by || 'Someone') + ' is typing\u2026';
-    drawStickies();
+  // Someone else's note as they write or move it shows on the note's own sticky and pin, as on their screen: their
+  // text, their place for it, until their save has landed and they stop (clearDraft). A note nobody has saved yet
+  // shows once it is (a new note is saved as it is typed).
+  var liveDrafts = {}; // note id -> their latest draft { target, item, anchor, dx, dy, text }
+  function showDraft(id, d) {
+    if (!d || typeof id !== 'string' || id === '__proto__') { return; }
+    liveDrafts[id] = d;
+    drawSoon();
   }
   function clearDraft(id) {
-    var g = ghosts[id];
-    if (!g) { return; }
-    g.box.remove();
-    delete ghosts[id];
-    drawStickies();
+    if (!hasOwn(liveDrafts, id)) { return; }
+    delete liveDrafts[id];
+    drawSoon();
   }
-  function drawGhosts() {
-    var vw = document.documentElement.clientWidth;
-    Object.keys(ghosts).forEach(function (id) {
-      var g = ghosts[id], d = g.d;
-      var p = pointOf({ target: d.target, item: d.item, rx: d.rx, ry: d.ry });
-      g.box.hidden = !p;
-      if (!p) { return; }
-      var dx = isNum(d.dx) ? d.dx : 24, dy = isNum(d.dy) ? d.dy : 24;
-      var w = g.box.offsetWidth;
-      g.box.style.left = Math.max(8, Math.min(p.x + dx, vw - w - 8)) + 'px';
-      g.box.style.top = Math.max(0, p.y + dy) + 'px';
-      var pin = g.box.querySelector('.gh-pin');
-      pin.style.left = (p.x - (parseFloat(g.box.style.left) || 0) - 6) + 'px';
-      pin.style.top = (p.y - (parseFloat(g.box.style.top) || 0) - 6) + 'px';
-    });
+  // A note as it shows now: the saved note, with someone's live draft of it over it.
+  function shownNote(id) {
+    var n = state.notes[id];
+    var d = hasOwn(liveDrafts, id) ? liveDrafts[id] : null;
+    if (!n || !d) { return n; }
+    var o = {};
+    Object.keys(n).forEach(function (k) { o[k] = n[k]; });
+    if (typeof d.target === 'string' && byKey(d.target)) {
+      o.target = d.target;
+      if (typeof d.item === 'string') { o.item = d.item; }
+      setAnchor(o, d);
+    }
+    if (typeof d.text === 'string') { o.text = d.text; }
+    if (isNum(d.dx) && isNum(d.dy)) { o.dx = d.dx; o.dy = d.dy; }
+    return o;
   }
   // The reader moving through the book themselves (not a scroll this page made): following someone stops.
   var scrollWatchers = [];
@@ -3081,7 +3166,7 @@
     var top = barBottom() + 4;
     var above = all.filter(function (e) { return e.getBoundingClientRect().top < top - 2; });
     var at = above.length ? above[above.length - 1] : all[all.length - 1];
-    window.scrollTo({ top: at.getBoundingClientRect().top + window.scrollY - top - 12, behavior: 'smooth' });
+    window.scrollTo({ top: at.getBoundingClientRect().top + window.scrollY - top - CHG_LAND, behavior: 'smooth' });
     at.classList.remove('chg-flash');
     void at.offsetWidth;
     at.classList.add('chg-flash');
@@ -3099,9 +3184,80 @@
       var i = 0;
       while (i < all.length && all[i].getBoundingClientRect().bottom < top) { i++; }
       document.getElementById('chg-pos').textContent = (all.length ? Math.min(i + 1, all.length) : 0) + ' / ' + all.length;
+      showWhere();
     });
   }
   window.addEventListener('scroll', changePosSoon, { passive: true });
+
+  // Where am I, on a narrow screen: the bar names the chapter or section in view (the last one whose top has passed
+  // just under the bar), and the contents mark it. The label, or the strip's Contents button, opens the contents as a
+  // sheet; a jump, the backdrop, Esc or a swipe down closes it.
+  var whereBtn = document.getElementById('where');
+  var tocBtn = document.getElementById('toc-btn');
+  var tocNav = document.getElementById('toc-nav');
+  var tocBackdrop = document.getElementById('toc-backdrop');
+  function showWhere() {
+    if (!narrow()) { return; }
+    var line = barBottom() + 40;
+    var here = null;
+    var all = document.querySelectorAll('#main .chapter, #main .bk-sec');
+    for (var i = 0; i < all.length; i++) {
+      var r = all[i].getBoundingClientRect();
+      if (!r.height) { continue; }
+      if (r.top > line) { break; }
+      here = all[i];
+    }
+    var link = here && here.id ? tocNav.querySelector('a[href="#' + CSS.escape(here.id) + '"]') : null;
+    var was = tocNav.querySelector('.sb-here');
+    if (was && was !== link) { was.classList.remove('sb-here'); }
+    var text = 'Contents';
+    if (link) {
+      link.classList.add('sb-here');
+      var copy = link.cloneNode(true);
+      Array.prototype.forEach.call(copy.querySelectorAll('.sb-chg, .sb-n'), function (x) { x.remove(); });
+      text = copy.textContent.trim().replace(/^§[\d.]+\s*/, '') || text; // the section's number is in the sheet
+    }
+    var label = document.getElementById('where-text');
+    if (label.textContent !== text) { label.textContent = text; }
+  }
+  function tocOpen() { return document.body.classList.contains('toc-open'); }
+  function setToc(open) {
+    document.body.classList.toggle('toc-open', open);
+    tocBackdrop.hidden = !open;
+    whereBtn.setAttribute('aria-expanded', String(open));
+    tocBtn.setAttribute('aria-expanded', String(open));
+    tocNav.style.transform = '';
+    if (!open) { return; }
+    showWhere();
+    var here = tocNav.querySelector('.sb-here');
+    if (here) {
+      var top = here.getBoundingClientRect().top - tocNav.getBoundingClientRect().top + tocNav.scrollTop;
+      tocNav.scrollTop = Math.max(0, top - tocNav.clientHeight / 3);
+    }
+  }
+  whereBtn.addEventListener('click', function () { setToc(!tocOpen()); });
+  tocBtn.addEventListener('click', function () { setToc(!tocOpen()); });
+  tocBackdrop.addEventListener('click', function () { setToc(false); });
+  tocNav.addEventListener('click', function (e) { if (tocOpen() && e.target.closest('a')) { setToc(false); } });
+  if (narrowQuery.addEventListener) {
+    narrowQuery.addEventListener('change', function () { if (!narrow()) { setToc(false); } else { showWhere(); } });
+  }
+  // A swipe down from the top of the sheet's list pulls it closed.
+  var swipeY = null;
+  tocNav.addEventListener('touchstart', function (e) {
+    swipeY = tocOpen() && tocNav.scrollTop <= 0 && e.touches.length === 1 ? e.touches[0].clientY : null;
+  }, { passive: true });
+  tocNav.addEventListener('touchmove', function (e) {
+    if (swipeY === null) { return; }
+    var dy = e.touches[0].clientY - swipeY;
+    tocNav.style.transform = dy > 0 ? 'translateY(' + dy + 'px)' : '';
+  }, { passive: true });
+  tocNav.addEventListener('touchend', function (e) {
+    if (swipeY === null) { return; }
+    var dy = e.changedTouches[0].clientY - swipeY;
+    swipeY = null;
+    if (dy > 80) { setToc(false); } else { tocNav.style.transform = ''; }
+  });
   changesBtn.addEventListener('click', function () { setDiff(!state.diff); });
   nextBtn.addEventListener('click', function () { nextChange(false); });
   prevBtn.addEventListener('click', prevChange);
