@@ -33,7 +33,6 @@
               "text": "<b>User:</b> anyone who opens the app. There are no accounts; todos are kept on the device."
             }
           ],
-          "frames": [],
           "stage": "built"
         }
       ]
@@ -78,21 +77,15 @@
               "reason": "Nobody reads it, and it crowds the list."
             }
           ],
-          "frames": [
+          "stage": "drafting",
+          "shows": [
             {
-              "id": "todos-list-1",
-              "role": "user",
-              "caption": "Todos",
-              "mockup": "mockups/todos-list-1.html"
+              "state": "SCR-3WRX.list"
             },
             {
-              "id": "todos-list-2",
-              "role": "user",
-              "caption": "No todos yet",
-              "mockup": "mockups/todos-list-2.html"
+              "state": "SCR-3WRX.empty"
             }
-          ],
-          "stage": "drafting"
+          ]
         },
         {
           "id": "add",
@@ -112,15 +105,12 @@
               "text": "Spaces at either end are trimmed, and a blank todo is never added."
             }
           ],
-          "frames": [
+          "stage": "built",
+          "shows": [
             {
-              "id": "todos-add-1",
-              "role": "user",
-              "caption": "Typing a new todo",
-              "mockup": "mockups/todos-add-1.html"
+              "state": "SCR-3WRX.typing"
             }
-          ],
-          "stage": "built"
+          ]
         },
         {
           "id": "complete",
@@ -144,15 +134,12 @@
               "text": "<b>Clear completed</b> shows in the footer while any todo is done, and removes every done todo."
             }
           ],
-          "frames": [
+          "stage": "built",
+          "shows": [
             {
-              "id": "todos-complete-1",
-              "role": "user",
-              "caption": "All marked done",
-              "mockup": "mockups/todos-complete-1.html"
+              "state": "SCR-3WRX.alldone"
             }
-          ],
-          "stage": "built"
+          ]
         },
         {
           "id": "edit",
@@ -172,21 +159,15 @@
               "text": "Swiping a todo left shows <b>Delete</b>, which removes it."
             }
           ],
-          "frames": [
+          "stage": "built",
+          "shows": [
             {
-              "id": "todos-edit-1",
-              "role": "user",
-              "caption": "Editing a title",
-              "mockup": "mockups/todos-edit-1.html"
+              "state": "SCR-3WRX.editing"
             },
             {
-              "id": "todos-edit-2",
-              "role": "user",
-              "caption": "Swiped to delete",
-              "mockup": "mockups/todos-edit-2.html"
+              "state": "SCR-3WRX.swiped"
             }
-          ],
-          "stage": "built"
+          ]
         }
       ]
     },
@@ -217,15 +198,12 @@
               "change": "add"
             }
           ],
-          "frames": [
+          "stage": "drafting",
+          "shows": [
             {
-              "id": "filters-bar-1",
-              "role": "user",
-              "caption": "Active only",
-              "mockup": "mockups/filters-bar-1.html"
+              "state": "SCR-3WRX.activeonly"
             }
-          ],
-          "stage": "drafting"
+          ]
         }
       ]
     },
@@ -251,7 +229,6 @@
               "change": "add"
             }
           ],
-          "frames": [],
           "stage": "drafting",
           "label": "Phase 2"
         }
@@ -287,6 +264,8 @@
     "FLT-YXRD",
     "LAT-EDBR",
     "LAT-EMZA",
+    "SCR-3WRX",
+    "SCR-Y6S2",
     "TOD-49WL",
     "TOD-BTPW",
     "TOD-ENN8",
@@ -303,5 +282,94 @@
     "TOD-VWFF",
     "TOD-WX2R",
     "TOD-X24M"
+  ],
+  "screens": [
+    {
+      "id": "SCR-3WRX",
+      "name": "TodosScreen",
+      "kind": "screen",
+      "states": [
+        {
+          "id": "list",
+          "name": "List",
+          "when": {
+            "role": "user"
+          },
+          "mockup": "mockups/screens/SCR-3WRX/list.html"
+        },
+        {
+          "id": "empty",
+          "name": "Empty",
+          "when": {
+            "role": "user"
+          },
+          "mockup": "mockups/screens/SCR-3WRX/empty.html"
+        },
+        {
+          "id": "typing",
+          "name": "Typing",
+          "when": {
+            "role": "user"
+          },
+          "mockup": "mockups/screens/SCR-3WRX/typing.html"
+        },
+        {
+          "id": "alldone",
+          "name": "All done",
+          "when": {
+            "role": "user"
+          },
+          "mockup": "mockups/screens/SCR-3WRX/alldone.html"
+        },
+        {
+          "id": "editing",
+          "name": "Editing",
+          "when": {
+            "role": "user"
+          },
+          "mockup": "mockups/screens/SCR-3WRX/editing.html"
+        },
+        {
+          "id": "swiped",
+          "name": "Swiped",
+          "when": {
+            "role": "user"
+          },
+          "mockup": "mockups/screens/SCR-3WRX/swiped.html"
+        },
+        {
+          "id": "activeonly",
+          "name": "Active only",
+          "when": {
+            "role": "user"
+          },
+          "mockup": "mockups/screens/SCR-3WRX/activeonly.html",
+          "change": "add"
+        }
+      ]
+    },
+    {
+      "id": "SCR-Y6S2",
+      "name": "FiltersBar",
+      "kind": "component",
+      "states": [
+        {
+          "id": "all",
+          "name": "All",
+          "when": {
+            "also": "All chosen"
+          },
+          "mockup": "mockups/screens/SCR-Y6S2/all.html"
+        },
+        {
+          "id": "active",
+          "name": "Active",
+          "when": {
+            "also": "Active chosen"
+          },
+          "mockup": "mockups/screens/SCR-Y6S2/active.html"
+        }
+      ]
+    }
   ]
 }

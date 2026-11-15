@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const INIT = fileURLToPath(new URL('./init.mjs', import.meta.url));
@@ -23,4 +24,23 @@ test('init git-ignores what stays local and keeps builds/ tracked', () => {
   assert.deepEqual(review.notes, {});
   assert.deepEqual(JSON.parse(readFileSync(join(data, 'history.json'), 'utf8')), { items: {}, changelog: [] });
   assert.match(readFileSync(join(root, 'docs', 'specbook', 'tools', 'collect-evidence.mjs'), 'utf8').split('\n')[1], /^\/\/ specbook-tool /);
+});
+
+test('the starter book has screens, no frames, and valid screens', () => {
+  const root = mkdtempSync(join(tmpdir(), 'specbook-init-'));
+  execFileSync(process.execPath, [INIT, '--project', root], { stdio: 'ignore' });
+  const data = join(root, 'docs', 'specbook');
+  const book = JSON.parse(readFileSync(join(data, 'book.json'), 'utf8'));
+  assert.ok(book.screens.length > 0);
+  for (const ch of book.chapters) for (const sec of ch.sections) assert.equal(sec.frames, undefined, sec.id);
+  const mockups = {};
+  const exists = p => {
+    if (!existsSync(join(data, p))) return false;
+    mockups[p] = readFileSync(join(data, p), 'utf8');
+    return true;
+  };
+  const M = createRequire(import.meta.url)('../app/model.js');
+  assert.equal(M.screenProblem(book, exists, mockups), null);
+  const bar = book.screens.find(s => s.name === 'FiltersBar');
+  assert.ok(Object.values(mockups).some(t => t.includes(`<sb-component id="${bar.id}" state="active">`)));
 });
