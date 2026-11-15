@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isLocalOrigin, ROOMS_PER_HOUR, TURN_PER_IP, TURN_PER_ROOM, mayMintTurn, countRoom, fromGuest, fromHost, roomHours, turnServers, validId, roomProtocol, mayWait, WAIT_MS, newId, validReader, pageFor, PROTOCOL, CSP } from './rules.mjs';
+import { isLocalOrigin, ROOMS_PER_HOUR, TURN_PER_IP, TURN_PER_ROOM, mayMintTurn, countRoom, fromGuest, fromHost, roomHours, turnServers, validId, roomProtocol, mayWait, WAIT_MS, newId, validReader, pageFor, PROTOCOL, CSP, assetHeaders, shareChoice, renewed } from './rules.mjs';
 
 test('room length is clamped to 1-24 hours, 8 by default', () => {
   assert.equal(roomHours(undefined), 8);
@@ -121,4 +121,28 @@ test('the page a room gets follows its protocol and reader version', () => {
   assert.deepEqual(pageFor({ protocol: 3, reader: '1.4.0' }, ['1.4.0']), { kind: 'reader', version: '1.4.0' });
   assert.deepEqual(pageFor({ protocol: 3, reader: '1.5.0' }, ['1.4.0']), { kind: 'missing', version: '1.5.0' });
   assert.match(CSP, /^default-src 'self'; script-src 'self';/);
+});
+
+test('only a good answer under /r/ is cached for good', () => {
+  assert.match(assetHeaders('/r/1.4.0/share.js', 200)['cache-control'], /immutable/);
+  assert.equal(assetHeaders('/r/1.5.0/share.html', 404)['cache-control'], 'no-store');
+  assert.equal(assetHeaders('/r/1.4.0/share.js', 307)['cache-control'], 'no-store');
+  assert.equal(assetHeaders('/r/versions.json', 200)['cache-control'], 'no-store');
+  assert.equal(assetHeaders('/r/versions.json', 200)['content-security-policy'], CSP);
+});
+
+test('a protocol 3 room with no reader published gets the notice, not the old guest page', () => {
+  assert.deepEqual(shareChoice({ kind: 'legacy' }, []), { file: '/guest.html', csp: false });
+  assert.deepEqual(shareChoice({ kind: 'none' }, []), { unavailable: true });
+  assert.deepEqual(shareChoice({ kind: 'missing', version: '1.5.0' }, []), { unavailable: true });
+  assert.deepEqual(shareChoice({ kind: 'missing', version: '1.5.0' }, ['1.4.0', '1.10.0', '1.9.0']), { file: '/r/1.10.0/share.html', csp: true });
+  assert.deepEqual(shareChoice({ kind: 'reader', version: '1.4.0' }, ['1.4.0']), { file: '/r/1.4.0/share.html', csp: true });
+});
+
+test('renewing a room takes the host\'s current reader and protocol', () => {
+  const held = { hostToken: 't', expiresAt: 100, protocol: 3, reader: '1.4.0' };
+  assert.deepEqual(renewed(held, { reader: '1.5.0', protocol: 3 }, 50), { hostToken: 't', expiresAt: 100, protocol: 3, reader: '1.5.0' });
+  assert.equal(renewed(held, { reader: '../x' }, 200).reader, '1.4.0');
+  assert.equal(renewed(held, {}, 200).protocol, 3);
+  assert.equal(renewed(held, {}, 200).expiresAt, 200);
 });

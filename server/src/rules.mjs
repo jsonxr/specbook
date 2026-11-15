@@ -137,3 +137,45 @@ export function mayMintTurn({ room, ip, day, cap }) {
 export function isLocalOrigin(origin) {
   return /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(String(origin));
 }
+
+// Headers for a file under /r/: a published version never changes, so a good answer is cached for good; anything else
+// (a version not published yet) and the list of versions are not.
+export function assetHeaders(path, status) {
+  const ok = status >= 200 && status < 300;
+  return {
+    'content-security-policy': CSP,
+    'cache-control': path === '/r/versions.json' || !ok ? 'no-store' : 'public, max-age=31536000, immutable',
+  };
+}
+
+export const NEEDS_NEWER = 'This book needs a newer share server. Ask its owner to deploy it.';
+
+// What /s/<room> serves: { file } or, when a protocol 3 room has no reader to show, { unavailable: true }.
+export function shareChoice(page, versions) {
+  if (page.kind === 'legacy') {
+    return { file: '/guest.html', csp: false };
+  }
+  const version = page.kind === 'reader' ? page.version : newestVersion(versions);
+  return version ? { file: `/r/${version}/share.html`, csp: true } : { unavailable: true };
+}
+
+export function newestVersion(versions) {
+  const key = v => v.split('.').map(Number);
+  return [...versions].sort((a, b) => {
+    const [x, y] = [key(a), key(b)];
+    return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
+  }).at(-1);
+}
+
+// A held room after its host opens it again with { room, hostToken }: a longer life, and the reader and protocol of the
+// host's current plugin.
+export function renewed(held, body, until) {
+  const next = { ...held, expiresAt: Math.max(held.expiresAt, until) };
+  if (validReader(body.reader)) {
+    next.reader = body.reader;
+  }
+  if (body.protocol !== undefined) {
+    next.protocol = roomProtocol(body.protocol);
+  }
+  return next;
+}

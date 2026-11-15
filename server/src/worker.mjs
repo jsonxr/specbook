@@ -14,7 +14,7 @@
 //   GET  /api/rooms/<room>/guest   WebSocket; while the host is away it waits, and hears host-online when it comes
 //   GET  /api/rooms/<room>/ice     { iceServers }: STUN, plus TURN when the TURN secrets are set
 import { DurableObject } from 'cloudflare:workers';
-import { CSP, GUEST_IDLE_MS, isLocalOrigin, MAX_GUESTS, MAX_MESSAGE, STUN, countRoom, fromGuest, fromHost, mayMintTurn, mayWait, newId, pageFor, roomHours, roomProtocol, turnServers, validId, validReader, WAIT_MS } from './rules.mjs';
+import { assetHeaders, CSP, GUEST_IDLE_MS, isLocalOrigin, MAX_GUESTS, MAX_MESSAGE, STUN, countRoom, fromGuest, fromHost, mayMintTurn, mayWait, NEEDS_NEWER, newId, pageFor, renewed as renewedRoom, shareChoice, roomHours, roomProtocol, turnServers, validId, validReader, WAIT_MS } from './rules.mjs';
 
 
 export default {
@@ -33,8 +33,9 @@ export default {
     if (path.startsWith('/r/')) {
       const res = await env.ASSETS.fetch(request);
       const headers = new Headers(res.headers);
-      headers.set('content-security-policy', CSP);
-      headers.set('cache-control', path === '/r/versions.json' ? 'no-store' : 'public, max-age=31536000, immutable');
+      for (const [k, v] of Object.entries(assetHeaders(path, res.status))) {
+        headers.set(k, v);
+      }
       return new Response(res.body, { status: res.status, headers });
     }
     if (path === '/guest.js') {
@@ -71,28 +72,24 @@ async function readerVersions(env, url) {
   }
 }
 
-function newest(versions) {
-  const key = v => v.split('.').map(Number);
-  return [...versions].sort((a, b) => {
-    const [x, y] = [key(a), key(b)];
-    return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
-  }).at(-1);
-}
-
 // /s/<room>: the guest page that matches the room's protocol and reader version.
 async function sharePage(request, env, url, id) {
   const info = await env.BROKER.get(env.BROKER.idFromName('broker')).fetch(new Request(new URL(`/api/rooms/${id}`, url)));
   const room = info.ok ? await info.json() : null;
   const versions = await readerVersions(env, url);
   const page = pageFor(room, versions);
-  const version = page.kind === 'reader' ? page.version : newest(versions);
-  // With no reader published at all, the old guest page is all there is.
-  const legacy = page.kind === 'legacy' || !version;
-  const res = await env.ASSETS.fetch(new Request(new URL(legacy ? '/guest.html' : `/r/${version}/share.html`, url)));
+  const choice = shareChoice(page, versions);
+  if (choice.unavailable) {
+    return new Response(`<!doctype html><meta charset="utf-8"><title>Spec book</title><p>${NEEDS_NEWER}</p>`, {
+      status: 503,
+      headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': CSP, 'referrer-policy': 'no-referrer', 'cache-control': 'no-store' },
+    });
+  }
+  const res = await env.ASSETS.fetch(new Request(new URL(choice.file, url)));
   const headers = new Headers(res.headers);
   headers.set('referrer-policy', 'no-referrer');
   headers.set('cache-control', 'no-store');
-  if (!legacy) {
+  if (choice.csp) {
     headers.set('content-security-policy', CSP);
   }
   return new Response(res.body, { status: res.status, headers });
@@ -278,7 +275,7 @@ export class Broker extends DurableObject {
         if (!sameToken(body.hostToken, held.hostToken)) {
           return json(409, { error: 'taken' });
         }
-        const renewed = { ...held, expiresAt: Math.max(held.expiresAt, until) };
+        const renewed = renewedRoom(held, body, until);
         await this.ctx.storage.put(`room:${body.room}`, renewed);
         await this.schedule();
         return json(200, { room: body.room, hostToken: held.hostToken, expiresAt: new Date(renewed.expiresAt).toISOString(), keeps: true });
