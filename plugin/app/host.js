@@ -95,7 +95,11 @@
     Object.keys(f).forEach(function (k) { msg[k] = f[k]; });
     msg.t = 'live';
     msg.from = peer.id;
-    if (msg.kind === 'hello') { msg.name = peer.name; msg.color = window.SpecRelay.colorOf(peer.id); msg.role = 'guest'; }
+    if (msg.kind === 'hello') {
+      msg.name = peer.name; msg.color = window.SpecRelay.colorOf(peer.id); msg.role = 'guest';
+      // The guest's reader has loaded: it hears who is here.
+      try { peer.channel.send(JSON.stringify({ t: 'live', kind: 'roster', you: peer.id, people: people() })); } catch (e) { /* closing */ }
+    }
     if (msg.kind === 'draft') {
       var id = msg.note;
       var notes = {};

@@ -2924,7 +2924,9 @@
     if (!e) { return; }
     var r = e.getBoundingClientRect();
     var top = r.top + window.scrollY + (Number(a.ry) || 0) * r.height - barBottom();
-    window.scrollTo({ top: Math.max(0, top), behavior: smooth ? 'smooth' : 'instant' });
+    // A jump of more than a screen is made at once; a short one glides.
+    var far = Math.abs(top - window.scrollY) > window.innerHeight;
+    window.scrollTo({ top: Math.max(0, top), behavior: smooth && !far ? 'smooth' : 'instant' });
   }
   function currentView() {
     return { view: state.view, diff: !!state.diff, videos: !!vid.checked, coverage: !!cover.checked };

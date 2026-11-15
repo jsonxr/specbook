@@ -463,3 +463,34 @@ body.guest .add-req, body.guest .req-form, body.guest .build-banner button, body
 .sticky.ghost .gh-text { white-space: pre-wrap; word-break: break-word; min-height: 1.4em; }
 .sticky.ghost .gh-by { font-style: italic; }
 .sticky.ghost .gh-pin { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: var(--note); box-shadow: 0 0 0 2px #222; }
+
+/* Live sharing: the share pill (faces and Copy link), its menu, following and being followed. */
+.share-pill { position: relative; display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); padding: 2px 2px 2px 4px; }
+.share-pill:has(.share-start), .share-pill:has(.share-note) { border: 0; background: none; padding: 0; }
+.share-note { color: var(--muted); font-size: 13px; }
+.share-solo { color: var(--muted); font: 600 12px var(--sans); padding-left: 8px; white-space: nowrap; }
+.faces { display: flex; align-items: center; }
+.face { position: relative; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font: 700 11px var(--sans); color: #111; background: var(--face); border: 2px solid var(--surface); margin-left: -6px; padding: 0; cursor: pointer; }
+.face:first-child { margin-left: 0; }
+.face.me { cursor: default; }
+.face.on { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px #fff; z-index: 2; }
+.face:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.face-pen { position: absolute; right: -4px; bottom: -4px; width: 12px; height: 12px; border-radius: 50%; background: var(--note); color: #222; font-size: 7px; display: grid; place-items: center; border: 2px solid var(--surface); }
+.face-count { position: absolute; right: -7px; top: -6px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px; background: #fff; color: #111; font-size: 9px; display: grid; place-items: center; }
+.share-copy, .share-more { font: 600 13px var(--sans); color: var(--ink); background: transparent; border: 0; padding: 5px 9px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+.share-more { padding: 5px 8px 5px 2px; color: var(--muted); }
+.share-copy:hover, .share-more:hover, .share-more[aria-expanded="true"] { background: #2a2c31; color: var(--ink); }
+.share-menu { position: absolute; right: 0; top: calc(100% + 8px); z-index: 80; width: 320px; max-width: calc(100vw - 24px); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px; box-shadow: 0 12px 30px rgba(0, 0, 0, .5); font-size: 13px; }
+.share-menu-head { margin: 0 0 8px; color: var(--muted); font-size: 12px; }
+.share-link-row { display: flex; gap: 8px; }
+.share-link { flex: 1; min-width: 0; font: 12px var(--mono); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+.share-people { list-style: none; margin: 10px 0; padding: 10px 0 0; border-top: 1px solid var(--line); }
+.share-people li { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.share-people .dot { width: 10px; height: 10px; border-radius: 50%; }
+.share-st { margin-left: auto; color: var(--muted); font-size: 12px; }
+.share-acts { display: flex; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
+.share-stop { color: #ff8a80; border-color: #5a2b28; background: transparent; }
+.follow-chip { position: absolute; left: 50%; top: calc(100% + 8px); transform: translateX(-50%); z-index: 65; color: #111; background: var(--surface); font: 600 13px var(--sans); padding: 5px 12px; border-radius: 999px; white-space: nowrap; box-shadow: 0 6px 18px rgba(0, 0, 0, .4); pointer-events: none; }
+.follow-chip[hidden] { display: none; }
+body.followed::after { content: ""; position: fixed; inset: 0; border: 3px solid var(--follower); pointer-events: none; z-index: 90; }
+@media print { .share-pill, .follow-chip { display: none; } body.followed::after { display: none; } }
