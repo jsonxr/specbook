@@ -9,6 +9,13 @@ description: Use when the reader pressed Revise, when the background watch on th
 never a request to change the app; Revise only refines the requirements and mockups. While it runs the reader locks
 the notes and the book, so you are the only writer.
 
+**The user can Stop.** The reader's Claude menu has **Stop**, which withdraws the request: its notes go back to drafts
+and the book unlocks. Check once step 3's questions are settled and again before each section in step 4:
+`node ${CLAUDE_PLUGIN_ROOT}/server/next-request.mjs --data <dir> --check <file>` prints `pending` or `stopped`. On
+`stopped`, stop at once: no more edits, no `link` or `reply`, no step 7. Tell the user in the terminal which sections
+you had already changed (those changes stay in the book, for them to accept or reject like any other), then re-arm
+the watch (step 8).
+
 **Announce at start:** "Using specbook:revise to work through the notes."
 
 1. **Read the request.** `node ${CLAUDE_PLUGIN_ROOT}/server/next-request.mjs --data <dir>` prints the path of the

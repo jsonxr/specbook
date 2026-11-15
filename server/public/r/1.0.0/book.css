@@ -544,7 +544,25 @@ body.followed::after { content: ""; position: fixed; inset: 0; border: 3px solid
 .claude-act small { display: block; font: 400 12px var(--sans); color: var(--muted); margin-top: 2px; }
 .claude-act:disabled { opacity: .5; cursor: default; }
 .claude-pop #claude-status { margin: 0; padding: 0 8px 4px; }
-.claude-pop #claude-status:empty { display: none; }
+/* Stop: the running action's row, its Stop, and the one question before it stops. */
+.claude-row { display: flex; align-items: center; gap: 8px; border-radius: 8px; }
+.claude-row .claude-act { flex: 1; min-width: 0; }
+.claude-row.running { background: #2a1c16; border: 1px solid #5c3a2c; }
+.claude-row.running .claude-act:disabled { opacity: 1; }
+.claude-row.running .ca-label { color: var(--claude, #d97757); }
+.claude-row.running .ca-label::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 7px; border-radius: 50%; background: currentColor; vertical-align: 1px; animation: claude-pulse 1.2s infinite; }
+@media (prefers-reduced-motion: reduce) { .claude-row.running .ca-label::before { animation: none; } }
+.claude-stop { flex: none; display: inline-flex; align-items: center; gap: 6px; margin-right: 8px; font: 600 13px var(--sans); color: #ff8a80; background: transparent; border: 1px solid #5a2b28; border-radius: 8px; padding: 5px 10px; cursor: pointer; }
+.claude-stop:hover { background: #3a1d1b; }
+.claude-stop[hidden], .claude-ask[hidden] { display: none; }
+.ca-sq { width: 10px; height: 10px; border-radius: 2px; background: currentColor; }
+.claude-ask { margin: 2px 0; padding: 10px; border-radius: 8px; background: #2a1715; border: 1px solid #5a2b28; }
+.claude-ask p { margin: 0 0 4px; font: 600 14px var(--sans); }
+.claude-ask small { display: block; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.ca-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.ca-stop { font: 600 13px var(--sans); color: #fff; background: #8a2b1d; border: 1px solid #a33a2b; border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+
+.claude-pop #claude-status:empty, .claude-pop:has(.claude-row.running) #claude-status { display: none; }
 body.guest #claude-menu { display: none; }
 
 /* The screen before Claude acts (book.js openConfirm): a dialog over the book on a wide screen, a sheet from the bottom
@@ -580,6 +598,8 @@ body.confirm-open { overflow: hidden; }
   .cc { left: 0; right: 0; top: 56px; bottom: 0; transform: none; width: auto; max-height: none; border-radius: 14px 14px 0 0; border-width: 1px 0 0; }
   .cc-foot { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   .cc-foot button { flex: 1; min-height: 44px; }
+  .claude-stop { min-height: 44px; padding: 0 14px; }
+  .ca-row button { flex: 1; min-height: 44px; }
 }
 @media print { .cc, .cc-backdrop { display: none !important; } }
 

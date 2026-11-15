@@ -26,6 +26,10 @@ and prints one JSON line; an error goes to stderr with exit code 1.
    approved.
 3. **Plan and build, scoped to the scope.** **REQUIRED SUB-SKILL:** superpowers:writing-plans, then
    superpowers:subagent-driven-development (steps below). No stop for plan approval.
+   - Before each task, check the request was not stopped: `next-request.mjs --data <dir> --check <file>` prints
+     `pending` or `stopped`. On `stopped` (the user pressed **Stop** in the reader's Claude menu), the reader has
+     already stopped the build and filed the request: stop at once, without `build.mjs stop` or `finish`, commit what
+     you have to the branch, tell the user what was done, and re-arm the watch.
    - Before each task: `build.mjs task --build <id> --index <n> --of <m> --title "<title>" [--section <chapter-id>-<section-id>] [--req <ID>]`.
    - As a requirement's state moves: `build.mjs req --build <id> --id <ID> --status queued|in_progress|proven|failed`.
    - At least every 5 minutes during a long step: `build.mjs beat --build <id>`. The reader calls a build stale

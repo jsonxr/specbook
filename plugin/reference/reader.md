@@ -100,8 +100,13 @@ draft note, in pin order, as a revise request (the notes become `sent`); **Cance
 the book. **Build** opens the same screen listing the sections marked Ready, and **✦ Build** posts a build request
 naming them. On a desktop the screen is a dialog over the book; on a phone it is a sheet from the bottom, its buttons
 in reach of the thumb. If the server is unreachable, Revise copies the request to the clipboard instead. The session's watch
-picks the request up. While Claude is busy both buttons are disabled and the group says `Revising…` or
-`Building · task 3 of 9` (`Building…` before the first task).
+picks the request up. While Claude is busy, the action it is doing is the menu's running row (`Revising`, or
+`Building · task 3 of 9`): what was sent and when, with **Stop** beside it; the other action says "Waiting for Claude to
+finish." **Stop** asks once, inside the menu (**Keep going** or **Stop revising** / **Stop the build**), then withdraws
+the request (`POST /api/claude/stop`). A stopped Revise puts its notes back to drafts, and anything Claude already
+changed stays in the book for review; a stopped Build sends its sections back to Drafting and keeps the evidence. A
+toast says what happened, and the book unlocks at once. The skills check `next-request.mjs --check <file>` before each
+section or task and stop there.
 
 What the user can change depends on what Claude is doing. The server enforces it with 409 answers.
 
