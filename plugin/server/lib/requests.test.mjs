@@ -9,6 +9,7 @@ import { readJson, writeJsonAtomic } from './json-file.mjs';
 import { fileRequest, listPending, stopFlag, stopRequest, writeRequest } from './requests.mjs';
 import { readReview, sendNotes, setNotesStatus } from './review.mjs';
 import { latestBuild, startBuild } from './builds.mjs';
+import { startAccepted } from './accept-all.testkit.mjs';
 
 const NEXT = fileURLToPath(new URL('../next-request.mjs', import.meta.url));
 let data;
@@ -67,7 +68,7 @@ test('a stopped revise filed with --done keeps its notes drafts, and --check say
 
 test('stopRequest stops a running build and files its request', () => {
   writeRequest(data, { kind: 'build', status: 'pending', createdAt: new Date().toISOString(), sections: ['c-r'] });
-  const id = startBuild(data).id;
+  const id = startAccepted(data).id;
   assert.deepEqual(stopRequest(data), { stopped: 'build', count: 1 });
   assert.equal(latestBuild(data).progress.state, 'failed');
   assert.equal(readJson(join(data, 'book.json'), null).chapters[0].sections[0].stage, 'drafting');
@@ -90,7 +91,7 @@ test('stopRequest returns null when nothing is pending', () => {
 });
 
 test('stopRequest stops a running build that has no pending request', () => {
-  const id = startBuild(data).id;
+  const id = startAccepted(data).id;
   assert.deepEqual(stopRequest(data), { stopped: 'build', count: 1 });
   assert.equal(latestBuild(data).progress.state, 'failed');
   assert.equal(latestBuild(data).id, id);

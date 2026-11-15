@@ -7,6 +7,7 @@ import { readJson, writeJsonAtomic } from './json-file.mjs';
 import { startBuild, latestBuild, stopBuild, recordTask, recordRequirement, recordCall, beat, finishBuild, reviewCall } from './builds.mjs';
 import { createRequire } from 'node:module';
 import { currentSnapshot, readHistory, readReview } from './review.mjs';
+import { acceptAll, startAccepted, startKeepingReview } from './accept-all.testkit.mjs';
 import { findRequirement } from './book-model.mjs';
 import { fileBuildRequests, fileRequest, listPending, writeRequest } from './requests.mjs';
 
@@ -29,8 +30,21 @@ beforeEach(() => {
   });
 });
 
+
+test('startBuild refuses a Ready section with a change not accepted yet, and moves nothing', () => {
+  acceptAll(data);
+  const book = readBook();
+  book.chapters[0].sections[0].requirements.push({ id: 'R9', text: 'new, unaccepted', change: 'add' });
+  writeJsonAtomic(join(data, 'book.json'), book);
+  assert.throws(() => startBuild(data), { code: 'unreviewed', message: /c-r/ });
+  assert.equal(readBook().chapters[0].sections[0].stage, 'ready');
+  assert.equal(latestBuild(data), null);
+  acceptAll(data);
+  assert.deepEqual(Object.keys(startBuild(data).requirements).sort(), ['R1', 'R9']);
+});
+
 test('startBuild moves ready sections to building and queues their changes', () => {
-  const p = startBuild(data, Date.parse('2026-11-12T10:00:00Z'));
+  const p = startAccepted(data, Date.parse('2026-11-12T10:00:00Z'));
   assert.equal(p.id, '2026-11-12T10-00-00-000Z');
   assert.deepEqual(p.sections, ['c-r']);
   assert.deepEqual(p.requirements, { R1: { status: 'queued', section: 'c-r' } });
@@ -46,7 +60,7 @@ test('startBuild with no ready section throws nothing-ready', () => {
 });
 
 test('stopBuild returns building sections to drafting and keeps changes', () => {
-  const p = startBuild(data);
+  const p = startAccepted(data);
   stopBuild(data, p.id, 'Marked as stopped');
   const s = readBook().chapters[0].sections.find(x => x.id === 'r');
   assert.equal(s.stage, 'drafting');
@@ -57,7 +71,7 @@ test('stopBuild returns building sections to drafting and keeps changes', () => 
 });
 
 test('record functions set the heartbeat and need a running build', () => {
-  const p = startBuild(data, 0);
+  const p = startAccepted(data, 0);
   const task = { index: 1, of: 2, title: 't', section: 'c-r', req: 'R1' };
   recordTask(data, p.id, task, 1000);
   recordRequirement(data, p.id, 'R1', 'in_progress', 2000);
@@ -74,7 +88,7 @@ test('record functions set the heartbeat and need a running build', () => {
 });
 
 test('recordCall mints a CALL id into usedIds and appends a pending call', () => {
-  const p = startBuild(data);
+  const p = startAccepted(data);
   const call = recordCall(data, p.id, { about: ['R1'], section: 'c-r', title: 't', body: 'b', before: 'x', after: 'y' });
   assert.match(call.id, /^CALL-[0-9A-Z]{4}$/);
   assert.equal(call.status, 'pending');
@@ -84,7 +98,7 @@ test('recordCall mints a CALL id into usedIds and appends a pending call', () =>
 });
 
 test('recordCall rejects a blank or missing title, before or after', () => {
-  const p = startBuild(data);
+  const p = startAccepted(data);
   const ok = { about: ['R1'], section: 'c-r', title: 't', body: 'b', before: 'x', after: 'y' };
   for (const field of ['title', 'before', 'after']) {
     assert.throws(() => recordCall(data, p.id, { ...ok, [field]: '  ' }), { code: 'missing-field' });
@@ -159,7 +173,7 @@ function seedFinishBook() {
 
 test('finishBuild applies proven changes, removes removals, and marks built', () => {
   seedFinishBook();
-  const p = startBuild(data);
+  const p = startAccepted(data);
   writeEvidence({ R0: { unit: [{ status: 'passed' }] }, R1: { unit: [{ status: 'passed' }] }, R2: { e2e: [{ status: 'passed' }] } });
   const out = finishBuild(data, p.id, Date.parse('2026-11-12T23:30:00Z'));
   assert.deepEqual(out, { built: ['c-r'], drafting: [] });
@@ -181,7 +195,7 @@ test('finishBuild applies proven changes, removes removals, and marks built', ()
 
 test('finishBuild keeps unproven changes and removals, back to drafting', () => {
   seedFinishBook();
-  const p = startBuild(data);
+  const p = startAccepted(data);
   writeEvidence({ R1: { unit: [{ status: 'passed' }] }, R2: { unit: [{ status: 'failed' }] } });
   assert.deepEqual(finishBuild(data, p.id), { built: [], drafting: [{ section: 'c-r', unproven: ['R0', 'R2'] }] });
   const s = section('c-r');
@@ -194,13 +208,13 @@ test('finishBuild keeps unproven changes and removals, back to drafting', () => 
 
 test('finishBuild with no evidence file proves nothing', () => {
   seedFinishBook();
-  const p = startBuild(data);
+  const p = startAccepted(data);
   assert.deepEqual(finishBuild(data, p.id).drafting, [{ section: 'c-r', unproven: ['R0', 'R1', 'R2'] }]);
 });
 
 test('finishBuild holds removals back while a requirement that stays is unproven', () => {
   seedFinishBook();
-  const p = startBuild(data);
+  const p = startAccepted(data);
   writeEvidence({ R1: { unit: [{ status: 'passed' }] }, R2: { e2e: [{ status: 'passed' }] } });
   assert.deepEqual(finishBuild(data, p.id), { built: [], drafting: [{ section: 'c-r', unproven: ['R0'] }] });
   const s = section('c-r');
@@ -213,13 +227,13 @@ test('finishBuild holds removals back while a requirement that stays is unproven
 });
 
 test('finishBuild with no removals needs only its changes proven', () => {
-  const p = startBuild(data);
+  const p = startAccepted(data);
   writeEvidence({ R1: { unit: [{ status: 'passed' }] } });
   assert.deepEqual(finishBuild(data, p.id), { built: ['c-r'], drafting: [] });
 });
 
 test('recordRequirement rejects an unknown status', () => {
-  const p = startBuild(data);
+  const p = startAccepted(data);
   assert.throws(() => recordRequirement(data, p.id, 'R1', 'done'), { code: 'bad-status' });
   assert.equal(latestBuild(data).progress.requirements.R1.status, 'queued');
 });
@@ -229,7 +243,7 @@ const pick = (obj, keys) => Object.fromEntries(keys.map(k => [k, obj[k]]));
 // A finished build with one call about R1 (still in the book) and one about R3 (removed by finishBuild).
 function seedReview() {
   seedFinishBook();
-  const p = startBuild(data);
+  const p = startAccepted(data);
   const call = recordCall(data, p.id, { about: ['R1'], section: 'c-r', title: 't', body: 'b', before: 'before text', after: 'after text' });
   const removed = recordCall(data, p.id, { about: ['R3'], section: 'c-r', title: 'gone', body: 'rb', before: 'x', after: 'y' });
   writeEvidence({ R0: { unit: [{ status: 'passed' }] }, R1: { unit: [{ status: 'passed' }] }, R2: { e2e: [{ status: 'passed' }] } });
@@ -304,7 +318,7 @@ test('finishBuild drops the markers into the accepted copy, records built histor
     accepted: { R0: { text: 'a' }, R2: { text: 'c', change: 'change', today: 'old c' }, R3: { text: '<p>d</p>', change: 'remove', reason: 'gone' } },
     notes: {}, tries: {}, opened: {}, where: {},
   });
-  const p = startBuild(data);
+  const p = startKeepingReview(data);
   allProven();
   finishBuild(data, p.id, Date.parse('2026-11-14T10:00:00Z'), { summary: 'People can filter.' });
   const review = readReview(data);
@@ -340,7 +354,7 @@ test('a build that also reworded text leaves the item under review against the o
   writeJsonAtomic(join(data, 'review.json'), {
     rev: 1, accepted: { R2: { text: 'old c', change: 'change', today: 'older' } }, notes: {}, tries: {}, opened: {}, where: {},
   });
-  const p = startBuild(data);
+  const p = startKeepingReview(data);
   allProven();
   finishBuild(data, p.id);
   assert.deepEqual(readReview(data).accepted.R2, { text: 'old c' });
@@ -352,7 +366,7 @@ test('a build that also reworded text leaves the item under review against the o
 
 test('finishBuild lists the build commits and does not add a second changelog entry for the same build', () => {
   seedFinishBook();
-  const p = startBuild(data);
+  const p = startKeepingReview(data);
   const progress = readJson(join(data, 'builds', p.id, 'progress.json'), null);
   writeJsonAtomic(join(data, 'builds', p.id, 'progress.json'), { ...progress, commits: ['abc1234'] });
   allProven();
@@ -370,7 +384,7 @@ test('finishBuild lists the build commits and does not add a second changelog en
 
 test('a build with nothing proven adds a changelog entry with no landed items and leaves review.json alone', () => {
   seedFinishBook();
-  const p = startBuild(data);
+  const p = startKeepingReview(data);
   finishBuild(data, p.id);
   assert.deepEqual(readHistory(data).changelog[0].landed, []);
   assert.equal(readReview(data).rev, 0);

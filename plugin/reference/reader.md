@@ -98,7 +98,9 @@ and text, tagged `changed` or `new` when not accepted yet), then the note, and w
 screen follows the notes while it is open (another tab or a collaborator saving one). **✦ Send to Claude** posts every
 draft note, in pin order, as a revise request (the notes become `sent`); **Cancel**, the backdrop or Esc goes back to
 the book. **Build** opens the same screen listing the sections marked Ready, and **✦ Build** posts a build request
-naming them. On a desktop the screen is a dialog over the book; on a phone it is a sheet from the bottom, its buttons
+naming them. Only accepted work is built: if a Ready section was edited since (by Claude or in the page) and has
+an open review, the server refuses with 409 `unreviewed` and its `sections`, and the page says "Only accepted changes are
+built. Accept every change in “<section>” first, or move it back to Drafting." On a desktop the screen is a dialog over the book; on a phone it is a sheet from the bottom, its buttons
 in reach of the thumb. If the server is unreachable, Revise copies the request to the clipboard instead. The session's watch
 picks the request up. While Claude is busy, the action it is doing is the menu's running row (`Revising`, or
 `Building · task 3 of 9`): what was sent and when, with **Stop** beside it; the other action says "Waiting for Claude to

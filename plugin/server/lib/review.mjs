@@ -466,3 +466,15 @@ export function setAccepted(data, changes) {
 export function knownItem(data, key) {
   return Object.hasOwn(currentItems(data), key) || Object.hasOwn(readReview(data).accepted, key);
 }
+
+// The sections, of those named by `<chapter-id>-<section-id>`, that still have something under review: their heading,
+// a requirement or a frame in them, or a removed item that lived there. Only accepted work is built, so Ready and
+// Build both refuse these.
+export function sectionsUnderReview(data, sectionIds) {
+  const snap = snapshot(data);
+  const review = readReview(data);
+  const under = reviewsOf(snap, review, readHistory(data)).byKey;
+  const keys = Object.keys(under);
+  const sectionOf = (key) => snap.items[key]?.section ?? under[key]?.place?.section ?? review.where[key]?.section;
+  return sectionIds.filter((id) => keys.some((key) => key === id || sectionOf(key) === id));
+}

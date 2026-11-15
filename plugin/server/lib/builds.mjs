@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { readJson, writeJsonAtomic } from './json-file.mjs';
 import { createMinter } from './ids.mjs';
 import { findRequirement, findSection, listSections } from './book-model.mjs';
-import { addNote, recordBuild, setAccepted, readReview } from './review.mjs';
+import { addNote, recordBuild, setAccepted, readReview, sectionsUnderReview } from './review.mjs';
 import { plain } from './migrate.mjs';
 
 const { isProven } = createRequire(import.meta.url)('../../app/model.js');
@@ -73,6 +73,11 @@ export function startBuild(data, now = Date.now()) {
   const ready = listSections(book ?? {}).filter(s => s.section.stage === 'ready');
   if (ready.length === 0) {
     throw fail('nothing-ready', 'No section is ready to build');
+  }
+  // Only accepted work is built: a Ready section with anything still under review is refused, whole.
+  const unreviewed = sectionsUnderReview(data, ready.map(s => s.fullId));
+  if (unreviewed.length > 0) {
+    throw fail('unreviewed', `Not accepted yet: ${unreviewed.join(', ')}. Accept every change in these sections, or move them back to Drafting, before building.`);
   }
   const at = new Date(now).toISOString();
   const requirements = {};

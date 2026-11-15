@@ -19,7 +19,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { createReadStream, existsSync, readFileSync, readdirSync, realpathSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs';
 import { dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { acceptItem, addNote, changeItem, currentSnapshot, forgetItem, readHistory, readReview, sendNotes, stampOpened, writeReviewNotes } from './lib/review.mjs';
+import { acceptItem, addNote, changeItem, currentSnapshot, forgetItem, readHistory, readReview, sectionsUnderReview, sendNotes, stampOpened, writeReviewNotes } from './lib/review.mjs';
 import { migrateReview } from './lib/migrate-review.mjs';
 import { createMinter } from './lib/ids.mjs';
 import { claudeState } from './lib/claude-state.mjs';
@@ -978,6 +978,12 @@ const server = createServer(async (req, res) => {
         json(res, 400, { error: 'nothing-ready' });
         return;
       }
+      // Only accepted work is built: a Ready section edited since (by Claude or in the page) waits for its Accepts.
+      const unreviewed = sectionsUnderReview(DATA, sections);
+      if (unreviewed.length > 0) {
+        json(res, 409, { error: 'unreviewed', sections: unreviewed });
+        return;
+      }
       const file = writeRequest(DATA, { kind: 'build', status: 'pending', createdAt: new Date().toISOString(), sections });
       json(res, 201, { file });
       return;
@@ -991,11 +997,7 @@ const server = createServer(async (req, res) => {
       const book = JSON.parse(readFileSync(join(DATA, 'book.json'), 'utf8'));
       if (body.stage === 'ready') {
         // Ready is gated on review: the section, its requirements and its frames must all be accepted.
-        const snap = currentSnapshot(DATA);
-        const review = readReview(DATA);
-        const under = SpecModel.reviews(snap.book, snap.mockups, review, readHistory(DATA)).byKey;
-        const unreviewed = Object.keys(under).some(key => key === body.section || (snap.items[key]?.section ?? under[key]?.place?.section ?? review.where[key]?.section) === body.section);
-        if (unreviewed) {
+        if (sectionsUnderReview(DATA, [body.section]).length > 0) {
           json(res, 409, { error: 'unreviewed' });
           return;
         }

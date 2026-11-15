@@ -34,7 +34,10 @@ and prints one JSON line; an error goes to stderr with exit code 1.
 
 1. **Start.** `build.mjs start` moves every Ready section to Building and prints the build's `id`, its `progress`
    and the `scope`: every requirement with a `change` (`add`, `change`, `remove`), with its section, text, `today`
-   and `reason`. It fails with `busy` if a build is running and `nothing-ready` if no section is Ready.
+   and `reason`. It fails with `busy` if a build is running, `nothing-ready` if no section is Ready, and `unreviewed` (naming the
+   sections) if a Ready section has a change not accepted yet: **only accepted work is built**. On `unreviewed`, build
+   nothing: tell the user which sections wait for ✓ Accept, file the request and re-arm the watch. Never accept on the
+   user's behalf.
 2. **Branch.** `git switch -c build/<id>`, then commit the book (with any earlier uncommitted revise edits) as
    approved.
 3. **Plan and build, scoped to the scope.** **REQUIRED SUB-SKILL:** superpowers:writing-plans, then

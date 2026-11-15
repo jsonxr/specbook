@@ -1,6 +1,6 @@
 ---
 name: design
-description: Use when writing or revising a spec book's chapters, sections, requirements, frames or phone mockups, when asked for the screens of a part of the app for every role, or when laying out a new spec book for a whole app.
+description: Use when writing or revising a spec book's chapters, sections, requirements, frames or phone mockups, when asked for the screens of a part of the app for every role, when laying out a new spec book for a whole app, or when a session is asked to add, change or drop a requirement, behavior or UI copy in a project that has a spec book.
 ---
 
 # Designing a spec book
@@ -13,7 +13,18 @@ book's data folder (`docs/specbook/` unless the project puts it elsewhere; see `
 **REQUIRED SUB-SKILL:** superpowers:brainstorming for anything not already agreed: questions one at a time,
 options with one recommendation, the user's approval before writing it down as agreed. Then edit `book.json` and
 the mockups. Every edit you make (and every edit the reader makes in the page) stays under review until the reader
-accepts it, so edit freely: you never record versions yourself. For the shape of `book.json` and the id rules, read `${CLAUDE_PLUGIN_ROOT}/reference/book-format.md`.
+accepts it, so edit freely: you never record versions yourself.
+
+**Every change must be accepted.** A change the user asks for in the terminal goes in the book the same way as one
+from a note: a pending change (`change` with `today` or `reason`) in `book.json` and the mockups, which the reader
+must ✓ Accept. Never touch `review.json` or `history.json`, never write an `accepted` copy, and never change app code
+for it: Build does that once it is accepted and Ready. When you finish, tell the user which items now wait in
+**Changes (n)** for ✓ Accept. For the shape of `book.json` and the id rules, read `${CLAUDE_PLUGIN_ROOT}/reference/book-format.md`.
+
+**Write at the right level.** Read `${CLAUDE_PLUGIN_ROOT}/reference/level.md` before writing or revising anything:
+the book holds what the app does, why, its rules and its proof, never a second copy of the code. When the user asks
+for something too detailed (it would change in a refactor that changes no behavior) or too vague (two builders
+would build it differently), say so and suggest the right level.
 
 ## Survey before drawing
 

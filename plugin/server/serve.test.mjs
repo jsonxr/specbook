@@ -76,7 +76,13 @@ const item = { text: 'hi' };
 // Every item as it stands is accepted, so nothing is under review.
 function acceptAll() {
   for (const key of Object.keys(currentItems(data))) {
-    acceptItem(data, key, '2026-11-01T00:00:00.000Z');
+    try {
+      acceptItem(data, key, '2026-11-01T00:00:00.000Z');
+    } catch (e) {
+      if (e.code !== 'not-under-review') {
+        throw e;
+      }
+    }
   }
 }
 
@@ -264,6 +270,17 @@ test('Build needs a ready section and locks stages; notes stay writable', async 
   assert.equal((await api('POST', '/api/build')).status, 409);
   assert.equal((await api('POST', '/api/stage', { section: 'c-d', stage: 'drafting' })).status, 409);
   assert.equal((await api('PUT', '/api/notes', { rev: readReview(data).rev, notes: { a: note } })).status, 200);
+});
+
+test('Build refuses a Ready section edited since it was accepted, naming it', async () => {
+  acceptAll();
+  assert.equal((await api('POST', '/api/stage', { section: 'c-d', stage: 'ready' })).status, 200);
+  const book = JSON.parse(readFileSync(join(data, 'book.json'), 'utf8'));
+  book.chapters[0].sections.find(s => s.id === 'd').requirements[0].text = 'edited after Ready';
+  writeFileSync(join(data, 'book.json'), JSON.stringify(book));
+  assert.deepEqual(await api('POST', '/api/build'), { status: 409, body: { error: 'unreviewed', sections: ['c-d'] } });
+  acceptAll();
+  assert.equal((await api('POST', '/api/build')).status, 201);
 });
 
 test('stage errors map to statuses', async () => {

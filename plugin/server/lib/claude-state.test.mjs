@@ -7,6 +7,7 @@ import { readJson, writeJsonAtomic } from './json-file.mjs';
 import { startBuild, stopBuild, recordCall } from './builds.mjs';
 import { writeRequest, listPending, fileBuildRequests } from './requests.mjs';
 import { claudeState } from './claude-state.mjs';
+import { startAccepted } from './accept-all.testkit.mjs';
 
 let data;
 
@@ -37,7 +38,7 @@ test('claudeState: revising, building, stale, review', () => {
   assert.equal(claudeState(data).state, 'revising');
   markHandled(data);
   const t0 = Date.parse('2026-11-12T10:00:00Z');
-  const p = startBuild(data, t0);
+  const p = startAccepted(data, t0);
   assert.equal(claudeState(data, t0 + 9 * 60e3).stale, false);
   assert.equal(claudeState(data, t0 + 11 * 60e3).stale, true);
   assert.equal(claudeState(data, t0).state, 'building');
@@ -69,7 +70,7 @@ test('corrupt progress.json reads as no running build', () => {
 });
 
 test('a running build with a missing or unparseable heartbeat is stale', () => {
-  const p = startBuild(data, 0);
+  const p = startAccepted(data, 0);
   const file = join(data, 'builds', p.id, 'progress.json');
   const progress = readJson(file, null);
   writeJsonAtomic(file, { ...progress, heartbeat: 'nonsense' });
@@ -91,7 +92,7 @@ test('a pending build request with no progress for 10 minutes is stale; filing i
 
 test('a build from before the request does not keep the request fresh', () => {
   const t0 = Date.parse('2026-11-12T10:00:00Z');
-  const p = startBuild(data, t0);
+  const p = startAccepted(data, t0);
   stopBuild(data, p.id, 'r', t0 + 30 * 60e3);
   writeRequest(data, { kind: 'build', status: 'pending', createdAt: new Date(t0 + 20 * 60e3).toISOString(), sections: ['c-r'] });
   assert.equal(claudeState(data, t0 + 31 * 60e3).stale, true);
@@ -100,7 +101,7 @@ test('a build from before the request does not keep the request fresh', () => {
 test('a build that wrote progress after its request is not stale until that progress is 10 minutes old', () => {
   const t0 = Date.parse('2026-11-12T10:00:00Z');
   writeRequest(data, { kind: 'build', status: 'pending', createdAt: new Date(t0).toISOString(), sections: ['c-r'] });
-  const p = startBuild(data, t0 + 8 * 60e3);
+  const p = startAccepted(data, t0 + 8 * 60e3);
   stopBuild(data, p.id, 'r', t0 + 9 * 60e3);
   assert.equal(claudeState(data, t0 + 15 * 60e3).stale, false);
   assert.equal(claudeState(data, t0 + 20 * 60e3).stale, true);
@@ -110,7 +111,7 @@ test('after a stop, filing the build requests leaves Claude idle', () => {
   writeRequest(data, { kind: 'revise', status: 'pending', items: [], noteIds: [] });
   markHandled(data);
   writeRequest(data, { kind: 'build', status: 'pending', createdAt: new Date().toISOString(), sections: ['c-r'] });
-  const p = startBuild(data);
+  const p = startAccepted(data);
   stopBuild(data, p.id, 'r');
   assert.equal(claudeState(data).state, 'building');
   fileBuildRequests(data);
@@ -121,7 +122,7 @@ test('after a stop, filing the build requests leaves Claude idle', () => {
 test('claudeState: sent says what is running, and whether a build has started', () => {
   writeRequest(data, { kind: 'build', status: 'pending', createdAt: '2026-11-15T18:00:00.000Z', sections: ['c-r'] });
   assert.deepEqual(claudeState(data).sent, { kind: 'build', at: '2026-11-15T18:00:00.000Z', count: 1, started: false });
-  const p = startBuild(data, Date.parse('2026-11-15T18:01:00Z'));
+  const p = startAccepted(data, Date.parse('2026-11-15T18:01:00Z'));
   assert.deepEqual(claudeState(data).sent, { kind: 'build', at: '2026-11-15T18:01:00.000Z', count: 1, started: true });
   fileBuildRequests(data);
   // A build running with no request left still says what it is building.

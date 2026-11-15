@@ -1,6 +1,6 @@
 ---
 name: specbook
-description: Use when the user wants a spec book, a scrollable, book-style requirements document for a whole app with every screen for every role as phone mockups (swappable for real e2e screenshots and recordings), where the reader drops numbered comment pins (notes) on exact spots, reviews and accepts every change, then presses Revise to send notes back or Build to build the sections marked Ready. Also for creating one in a project, serving it, stopping it, or explaining how its reader works.
+description: Use when the user wants a spec book, a scrollable, book-style requirements document for a whole app with every screen for every role as phone mockups (swappable for real e2e screenshots and recordings), where the reader drops numbered comment pins (notes) on exact spots, reviews and accepts every change, then presses Revise to send notes back or Build to build the sections marked Ready. Also for creating one in a project, serving it, stopping it, or explaining how its reader works, and whenever a session is asked to add, change or drop a requirement, behavior or UI copy in a project that has a spec book (the change goes into the book, under review, never straight into the code).
 ---
 
 # Spec book
@@ -12,6 +12,20 @@ book (by Claude or in the page) stays under review until the reader accepts it; 
 user marked Ready.
 
 **Announce at start:** "Using specbook to <command>."
+
+## A requirement change asked in a session
+
+In a project with a spec book, a request typed in the terminal to add, change or drop a requirement, a behavior
+or fixed UI copy ("make Resend wait 60 seconds") is a change to the book first, never straight to the app. Make it
+with `specbook:design` (**REQUIRED SUB-SKILL**) so it lands as a pending change the reader must accept:
+- Edit only `book.json` and the mockups, marked as a change (`change: "add" | "change" | "remove"`, with `today` or
+  `reason`), so it shows under **Changes (n)** with **✓ Accept**. Never write `review.json` or `history.json` to make
+  it look accepted, and never set an `accepted` copy.
+- Never change app code or tests for it in the same session: it is built only by **Build**, after the user accepts
+  it and marks its section Ready. If the user asked for the code too, say it waits for Accept and Build.
+- A `ready` section you edit goes back to `drafting`; a `building` one is not edited (tell the user and wait for the
+  build).
+- Then tell the user, in one line, which items changed and that they are waiting in **Changes (n)** for ✓ Accept.
 
 ## The reader
 

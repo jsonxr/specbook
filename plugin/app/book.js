@@ -2603,7 +2603,11 @@
       .then(function (res) {
         if (!res.ok) {
           msgEl.textContent = res.j.error === 'busy' ? 'Claude is busy; try again when it is done.' :
-            res.j.error === 'nothing-ready' ? 'No section is marked Ready.' : 'Could not start the build: ' + (res.j.error || 'failed') + '.';
+            res.j.error === 'nothing-ready' ? 'No section is marked Ready.' :
+            res.j.error === 'unreviewed' ? 'Only accepted changes are built. Accept every change in ' +
+              (res.j.sections || []).map(function (id) { var s = findSection(id); return '“' + ((s && s.title) || id) + '”'; }).join(', ') +
+              ' first, or move it back to Drafting.' :
+            'Could not start the build: ' + (res.j.error || 'failed') + '.';
         } else {
           msgEl.textContent = 'Build sent to Claude (' + res.j.file + ').';
         }
