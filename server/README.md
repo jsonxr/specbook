@@ -22,9 +22,14 @@ it, so an idle share costs nothing.
 
 ## Deploy
 
-From this folder: `wrangler deploy`. It serves at `https://specbook.jasonrowland.com` (the `routes` entry in
+From this folder: `./wrangler.sh deploy`. It serves at `https://specbook.jasonrowland.com` (the `routes` entry in
 `wrangler.jsonc`; change it to deploy under another domain in your own account). The plugin uses
 `https://specbook.jasonrowland.com` unless a book names another in `settings.shareBroker`.
+
+`wrangler.sh` runs wrangler with a Cloudflare token from LastPass. It asks for your LastPass master password on every
+run. The first time, it mints a `specbook-provision` token with the master token in `Cloudflare/cloudflare-master`
+(override with `SPECBOOK_BOOTSTRAP_NOTE`) and saves it in `Cloudflare/cloudflare-specbook-provision`. Later runs reuse that
+token. Put `LPASS_USERNAME=you@example.com` in `server/.env` to skip the username prompt. Run it in a real terminal.
 
 On the Workers Free plan this costs nothing at the scale of a few shares: 100,000 requests a day, and Durable Objects
 get 100,000 requests and 13,000 GB-s a day (incoming WebSocket messages count 20 to 1; hibernation accrues no
@@ -36,8 +41,8 @@ Without TURN, guests connect directly (STUN), which works on most home and Wi-Fi
 office networks need a relay. To offer one, create a TURN key in the Cloudflare dashboard (Realtime → TURN) and set:
 
 ```sh
-wrangler secret put TURN_KEY_ID
-wrangler secret put TURN_KEY_API_TOKEN
+./wrangler.sh secret put TURN_KEY_ID
+./wrangler.sh secret put TURN_KEY_API_TOKEN
 ```
 
 TURN costs $0.05 a GB after the first 1,000 GB a month (shared with the Realtime SFU). `TURN_DAILY_CAP` in
