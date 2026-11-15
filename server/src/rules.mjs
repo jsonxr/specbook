@@ -5,8 +5,8 @@ export const MAX_GUESTS = 20; // guests waiting or connecting in one room at onc
 export const MAX_MESSAGE = 64 * 1024; // bytes in one handshake message
 export const DEFAULT_HOURS = 8;
 export const MAX_HOURS = 24;
-export const HOST_GRACE_MS = 60_000; // a room outlives its host's socket this long, for the host to reconnect
-export const GUEST_IDLE_MS = 60_000; // a guest's handshake socket is closed after this; a guest only needs it to connect
+export const GUEST_IDLE_MS = 60_000; // a guest's handshake socket is closed after this while the host is there
+export const PROTOCOL = 2; // the newest wire protocol between a host tab and a guest page
 export const TURN_PER_ROOM = 30; // relay credentials one room may hand out
 export const TURN_PER_IP = 30; // relay credentials one address may get in a day
 export const STUN = [{ urls: 'stun:stun.cloudflare.com:3478' }];
@@ -21,6 +21,12 @@ export function validId(id) {
 export function roomHours(asked) {
   const n = Number(asked);
   return Number.isFinite(n) ? Math.min(MAX_HOURS, Math.max(1, Math.round(n))) : DEFAULT_HOURS;
+}
+
+// The protocol a room speaks: what its host asked for (1 for hosts that sent none), at most PROTOCOL.
+export function roomProtocol(asked) {
+  const n = Number(asked);
+  return Number.isInteger(n) && n >= 1 ? Math.min(PROTOCOL, n) : 1;
 }
 
 // The rate window for one address after one more room: { ok, next } where next is the window to store.
@@ -38,7 +44,7 @@ export function fromGuest(msg, gid) {
   if (!msg || msg.type !== 'offer' || typeof msg.sdp !== 'string' || typeof msg.sig !== 'string') {
     return null;
   }
-  return { type: 'offer', from: gid, key: String(msg.key ?? ''), name: String(msg.name ?? ''), sdp: msg.sdp, sig: msg.sig };
+  return { type: 'offer', from: gid, key: String(msg.key ?? ''), name: String(msg.name ?? ''), sdp: msg.sdp, sig: msg.sig, protocol: roomProtocol(msg.protocol) };
 }
 
 // A host's message for one guest: an answer or a rejection, addressed by `to`.

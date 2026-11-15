@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isLocalOrigin, ROOMS_PER_HOUR, TURN_PER_IP, TURN_PER_ROOM, mayMintTurn, countRoom, fromGuest, fromHost, roomHours, turnServers, validId } from './rules.mjs';
+import { isLocalOrigin, ROOMS_PER_HOUR, TURN_PER_IP, TURN_PER_ROOM, mayMintTurn, countRoom, fromGuest, fromHost, roomHours, turnServers, validId, roomProtocol } from './rules.mjs';
 
 test('room length is clamped to 1-24 hours, 8 by default', () => {
   assert.equal(roomHours(undefined), 8);
@@ -24,7 +24,7 @@ test('an address may open ROOMS_PER_HOUR rooms an hour', () => {
 test('only offers pass from a guest, and only answers or rejections from the host', () => {
   assert.equal(fromGuest({ type: 'answer', sdp: 's', sig: 'x' }, 'g'), null);
   assert.equal(fromGuest({ type: 'offer', sdp: 's' }, 'g'), null);
-  assert.deepEqual(fromGuest({ type: 'offer', sdp: 's', sig: 'x', key: 'k', name: 'n', from: 'forged' }, 'g'), { type: 'offer', from: 'g', key: 'k', name: 'n', sdp: 's', sig: 'x' });
+  assert.deepEqual(fromGuest({ type: 'offer', sdp: 's', sig: 'x', key: 'k', name: 'n', from: 'forged' }, 'g'), { type: 'offer', from: 'g', key: 'k', name: 'n', sdp: 's', sig: 'x', protocol: 1 });
   assert.equal(fromHost({ type: 'offer', to: 'g', sdp: 's', sig: 'x' }), null);
   assert.equal(fromHost({ type: 'answer', sdp: 's', sig: 'x' }), null);
   assert.deepEqual(fromHost({ type: 'answer', to: 'g', sdp: 's', sig: 'x' }), { to: 'g', out: { type: 'answer', sdp: 's', sig: 'x' } });
@@ -52,4 +52,17 @@ test('only a page on this machine is a local origin', () => {
   assert.equal(isLocalOrigin('https://evil.example'), false);
   assert.equal(isLocalOrigin('http://localhost.evil.example'), false);
   assert.equal(isLocalOrigin(null), false);
+});
+
+test('a room speaks the protocol its host asked for, 1 when it asked none', () => {
+  assert.equal(roomProtocol(2), 2);
+  assert.equal(roomProtocol(undefined), 1);
+  assert.equal(roomProtocol(9), 2);
+  assert.equal(roomProtocol('x'), 1);
+});
+
+test('a guest offer carries its protocol to the host', () => {
+  const out = fromGuest({ type: 'offer', sdp: 's', sig: 'g', key: 'k', name: 'n', protocol: 2 }, 'gid-000000001');
+  assert.equal(out.protocol, 2);
+  assert.equal(fromGuest({ type: 'offer', sdp: 's', sig: 'g' }, 'gid-000000001').protocol, 1);
 });

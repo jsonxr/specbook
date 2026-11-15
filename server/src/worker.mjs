@@ -5,12 +5,14 @@
 //   GET  /                         the plugin's front page (public/index.html)
 //   GET  /s/<room>                 the guest page (public/guest.html): asks a name, connects, loads the reader
 //   GET  /guest.js                 its script
-//   POST /api/rooms                { hours } -> { room, hostToken, expiresAt }   (the host tab; CORS for localhost)
+//   POST /api/rooms                { hours, protocol } -> { room, hostToken, expiresAt }   (the host tab; CORS for localhost)
+//   GET  /api/rooms/<room>          { host, protocol }: whether the room exists, its host is there, and its protocol
+//   POST /api/rooms/<room>/end      { token }: ends the room (the host's local server, or its tab)
 //   GET  /api/rooms/<room>/host    WebSocket, ?token=hostToken
-//   GET  /api/rooms/<room>/guest   WebSocket
+//   GET  /api/rooms/<room>/guest   WebSocket; while the host is away it waits, and hears host-online when it comes
 //   GET  /api/rooms/<room>/ice     { iceServers }: STUN, plus TURN when the TURN secrets are set
 import { DurableObject } from 'cloudflare:workers';
-import { HOST_GRACE_MS, GUEST_IDLE_MS, isLocalOrigin, MAX_GUESTS, MAX_MESSAGE, STUN, countRoom, fromGuest, fromHost, mayMintTurn, roomHours, turnServers, validId } from './rules.mjs';
+import { GUEST_IDLE_MS, isLocalOrigin, MAX_GUESTS, MAX_MESSAGE, STUN, countRoom, fromGuest, fromHost, mayMintTurn, roomHours, roomProtocol, turnServers, validId } from './rules.mjs';
 
 
 export default {
@@ -105,7 +107,7 @@ export class Broker extends DurableObject {
     if (url.pathname === '/api/rooms' && request.method === 'POST') {
       return this.open(request);
     }
-    const m = /^\/api\/rooms\/([^/]+)(?:\/(host|guest|ice))?$/.exec(url.pathname);
+    const m = /^\/api\/rooms\/([^/]+)(?:\/(host|guest|ice|end))?$/.exec(url.pathname);
     if (!m) {
       return json(404, { error: 'not-found' });
     }
@@ -115,7 +117,24 @@ export class Broker extends DurableObject {
     }
     // Whether the room still exists, and whether its host is there.
     if (!m[2]) {
-      return json(200, { host: this.ctx.getWebSockets(`host:${m[1]}`).length > 0 });
+      return json(200, { host: this.ctx.getWebSockets(`host:${m[1]}`).length > 0, protocol: room.protocol ?? 1 });
+    }
+    // The host ends its room: its tab on New link or Stop, or its local server when it stops.
+    if (m[2] === 'end') {
+      if (request.method !== 'POST') {
+        return json(405, { error: 'post-required' });
+      }
+      let body = {};
+      try {
+        body = await request.json();
+      } catch {
+        // no body: no token
+      }
+      if (!sameToken(body.token, room.hostToken)) {
+        return json(403, { error: 'bad-token' });
+      }
+      await this.close(m[1]);
+      return new Response(null, { status: 204 });
     }
     // The host's ICE servers (it asks once a share, with its token). A guest gets TURN only over its socket, once, and
     // only while the host is there; asked here, it gets STUN.
@@ -134,33 +153,41 @@ export class Broker extends DurableObject {
       for (const old of this.ctx.getWebSockets(`host:${m[1]}`)) {
         old.close(4000, 'replaced');
       }
-      if (room.hostGoneAt) {
-        await this.ctx.storage.put(`room:${m[1]}`, { ...room, hostGoneAt: null });
+      const res = this.accept({ role: 'host', room: m[1] }, [`host:${m[1]}`]);
+      // Guests waiting for the host start their handshake now, with a fresh minute for it.
+      const now = Date.now();
+      for (const g of this.ctx.getWebSockets(`guest:${m[1]}`)) {
+        const a = g.deserializeAttachment();
+        g.serializeAttachment({ ...a, at: now, iced: false, offered: false });
+        try {
+          g.send(JSON.stringify({ type: 'host-online' }));
+        } catch {
+          // closing
+        }
       }
-      return this.accept({ role: 'host', room: m[1] }, [`host:${m[1]}`]);
-    }
-    if (!this.ctx.getWebSockets(`host:${m[1]}`).length) {
-      return json(409, { error: 'host-offline' });
+      await this.schedule(now + GUEST_IDLE_MS);
+      return res;
     }
     if (this.ctx.getWebSockets(`guest:${m[1]}`).length >= MAX_GUESTS) {
       return json(429, { error: 'full' });
     }
     const gid = randomId(9);
     const ip = request.headers.get('cf-connecting-ip') ?? 'local';
-    const res = this.accept({ role: 'guest', room: m[1], gid, at: Date.now(), ip, iced: false, offered: false }, [`guest:${m[1]}`, `g:${m[1]}:${gid}`]);
-    // A guest's socket is only for the handshake: the alarm closes any left open, so idle sockets cannot fill a room.
-    const due = Date.now() + GUEST_IDLE_MS;
-    const set = await this.ctx.storage.getAlarm();
-    if (!set || set > due) {
-      await this.ctx.storage.setAlarm(due);
-    }
+    const away = !this.ctx.getWebSockets(`host:${m[1]}`).length;
+    const res = this.accept({ role: 'guest', room: m[1], gid, at: Date.now(), ip, iced: false, offered: false }, [`guest:${m[1]}`, `g:${m[1]}:${gid}`], away ? { type: 'host-offline' } : null);
+    // A guest's socket is for the handshake: while the host is there, the alarm closes any left open, so idle sockets
+    // cannot fill a room. While the host is away it waits (hibernating, at no cost) to hear host-online.
+    await this.schedule(Date.now() + GUEST_IDLE_MS);
     return res;
   }
 
-  accept(attachment, tags) {
+  accept(attachment, tags, hello = null) {
     const pair = new WebSocketPair();
     this.ctx.acceptWebSocket(pair[1], tags);
     pair[1].serializeAttachment(attachment);
+    if (hello) {
+      pair[1].send(JSON.stringify(hello));
+    }
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
 
@@ -179,7 +206,7 @@ export class Broker extends DurableObject {
       // no body: the default length
     }
     const id = randomId(16);
-    const room = { hostToken: randomId(24), expiresAt: now + roomHours(body.hours) * 3600_000, created: now };
+    const room = { hostToken: randomId(24), expiresAt: now + roomHours(body.hours) * 3600_000, created: now, protocol: roomProtocol(body.protocol) };
     await this.ctx.storage.put(`room:${id}`, room);
     await this.schedule();
     return json(201, { room: id, hostToken: room.hostToken, expiresAt: new Date(room.expiresAt).toISOString() });
@@ -282,12 +309,8 @@ export class Broker extends DurableObject {
       for (const g of this.ctx.getWebSockets(`guest:${me.room}`)) {
         g.send(JSON.stringify({ type: 'host-offline' }));
       }
-      // The host tab closed, or lost its connection: the room ends unless it comes back within the grace.
-      const room = await this.room(me.room);
-      if (room) {
-        await this.ctx.storage.put(`room:${me.room}`, { ...room, hostGoneAt: Date.now() });
-        await this.schedule(Date.now() + HOST_GRACE_MS);
-      }
+      // The host tab closed or reloaded: the room stays until it expires or is ended, so the same link works when the
+      // book is open again. Its guests wait for host-online.
     }
   }
 
@@ -315,7 +338,7 @@ export class Broker extends DurableObject {
     const rooms = await this.ctx.storage.list({ prefix: 'room:' });
     let soonest = sooner;
     for (const r of rooms.values()) {
-      soonest = Math.min(soonest, r.expiresAt, r.hostGoneAt ? r.hostGoneAt + HOST_GRACE_MS : Infinity);
+      soonest = Math.min(soonest, r.expiresAt);
     }
     const set = await this.ctx.storage.getAlarm();
     if (set && set > Date.now() && set < soonest) {
@@ -332,6 +355,10 @@ export class Broker extends DurableObject {
     for (const g of this.ctx.getWebSockets()) {
       const a = g.deserializeAttachment();
       if (a?.role === 'guest') {
+        // A guest waiting for a host that is away is not idle.
+        if (!this.ctx.getWebSockets(`host:${a.room}`).length) {
+          continue;
+        }
         if (now - a.at >= GUEST_IDLE_MS) {
           try {
             g.close(4408, 'idle');
@@ -344,7 +371,7 @@ export class Broker extends DurableObject {
       }
     }
     for (const [key, r] of await this.ctx.storage.list({ prefix: 'room:' })) {
-      if (r.expiresAt <= now || (r.hostGoneAt && now - r.hostGoneAt >= HOST_GRACE_MS)) {
+      if (r.expiresAt <= now) {
         await this.close(key.slice('room:'.length));
       }
     }
