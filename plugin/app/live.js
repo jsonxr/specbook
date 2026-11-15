@@ -219,7 +219,7 @@
     var st = hostState();
     var list = api.people();
     var meP = people[myId] || (guest ? null : { id: 'host', name: Book.me().name, color: (window.SpecRelay ? window.SpecRelay.colorOf('host') : '#3ecf8e'), role: 'owner' });
-    if (!guest && !people.host) { people.host = meP; list = api.people(); }
+    if (!guest) { meP.name = Book.me().name; if (!people.host) { people.host = meP; list = api.people(); } }
     var others = list.filter(function (p) { return p.id !== myId; });
     var followers = others.filter(function (p) { return p.following === myId; });
     pill.innerHTML = '';
@@ -358,7 +358,9 @@
       var ids = {};
       Host.people().forEach(function (p) {
         ids[p.id] = true;
-        if (!people[p.id]) { people[p.id] = { id: p.id, name: p.name, color: p.color, role: p.role }; }
+        var was = people[p.id] || { id: p.id };
+        was.name = p.name; was.color = p.color; was.role = p.role;
+        people[p.id] = was;
       });
       Object.keys(people).forEach(function (id) { if (!ids[id]) { delete people[id]; } });
       if (follow.leader && !people[follow.leader]) { setFollow({ type: 'leader-left' }); }

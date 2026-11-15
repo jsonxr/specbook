@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Smoke test for sharing a book: the share server (wrangler dev), the owner's book tab as host, and a guest page,
-// talking over WebRTC.
+// talking over WebRTC: always-on sharing, live typing, following, a lasting link, and New link.
 //
 //   GLOBAL_ROOT=$(npm root -g)/playwright node plugins/specbook/test/share.smoke.mjs
 //
@@ -112,14 +112,16 @@ try {
   await owner.goto(OWNER);
   await owner.waitForSelector('#todos-list');
   await waitFor(async () => (await (await fetch(`${OWNER}api/share`)).json()).tabs > 0, 5000, 'the owner tab to listen');
-  host = run(process.execPath, [join(PLUGIN, 'server', 'share.mjs'), '--data', data, '--hours', '1']);
+  // The tab shares by itself; share.mjs only prints the link.
+  host = run(process.execPath, [join(PLUGIN, 'server', 'share.mjs'), '--data', data]);
   let hostLog = '';
   host.stdout.on('data', d => { hostLog += d; });
   host.stderr.on('data', d => { hostLog += d; });
-  const link = await waitFor(() => /Sharing at (\S+)/.exec(hostLog)?.[1], 15000, 'the share link').catch(e => {
-    throw new Error(`${e.message}\n${hostLog}`);
+  const link = await waitFor(() => /Sharing at (\S+?)\.?\s/.exec(hostLog)?.[1], 15000, 'the share link').catch(async e => {
+    throw new Error(`${e.message}\n${hostLog}\nshare: ${JSON.stringify(await (await fetch(`${OWNER}api/share`)).json())}\nerrors: ${errors.join('\n')}`);
   });
-  await owner.waitForFunction(() => /^Sharing · 0 guests$/.test(document.querySelector('.share-count')?.textContent ?? ''), null, { timeout: 5000 });
+  await owner.waitForFunction(() => document.querySelector('.share-pill .share-solo')?.textContent === 'Only you', null, { timeout: 5000 });
+  const ownerName = await owner.evaluate(() => window.SpecBook.me().name);
 
   await check('a guest names themself, connects, and reads the live book', async () => {
     await guest.goto(link);
@@ -200,16 +202,36 @@ try {
     if (seen.some(n => 'authorKey' in n) || !seen.some(n => n.mine && n.author === 'Ann')) {
       throw new Error(`a guest sees note keys, or not their own: ${JSON.stringify(seen)}`);
     }
-    await owner.waitForFunction(() => /^Sharing · 1 guest$/.test(document.querySelector('.share-count')?.textContent ?? ''), null, { timeout: 5000 }).catch(async e => {
-      throw new Error(`${e.message}: ${await owner.evaluate(() => document.querySelector('.share-host')?.outerHTML)}`);
+    await owner.waitForFunction(() => document.querySelectorAll('.share-pill .face').length === 2, null, { timeout: 5000 }).catch(async e => {
+      throw new Error(`${e.message}: ${await owner.evaluate(() => document.querySelector('.share-pill')?.outerHTML)}`);
     });
     await owner.waitForFunction(() => [...document.querySelectorAll('.sticky .st-by')].some(e => e.textContent === 'Ann'), null, { timeout: 8000 });
   });
 
-  await check('the owner\'s note reaches the guest at once, marked Host, and the guest cannot change it', async () => {
+  await check('a guest\'s typing shows in the owner\'s page before it is saved', async () => {
+    await guest.keyboard.press('c');
+    await guest.waitForSelector('body.commenting');
+    const at = await spot(guest);
+    await guest.mouse.click(at.x + 40, at.y);
+    await guest.waitForSelector('.note-pop.composer textarea');
+    await guest.keyboard.type('Typing live', { delay: 20 });
+    await owner.waitForFunction(() => [...document.querySelectorAll('.sticky.ghost')].some(g => g.querySelector('.gh-text')?.textContent === 'Typing live' && /Ann is typing/.test(g.querySelector('.gh-by')?.textContent ?? '')), null, { timeout: 3000 }).catch(async e => {
+      throw new Error(`${e.message}\nghosts: ${await owner.evaluate(() => [...document.querySelectorAll('.sticky.ghost')].map(g => g.outerHTML).join('\n'))}\npeople: ${JSON.stringify(await owner.evaluate(() => window.SpecLive.people()))}\nguest composer: ${await guest.evaluate(() => document.querySelector('.note-pop.composer textarea')?.value)}`);
+    });
+    if (Object.values(review().notes).some(n => n.text === 'Typing live')) {
+      throw new Error('the draft was saved before it was posted');
+    }
+    await guest.keyboard.press('Escape');
+    await guest.keyboard.press('Escape');
+  });
+
+  await check('the owner\'s note reaches the guest within a second, with the owner\'s name, and the guest cannot change it', async () => {
     await comment(owner, 'From the owner');
-    await waitFor(() => Object.values(review().notes).some(n => n.text === 'From the owner'), 5000, 'review.json to hold the owner note');
-    await guest.waitForFunction(() => [...document.querySelectorAll('.sticky')].some(s => s.querySelector('textarea')?.value === 'From the owner' && s.classList.contains('not-mine') && s.querySelector('.st-by')?.textContent === 'Host'), null, { timeout: 4000 });
+    const t0 = Date.now();
+    await guest.waitForFunction(name => [...document.querySelectorAll('.sticky')].some(s => s.querySelector('textarea')?.value === 'From the owner' && s.classList.contains('not-mine') && s.querySelector('.st-by')?.textContent === name), ownerName, { timeout: 4000 });
+    if (Date.now() - t0 > 1000) {
+      throw new Error(`the owner's note took ${Date.now() - t0} ms to reach the guest`);
+    }
     // A forged save of the owner's note (as a modified page would send) is ignored by the server.
     const changed = await guest.evaluate(async () => {
       const b = await (await fetch('/api/book')).json();
@@ -227,6 +249,47 @@ try {
     if (Object.values(review().notes).some(n => n.text === 'hijacked')) {
       throw new Error('a guest changed the owner\'s note');
     }
+  });
+
+  await check('a forged draft of the owner\'s note never shows on the owner\'s page', async () => {
+    const id = Object.entries(review().notes).find(([, n]) => n.text === 'From the owner')[0];
+    await guest.evaluate(id => window.SpecShare.send({ kind: 'draft', note: id, item: 'TOD-001', target: 'TOD-001', rx: 0, ry: 0, text: 'forged' }), id);
+    await sleep(1000);
+    if (await owner.evaluate(() => [...document.querySelectorAll('.sticky.ghost .gh-text')].some(e => e.textContent === 'forged'))) {
+      throw new Error('the owner\'s page showed a guest\'s draft of the owner\'s note');
+    }
+  });
+
+  await check('following scrolls to the leader\'s place, and the follower\'s own scroll stops it', async () => {
+    await guest.locator('.share-pill .face:not(.me)').first().click();
+    await guest.waitForFunction(() => /^Following /.test(document.querySelector('.follow-chip')?.textContent ?? '') && !document.querySelector('.follow-chip').hidden, null, { timeout: 3000 });
+    await owner.waitForFunction(() => document.body.classList.contains('followed'), null, { timeout: 3000 });
+    await owner.evaluate(() => {
+      const e = document.querySelector('#filters-bar > h3');
+      const bar = document.querySelector('.bar').offsetHeight + 8;
+      window.scrollTo({ top: e.getBoundingClientRect().top + window.scrollY - bar, behavior: 'instant' });
+    });
+    await guest.waitForFunction(() => {
+      const e = document.querySelector('#filters-bar > h3');
+      const bar = document.querySelector('.bar').offsetHeight + 8;
+      return Math.abs(e.getBoundingClientRect().top - bar) < 40;
+    }, null, { timeout: 4000 });
+    await guest.mouse.move(600, 500);
+    await guest.mouse.wheel(0, 300);
+    await guest.waitForFunction(() => document.querySelector('.follow-chip').hidden, null, { timeout: 3000 });
+    await owner.waitForFunction(() => !document.body.classList.contains('followed'), null, { timeout: 3000 });
+  });
+
+  await check('reloading the owner\'s tab keeps the link, and the guest reconnects', async () => {
+    await owner.reload();
+    await owner.waitForSelector('#todos-list');
+    await waitFor(async () => (await (await fetch(`${OWNER}api/share`)).json()).state === 'live', 8000, 'the share to be live again');
+    const now = (await (await fetch(`${OWNER}api/share`)).json()).url;
+    if (now !== link) {
+      throw new Error(`the link changed on reload: ${link} -> ${now}`);
+    }
+    await guest.waitForFunction(() => /Live · Ann/.test(document.querySelector('.share-chip')?.textContent ?? ''), null, { timeout: 20000 });
+    await owner.waitForFunction(() => document.querySelectorAll('.share-pill .face').length === 2, null, { timeout: 8000 });
   });
 
   await check('a link with the wrong key does not connect', async () => {
@@ -249,9 +312,39 @@ try {
     if (!/guests: Ann/.test(status)) {
       throw new Error(`status: ${status}`);
     }
+  });
+
+  let owner2;
+  await check('closing the owner\'s tab pauses the share; reopening reconnects the guest without a reload', async () => {
     await owner.close();
-    await guest.waitForFunction(() => document.querySelector('.share-chip')?.classList.contains('bad'), null, { timeout: 10000 });
-    await waitFor(async () => (await (await fetch(`${OWNER}api/share`)).json()).state === 'idle', 5000, 'the share to end on the server');
+    await guest.waitForFunction(() => /isn.t open right now/.test(document.querySelector('.share-chip')?.textContent ?? ''), null, { timeout: 10000 });
+    await waitFor(async () => (await (await fetch(`${OWNER}api/share`)).json()).state === 'idle', 5000, 'the server to hear the tab go');
+    owner2 = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
+    owner2.on('pageerror', e => errors.push(`owner: ${e.message}`));
+    await guest.evaluate(() => { window.__noReload = true; });
+    await owner2.goto(OWNER);
+    await owner2.waitForSelector('#todos-list');
+    await guest.waitForFunction(() => /Live · Ann/.test(document.querySelector('.share-chip')?.textContent ?? ''), null, { timeout: 20000 });
+    if (!(await guest.evaluate(() => window.__noReload))) {
+      throw new Error('the guest page reloaded');
+    }
+    if ((await (await fetch(`${OWNER}api/share`)).json()).url !== link) {
+      throw new Error('the link changed when the tab was reopened');
+    }
+  });
+
+  await check('New link ends the old link', async () => {
+    const before = errors.length;
+    await owner2.evaluate(() => window.SpecHost.newLink());
+    await guest.waitForFunction(() => /This share has ended/.test(document.querySelector('.share-chip')?.textContent ?? ''), null, { timeout: 15000 });
+    await waitFor(async () => {
+      const v = await (await fetch(`${OWNER}api/share`)).json();
+      return v.state === 'live' && v.url && v.url !== link;
+    }, 10000, 'a new link');
+    // The guest asking for its ended room is answered 404, as it should be: not a page error.
+    for (let i = errors.length - 1; i >= before; i--) {
+      if (/^guest: Failed to load resource: .*404/.test(errors[i])) { errors.splice(i, 1); }
+    }
   });
 
   await check('no page errors', async () => {

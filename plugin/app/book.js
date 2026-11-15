@@ -1479,6 +1479,8 @@
       if (data.review) { state.review = data.review; }
       mergeNotes(data.review);
       if (state.book) { computeReviews(); updateChangesBar(); }
+      // A note started while this was loading is not swept away: the notes are drawn again once it is done.
+      if (writingNote()) { refetchWaiting = true; return; }
       renderNotes();
       if (message) { document.getElementById('make-msg').textContent = message; }
     }).catch(function () { /* unreachable: keep what is on the page */ });

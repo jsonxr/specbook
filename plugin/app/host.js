@@ -338,13 +338,13 @@
 
   var starting = 0; // which start is current: a stop while a room is being opened cancels it
   function start(req) {
-    var mine = ++starting;
     var broker = String(req.broker || '').replace(/\/+$/, '');
     if (share && share.broker === broker && (!req.room || req.room.room === share.room)) {
       post('/api/share/live', { tab: TAB, room: share.room, hostToken: share.token, secret: share.secret, url: share.url, expiresAt: share.expiresAt });
       return;
     }
     drop_share(false);
+    var mine = ++starting;
     setState('starting');
     // The room the local server remembers: the same link as before this tab opened.
     if (req.room && req.room.room) {
