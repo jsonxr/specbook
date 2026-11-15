@@ -241,6 +241,37 @@
     return (prev.mockup !== v.mockup ? '<p class="rv-field rv-mock">Mockup changed</p>' : '') +
       (prev.today !== v.today ? '<p class="rv-field rv-mock">Today’s mockup changed</p>' : '');
   }
+  // A list field of a version (a section's shows, a requirement's screens), each entry by its label. Against the
+  // earlier list (was; undefined for none to compare with), an entry that came is highlighted, one that went is
+  // struck through after the rest, and a list that differs only in order says so.
+  function listField(was, now, label) {
+    var w = was || [], n = now || [];
+    var inList = function (list, x) { return list.some(function (y) { return window.SpecModel.sameValue(x, y); }); };
+    var html = n.map(function (x) { return was === undefined || inList(w, x) ? label(x) : '<ins class="now">' + label(x) + '</ins>'; })
+      .concat(w.filter(function (x) { return !inList(n, x); }).map(function (x) { return '<del class="was">' + label(x) + '</del>'; }))
+      .join(', ');
+    if (was !== undefined && html && w.length === n.length && n.every(function (x) { return inList(w, x); }) && !window.SpecModel.sameValue(w, n)) {
+      html += ' (order changed)';
+    }
+    return html;
+  }
+  // A shown state as `<screen name> · <state name>`, with the component it outlines; a requirement's screen entry as
+  // its screen, or its state when it names one.
+  function showLabel(sh) {
+    var text = screenLabel(sh && sh.state);
+    return esc(sh && sh.highlight ? text + ' (outlines ' + screenLabel(sh.highlight) + ')' : text);
+  }
+  function screenEntryLabel(e) {
+    return esc(e && e.state ? screenLabel(e.screen + '.' + e.state) : screenLabel(e && e.screen));
+  }
+  // A section's shows or a requirement's screens, when they differ from the version after (newer): what that version
+  // has, with the entries it added highlighted and those it dropped struck through.
+  function listsChanged(kind, v, newer) {
+    var f = kind === 'req' ? 'screens' : kind === 'section' ? 'shows' : null;
+    if (!f || !v || !newer || window.SpecModel.sameValue(v[f] || [], newer[f] || [])) { return ''; }
+    var html = listField(v[f] || [], newer[f] || [], f === 'shows' ? showLabel : screenEntryLabel);
+    return '<p class="rv-field rv-mock"><span>' + (f === 'shows' ? 'Shows now:' : 'Screens now:') + '</span> ' + (html || 'none') + '</p>';
+  }
   // A version of an item, compared with the one before it (prev; null for the first version shown).
   function versionHtml(kind, v, prev) {
     var p = prev || {};
@@ -251,7 +282,8 @@
       return line('rv-text', '', diffField(cmp('text'), v.text)) +
         line('rv-field', 'Marker:', prev && p.change !== v.change ? diffField(p.change || '', v.change || '', tag) : tag(v.change)) +
         line('rv-field', 'Today:', diffField(cmp('today'), v.today)) +
-        line('rv-field', 'Why:', diffField(cmp('reason'), v.reason));
+        line('rv-field', 'Why:', diffField(cmp('reason'), v.reason)) +
+        line('rv-field', 'Screens:', listField(prev ? p.screens || [] : undefined, v.screens, screenEntryLabel));
     }
     if (kind === 'state') {
       var role = function (r) { return esc(roleInfo(r).label); };
@@ -272,7 +304,8 @@
         line('rv-field', 'File:', diffField(cmp('file'), v.file, esc)) +
         line('rv-field', 'Intro:', diffField(cmp('intro'), v.intro));
     }
-    return line('rv-text', '', diffField(cmp('title'), v.title, esc)) + line('rv-field', 'Intro:', diffField(cmp('intro'), v.intro));
+    return line('rv-text', '', diffField(cmp('title'), v.title, esc)) + line('rv-field', 'Intro:', diffField(cmp('intro'), v.intro)) +
+      line('rv-field', 'Shows:', listField(prev ? p.shows || [] : undefined, v.shows, showLabel));
   }
   // What the reader sees of an item a note was dropped on, for a note shown under another item it caused.
   // (From the items, not the page: the stack is drawn before the rest of the book is.)
@@ -394,7 +427,7 @@
     // Each older version as it was; a state also says when its pictures differ from the version after it.
     var newer = r.current;
     var oldHtml = function (v) {
-      var mock = kind === 'state' ? mockupChanged(v, newer) : '';
+      var mock = kind === 'state' ? mockupChanged(v, newer) : listsChanged(kind, v, newer);
       newer = v || newer;
       return versionHtml(kind, v, null) + mock;
     };

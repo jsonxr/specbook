@@ -2119,6 +2119,57 @@ try {
     }
   });
 
+  await check('a section whose shows changed says what it shows now in its review stack, and the line fits a phone', async () => {
+    await idle();
+    const file = join(data, 'book.json');
+    const original = readFileSync(file, 'utf8');
+    const KEY = 'filters-bar';
+    const was = readReviewFile().accepted[KEY];
+    try {
+      const book = JSON.parse(original);
+      const bar = book.chapters.find(c => c.id === 'filters').sections.find(s => s.id === 'bar');
+      // Accepted as it stands, so the only difference is the new shows.
+      restoreAccepted(KEY, { title: bar.title || '', intro: bar.intro || '', shows: bar.shows });
+      bar.shows = [{ state: 'SCR-3WRX.alldone' }, { state: 'SCR-3WRX.empty' }];
+      writeFileSync(file, JSON.stringify(book, null, 2));
+      await open();
+      if (!(await page.evaluate(() => document.body.classList.contains('diff-on')))) {
+        await page.locator('#changes-btn').click();
+      }
+      await page.waitForSelector(`.rv-stack[data-key="${KEY}"]`, { state: 'attached', timeout: 5000 });
+      const seen = () => page.evaluate(k => {
+        const stack = document.querySelector(`.rv-stack[data-key="${k}"]`);
+        const was = [...stack.querySelectorAll('.rv-field')].find(p => p.textContent.startsWith('Shows:'));
+        const line = [...stack.querySelectorAll('.rv-field')].find(p => p.textContent.startsWith('Shows now:'));
+        const r = line ? line.getBoundingClientRect() : null;
+        return {
+          was: was ? was.textContent : '',
+          text: line ? line.textContent : '',
+          added: line ? [...line.querySelectorAll('ins.now')].map(e => e.textContent) : [],
+          gone: line ? [...line.querySelectorAll('del.was')].map(e => e.textContent) : [],
+          fits: !!r && r.right <= document.documentElement.clientWidth + 1 && line.scrollWidth <= line.clientWidth + 1,
+        };
+      }, KEY);
+      const desk = await seen();
+      if (desk.was !== 'Shows: TodosScreen · Active only (outlines FiltersBar)' ||
+        desk.added.join('|') !== 'TodosScreen · All done|TodosScreen · Empty' || desk.gone.join('|') !== 'TodosScreen · Active only (outlines FiltersBar)') {
+        throw new Error(`the Shows lines: ${JSON.stringify(desk)}`);
+      }
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.locator(`.rv-stack[data-key="${KEY}"]`).first().scrollIntoViewIfNeeded().catch(() => {});
+      const phone = await seen();
+      if (!phone.text || !phone.fits) {
+        throw new Error(`on a phone the Shows line does not fit: ${JSON.stringify(phone)}`);
+      }
+    } finally {
+      await page.setViewportSize({ width: 1400, height: 900 });
+      writeFileSync(file, original);
+      restoreAccepted(KEY, was);
+      await open();
+      await filterOff();
+    }
+  });
+
   await check('on a phone the bar\'s switch, the Screens view, a screen\'s page and Used on fit the screen', async () => {
     await page.setViewportSize({ width: 390, height: 844 });
     const bad = [];
