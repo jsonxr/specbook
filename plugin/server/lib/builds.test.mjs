@@ -480,3 +480,53 @@ test('a section that goes back to drafting keeps the markers of the states it sh
   assert.equal(existsSync(join(data, 'mockups/home-old.html')), true);
   assert.equal(readBook().decisions, undefined);
 });
+
+const SpecModel = Model;
+const problemOf = () => {
+  const book = readBook();
+  const mockups = {};
+  for (const p of SpecModel.mockupPaths(book)) {
+    if (existsSync(join(data, p))) {
+      mockups[p] = readFileSync(join(data, p), 'utf8');
+    }
+  }
+  return SpecModel.screenProblem(book, p => existsSync(join(data, p)), mockups);
+};
+
+test('removing a state repairs what named it, accepted copies included, and the book stays valid', () => {
+  seedScreensBook();
+  const book = readBook();
+  book.roles = [{ id: 'admin' }, { id: 'member' }, { id: 'visitor' }, { id: 'x' }];
+  const sec = book.chapters[0].sections[0];
+  sec.shows.push({ state: 'SCR-HOME.admin' });
+  sec.requirements = [
+    { id: 'R1', text: 'x', screens: [{ screen: 'SCR-HOME', state: 'old' }, { screen: 'SCR-HOME', state: 'admin' }, { screen: 'SCR-HOME' }] },
+  ];
+  book.usedIds = ['R1'];
+  writeJsonAtomic(join(data, 'book.json'), book);
+  const p = startAccepted(data);
+  writeEvidence({ R1: { unit: [{ status: 'passed' }] } });
+  finishBuild(data, p.id);
+  assert.equal(problemOf(), null);
+  const after = readBook().chapters[0].sections[0];
+  assert.deepEqual(after.shows.map(s => s.state), ['SCR-HOME.admin', 'SCR-HOME.new', 'SCR-HOME.admin']);
+  assert.deepEqual(after.requirements[0].screens, [{ screen: 'SCR-HOME', state: 'admin' }, { screen: 'SCR-HOME' }]);
+  const accepted = readReview(data).accepted;
+  assert.deepEqual(accepted['c-r'].shows.map(s => s.state), ['SCR-HOME.admin', 'SCR-HOME.new', 'SCR-HOME.admin']);
+  assert.deepEqual(accepted.R1.screens, after.requirements[0].screens);
+});
+
+test('a removal something still depends on is held back and named in the summary', () => {
+  seedScreensBook();
+  const book = readBook();
+  book.roles = [{ id: 'admin' }, { id: 'member' }, { id: 'visitor' }, { id: 'x' }];
+  book.screens[0].states.push({ id: 'same', name: 'Same', when: { role: 'x' }, sameAs: 'old' });
+  writeJsonAtomic(join(data, 'book.json'), book);
+  const p = startAccepted(data);
+  finishBuild(data, p.id);
+  assert.equal(stateOf('old').change, 'remove');
+  assert.equal(existsSync(join(data, 'mockups/home-old.html')), true);
+  assert.deepEqual(readBook().decisions ?? [], []);
+  assert.equal(problemOf(), null);
+  assert.match(readFileSync(join(data, 'builds', p.id, 'summary.md'), 'utf8'), /## Held back\n- SCR-HOME\.old: .*SCR-HOME\.same is sameAs it/);
+});

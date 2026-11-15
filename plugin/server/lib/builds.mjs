@@ -4,10 +4,10 @@ import { join, resolve, sep } from 'node:path';
 import { readJson, writeJsonAtomic } from './json-file.mjs';
 import { createMinter } from './ids.mjs';
 import { findRequirement, findSection, listSections } from './book-model.mjs';
-import { addNote, currentItems, recordBuild, setAccepted, readReview, sectionsUnderReview } from './review.mjs';
+import { addNote, currentSnapshot, recordBuild, setAccepted, readReview, sectionsUnderReview } from './review.mjs';
 import { plain } from './migrate.mjs';
 
-const { isProven, screenIndex, shownIn, mockupPaths } = createRequire(import.meta.url)('../../app/model.js');
+const { isProven, screenIndex, shownIn, mockupPaths, componentsIn } = createRequire(import.meta.url)('../../app/model.js');
 
 const REQUIREMENT_STATUSES = ['queued', 'in_progress', 'proven', 'failed'];
 
@@ -158,11 +158,55 @@ export function stopBuild(data, id, reason, now = Date.now()) {
   return progress;
 }
 
+// What still names a state that is about to be removed and cannot be repaired silently: a sibling's sameAs, or a
+// picture that places it. Returns a description of the first referrer, or null.
+function referrerOf(book, mockups, screen, state) {
+  const sibling = screen.states.find(st => st !== state && st.sameAs === state.id);
+  if (sibling) {
+    return `${screen.id}.${sibling.id} is sameAs it`;
+  }
+  const here = mockupPaths(book).filter(p => ![state.mockup, state.today].includes(p));
+  for (const path of here) {
+    if (componentsIn(mockups[path]).some(c => c.id === screen.id && c.state === state.id)) {
+      return `the picture ${path} places it`;
+    }
+  }
+  return null;
+}
+
+// Removing a state repairs what named it: sections stop showing it and requirements stop naming it (their accepted
+// copies lose the same entries, so no review reopens from the build alone).
+function unreference(book, key, { accepted, accept }) {
+  const strip = (itemKey, field, keep) => {
+    const base = Object.hasOwn(accept, itemKey) ? accept[itemKey] : accepted[itemKey];
+    if (base && Array.isArray(base[field]) && !base[field].every(keep)) {
+      accept[itemKey] = { ...base, [field]: base[field].filter(keep) };
+    }
+  };
+  const [screenId, stateId] = [key.slice(0, key.indexOf('.')), key.slice(key.indexOf('.') + 1)];
+  for (const { section, fullId } of listSections(book)) {
+    if (Array.isArray(section.shows)) {
+      const keep = sh => !(sh && sh.state === key);
+      section.shows = section.shows.filter(keep);
+      strip(fullId, 'shows', keep);
+    }
+    for (const req of section.requirements ?? []) {
+      if (req && typeof req === 'object' && Array.isArray(req.screens)) {
+        const keep = e => !(e && e.screen === screenId && e.state === stateId);
+        req.screens = req.screens.filter(keep);
+        strip(req.id, 'screens', keep);
+      }
+    }
+  }
+}
+
 // Applies the change of every state a built section shows: `add` drops its marker, `change` also drops `today`, and
-// `remove` deletes the state and records a decision. Returns the picture paths that went out of use.
-function landStates(book, built, land, items, at) {
+// `remove` deletes the state and records a decision. A removal something still depends on is held back, marker kept.
+// Returns the picture paths that went out of use and the held-back removals.
+function landStates(book, built, land, ctx, at) {
   const ix = screenIndex(book);
   const gone = [];
+  const held = [];
   const mint = createMinter(book).mint;
   for (const [key, sections] of Object.entries(shownIn(book))) {
     const hit = ix.states[key];
@@ -175,13 +219,19 @@ function landStates(book, built, land, items, at) {
       continue;
     }
     if (kind === 'removed') {
+      const by = referrerOf(book, ctx.snap.mockups, screen, state);
+      if (by) {
+        held.push({ key, by });
+        continue;
+      }
       book.decisions = book.decisions ?? [];
       book.decisions.push({ id: mint('DEC'), date: at.slice(0, 10), about: [key], by: 'build', title: state.name ?? '', body: state.reason ?? '', kind: 'removed' });
       screen.states = screen.states.filter(st => st !== state);
+      unreference(book, key, ctx);
       gone.push(state.mockup, state.today);
       land(state, kind, { key, label: state.name ?? '' });
     } else {
-      land(state, kind, { key, label: state.name ?? '', now: items[key] });
+      land(state, kind, { key, label: state.name ?? '', now: ctx.snap.items[key]?.value });
       if (kind === 'changed') {
         gone.push(state.today);
       }
@@ -189,7 +239,7 @@ function landStates(book, built, land, items, at) {
       delete state.today;
     }
   }
-  return gone.filter(p => typeof p === 'string' && p !== '');
+  return { gone: gone.filter(p => typeof p === 'string' && p !== ''), held };
 }
 
 // Settles a running build from evidence: proven changes are applied, and a section whose changes are all proven
@@ -281,7 +331,7 @@ export function finishBuild(data, id, now = Date.now(), { summary } = {}) {
     }
   }
   // A built section lands the states it shows: pictures need no proof, only the section being built.
-  const gone = landStates(book, built, land, currentItems(data), at);
+  const { gone, held } = landStates(book, built, land, { snap: currentSnapshot(data), accepted: review.accepted, accept }, at);
   progress.state = 'done';
   progress.finishedAt = at;
   progress.heartbeat = at;
@@ -314,6 +364,9 @@ export function finishBuild(data, id, now = Date.now(), { summary } = {}) {
   writeJsonAtomic(progressFile(data, id), progress);
   const lines = ['# Build summary', '', '## Built', ...(built.length > 0 ? built.map(s => `- ${s}`) : ['- none']), '', '## Back to drafting'];
   lines.push(...(drafting.length > 0 ? drafting.map(d => `- ${d.section}: unproven ${d.unproven.join(', ')}`) : ['- none']), '');
+  if (held.length > 0) {
+    lines.push('## Held back', ...held.map(h => `- ${h.key}: removal held back, ${h.by}`), '');
+  }
   writeFileSync(join(buildDir(data, id), 'summary.md'), lines.join('\n'));
   return { built, drafting };
 }
