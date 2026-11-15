@@ -1,6 +1,6 @@
 # Specbook share server
 
-A Cloudflare Worker that lets the specbook plugin's `/specbook:share` hand out a link to a live spec book. It is
+A Cloudflare Worker that lets the specbook plugin hand out a link to a live spec book. It is
 deployed on its own; the plugin only uses it, by the address in a book's `settings.shareBroker`.
 
 The owner's open book tab is the host. This server serves a small guest page (`public/`), and passes the WebRTC

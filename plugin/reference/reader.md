@@ -169,7 +169,7 @@ only, remembered) draws the pins of sent and answered notes again, read-only.
 ## Sharing a book
 
 The book is shared whenever your book tab is open, so others (or you, from a phone) can read it and leave notes from
-anywhere. **Copy link** in the bar copies the link; `/specbook:share` prints it. `settings.share: false` in `book.json`
+anywhere. **Copy link** in the bar copies the link; the same menu has **New link** and **Stop sharing**. `settings.share: false` in `book.json`
 turns this off: the bar then shows **Share**, which starts a share on click. Your open book tab is the host. It sends the book straight to each guest over WebRTC, encrypted end to end.
 A share server, `https://specbook.jasonrowland.com` unless the book names its own in `settings.shareBroker`, passes the
 handshake and serves the small guest page.

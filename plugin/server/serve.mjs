@@ -11,6 +11,7 @@
 //
 // No dependencies. Data never leaves the project folder: the book (book.json, mockups/), the media
 // (media/) the requests (requests/), review.json, history.json and builds/ all live under --data.
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { createRequire } from 'node:module';
@@ -34,6 +35,19 @@ const SpecModel = createRequire(import.meta.url)('../app/model.js');
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = resolve(HERE, '..', 'app');
+
+// A stamp of the server's own code (this file, lib/, and the app model it loads). /api/health reports it, so a
+// --detach run can tell a server that an older copy of the plugin started, and replace it.
+const CODE = (() => {
+  const hash = createHash('sha1');
+  const lib = join(HERE, 'lib');
+  const files = [fileURLToPath(import.meta.url), join(APP, 'model.js'),
+    ...readdirSync(lib).filter(f => f.endsWith('.mjs') && !f.endsWith('.test.mjs')).sort().map(f => join(lib, f))];
+  for (const f of files) {
+    hash.update(readFileSync(f));
+  }
+  return hash.digest('hex').slice(0, 12);
+})();
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -116,6 +130,8 @@ async function choosePort() {
 const PORT = await choosePort();
 const url = `http://localhost:${PORT}/`;
 
+// Whether this folder's book is served on PORT: true by this code, 'old' by other code (an older copy of the
+// plugin), false when it is not.
 async function alreadyServing() {
   try {
     const r = await fetch(`${url}api/health`);
@@ -123,7 +139,10 @@ async function alreadyServing() {
       return false;
     }
     const j = await r.json();
-    return j.data === DATA;
+    if (j.data !== DATA) {
+      return false;
+    }
+    return j.code === CODE ? true : 'old';
   } catch {
     return false;
   }
@@ -143,7 +162,25 @@ function openBrowser() {
   return run('xdg-open', [url]);
 }
 
-if (await alreadyServing()) {
+// A server an older copy of the plugin started for this folder: stop it and start this one on its port.
+if (arg('detach') && (await alreadyServing()) === 'old') {
+  const rec = readJson(PIDFILE, null);
+  try {
+    if (rec?.port !== PORT) {
+      throw new Error('not recorded');
+    }
+    process.kill(rec.pid);
+  } catch {
+    console.error(`An older copy of the plugin serves this book at ${url}, and it could not be stopped. Stop it, then try again.`);
+    process.exit(1);
+  }
+  for (let i = 0; i < 50 && !(await portFree(PORT)); i++) {
+    await new Promise(r => setTimeout(r, 100));
+  }
+  console.log('The server running this book was started by an older copy of the plugin; restarted it. Please reload any open book tab.');
+}
+
+if ((await alreadyServing()) === true) {
   console.log(`Spec book already served at ${url}`);
   if (arg('open')) {
     await openBrowser();
@@ -158,7 +195,7 @@ if (arg('detach')) {
   });
   child.unref();
   writeFileSync(PIDFILE, JSON.stringify({ pid: child.pid, port: PORT, startedAt: new Date().toISOString() }, null, 2));
-  for (let i = 0; i < 40 && !(await alreadyServing()); i++) {
+  for (let i = 0; i < 40 && (await alreadyServing()) !== true; i++) {
     await new Promise(r => setTimeout(r, 100));
   }
   console.log(`Spec book served at ${url} (pid ${child.pid}). Stop with --stop.`);
@@ -601,16 +638,15 @@ const server = createServer(async (req, res) => {
   }
   try {
     const path = decodeURIComponent(new URL(req.url, url).pathname);
-    // A guest of a shared book (share.mjs) may read it and keep their own notes, nothing else.
+    // A guest of a shared book (through the host tab) may read it and keep their own notes, nothing else.
     const guest = guestOf(req.headers);
     if (guest && (guest.invalid || !guestMay(req.method, path))) {
       json(res, 403, { error: 'guest' });
       return;
     }
     if (path === '/api/health') {
-      // `guests`: this server checks shared-book guests; `share: 2`: it remembers the share's room and shares by
-      // itself (share.mjs restarts a server without them).
-      json(res, 200, guest ? { ok: true, guests: true, share: 2 } : { ok: true, data: DATA, guests: true, share: 2 });
+      // `code` tells serve.mjs --detach whether this server runs its own code (see CODE).
+      json(res, 200, guest ? { ok: true } : { ok: true, data: DATA, code: CODE });
       return;
     }
     if (path === '/api/book' && req.method === 'GET') {

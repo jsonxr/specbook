@@ -9,15 +9,16 @@ claude plugin marketplace add jsonxr/claude-plugins
 claude plugin install specbook@jsonxr
 ```
 
-In a session the commands are `/specbook`, `/specbook:open`, `/specbook:design`, `/specbook:revise`, `/specbook:build`
-and `/specbook:share`. Each also starts on its own when what you ask for matches it.
+In a session the commands are `/specbook`, `/specbook:open`, `/specbook:design`, `/specbook:revise` and `/specbook:build`.
+Each also starts on its own when what you ask for matches it. The open book is shared too: **Copy link** in its bar
+gives others a link to read it and leave notes.
 
 ## This repository
 
 | Folder | What it is |
 | --- | --- |
 | [`plugin/`](plugin/) | The plugin, as installed: the reader (`app/`), the local server and scripts (`server/`), the skills, the formats (`reference/`) and its tests. The [`jsonxr`](https://github.com/jsonxr/claude-plugins) marketplace installs this folder. |
-| [`server/`](server/) | The share server behind `/specbook:share`, and the site at specbook.jasonrowland.com. A Cloudflare Worker deployed on its own (see its README); the plugin only uses it. |
+| [`server/`](server/) | The share server behind a book's share link, and the site at specbook.jasonrowland.com. A Cloudflare Worker deployed on its own (see its README); the plugin only uses it. |
 
 ## Releasing
 

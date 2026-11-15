@@ -32,7 +32,6 @@ The plugin holds the code; **the project holds the data**. Nothing about a proje
 | `${CLAUDE_PLUGIN_ROOT}/server/serve.mjs` | The server: reader from the plugin, data from the project, notes, reviews (`/api/accept`, `/api/change`, `/api/history/<key>`), requirement editing (`/api/requirements`), stages, `POST /api/revise` and `POST /api/build`; `--detach`, `--stop`. It answers only its own page: another `Origin` or `Host` gets 403 `forbidden`, a POST or PUT without `content-type: application/json` gets 415 `json-required`, and `/data/` refuses `requests/`, `builds/`, `revise/`, `notes.json`, `review.json`, `history.json` and dot files with 403 |
 | `${CLAUDE_PLUGIN_ROOT}/server/next-request.mjs` | Prints the path of the oldest pending request (revise or build); `--wait` blocks until one arrives; `--done <file>` files it (a revise sets its notes `answered`) |
 | `${CLAUDE_PLUGIN_ROOT}/server/migrate-book.mjs` | Moves an old-format `book.json` to stages, requirement changes and one decision list, turns an old `notes.json` and `revise/before.json` into `review.json` and `history.json`, and fixes the git-ignore lines; `--data <dir>` |
-| `${CLAUDE_PLUGIN_ROOT}/server/share.mjs` | The live book is shared whenever its tab is open (through `https://specbook.jasonrowland.com`, or `settings.shareBroker`); this prints the link, with `--new-link`, `--status`, `--stop`, `--check`, `--set-broker`; guests read and keep their own notes only; used by `specbook:share` |
 | `${CLAUDE_PLUGIN_ROOT}/server/review.mjs` | Claude's side of a review: `reply --note <id> --text "…"` and `link --note <id> --item <key>…`; used by `specbook:revise` |
 | `${CLAUDE_PLUGIN_ROOT}/server/build.mjs` | A build's bookkeeping: `start`, `task`, `req`, `call`, `beat`, `finish` (with `--summary`), `stop`; used by `specbook:build` |
 | `${CLAUDE_PLUGIN_ROOT}/server/assign-ids.mjs` | Gives every requirement, decision and call a stable id, once |
@@ -66,7 +65,6 @@ put it elsewhere, follow them and pass that folder as `--data` everywhere (inclu
 | `init` | Creates the book in the current project, then runs `design` for the whole app |
 | `design <topic>` | Writes or revises chapters, requirements and mockups with the user: `specbook:design` |
 | `build <chapter \| all>`, `evidence`, `media` | Builds what the book proposes and proves it; collects evidence; adds screenshots and recordings: `specbook:build` |
-| `share`, `share new-link`, `share stop` | The link to the live book for collaborators (or a phone), a new one, or ending it: `specbook:share` |
 | `revise` | Works through the pending notes with the user (also what the watch triggers for a revise request): `specbook:revise` |
 
 For `design`, `build`, `evidence`, `media` and `revise`, **REQUIRED SUB-SKILL:** the skill named in the table.

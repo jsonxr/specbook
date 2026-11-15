@@ -1,6 +1,6 @@
 ---
 name: open
-description: Use when the user types /specbook:open, or asks to open, see, view or show the spec book. Opens the project's spec book in the browser, starting its server first if it is not running, and offers to create a book when the project has none.
+description: Use when the user types /specbook:open, or asks to open, see, view or show the spec book, share it, or get a link to it for someone else or a phone (the open book is shared; Copy link in its bar gives the link). Opens the project's spec book in the browser, starting its server first if it is not running, and offers to create a book when the project has none.
 ---
 
 # Open the spec book
@@ -27,4 +27,4 @@ docs README it points to) put it elsewhere. `${CLAUDE_PLUGIN_ROOT}` is this plug
    `serve` in the `specbook` skill (a `revise` goes to `specbook:revise`, a `build` to `specbook:build`).
 5. **Tell the user** the URL the server printed, in one line, and that **Changes (n)** in the bar shows every change
    still under review. Each has **✓ Accept** to keep it; to say "not yet", drop a note on it for the next Revise;
-   **History (n) ▸** on an item shows what was accepted before. To let others read it and leave notes, `/specbook:share`.
+   **History (n) ▸** on an item shows what was accepted before. The book is shared while its tab is open: **Copy link** in the bar gives others a link to read it and leave notes.

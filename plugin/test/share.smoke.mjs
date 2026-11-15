@@ -82,7 +82,7 @@ function run(cmd, args, opts) {
   return p;
 }
 
-// Detached, so it records its port in .server.json the way share.mjs looks for it; stopped at the end.
+// Detached, the way /specbook:open starts it; stopped at the end.
 const serve = (...args) => new Promise(done => spawn(process.execPath, [join(PLUGIN, 'server', 'serve.mjs'), '--data', data, ...args], { stdio: 'ignore' }).on('exit', done));
 await serve('--port', String(PORT), '--detach');
 // Its own state each run, so earlier runs' rooms do not count against the rate limit.
@@ -91,7 +91,6 @@ const broker = run('wrangler', ['dev', '--port', '8798', '--ip', '127.0.0.1', '-
 let brokerLog = '';
 broker.stdout.on('data', d => { brokerLog += d; });
 broker.stderr.on('data', d => { brokerLog += d; });
-let host;
 let browser;
 const errors = [];
 try {
@@ -112,13 +111,12 @@ try {
   await owner.goto(OWNER);
   await owner.waitForSelector('#todos-list');
   await waitFor(async () => (await (await fetch(`${OWNER}api/share`)).json()).tabs > 0, 5000, 'the owner tab to listen');
-  // The tab shares by itself; share.mjs only prints the link.
-  host = run(process.execPath, [join(PLUGIN, 'server', 'share.mjs'), '--data', data]);
-  let hostLog = '';
-  host.stdout.on('data', d => { hostLog += d; });
-  host.stderr.on('data', d => { hostLog += d; });
-  const link = await waitFor(() => /Sharing at (\S+?)\.?\s/.exec(hostLog)?.[1], 15000, 'the share link').catch(async e => {
-    throw new Error(`${e.message}\n${hostLog}\nshare: ${JSON.stringify(await (await fetch(`${OWNER}api/share`)).json())}\nerrors: ${errors.join('\n')}`);
+  // The tab shares by itself, with nothing run in the terminal.
+  const link = await waitFor(async () => {
+    const v = await (await fetch(`${OWNER}api/share`)).json();
+    return v.state === 'live' && v.url;
+  }, 15000, 'the share link').catch(async e => {
+    throw new Error(`${e.message}\nshare: ${JSON.stringify(await (await fetch(`${OWNER}api/share`)).json())}\nerrors: ${errors.join('\n')}`);
   });
   await owner.waitForFunction(() => document.querySelector('.share-pill .share-solo')?.textContent === 'Only you', null, { timeout: 5000 });
   const ownerName = await owner.evaluate(() => window.SpecBook.me().name);
@@ -373,15 +371,10 @@ try {
     }
   });
 
-  await check('status names the guests; closing the owner\'s tab ends the share', async () => {
-    const status = await new Promise(done => {
-      let out = '';
-      const p = spawn(process.execPath, [join(PLUGIN, 'server', 'share.mjs'), '--data', data, '--status']);
-      p.stdout.on('data', d => { out += d; });
-      p.on('exit', () => done(out));
-    });
-    if (!/guests: Ann/.test(status)) {
-      throw new Error(`status: ${status}`);
+  await check('the book\'s server hears who the guests are', async () => {
+    const guests = (await (await fetch(`${OWNER}api/share`)).json()).guests;
+    if (!guests?.includes('Ann')) {
+      throw new Error(`guests: ${JSON.stringify(guests)}`);
     }
   });
 

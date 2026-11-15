@@ -323,6 +323,43 @@ test('without --port, --detach reuses the server already running for the folder 
   rmSync(join(data, '.server.json'), { force: true });
 });
 
+test('--detach replaces a server for the folder that runs older code, and says to reload open tabs', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'specbook-old-'));
+  writeFileSync(join(dir, 'book.json'), JSON.stringify(freshBook()));
+  const p = 5000 + Math.floor(Math.random() * 900);
+  // A server an older copy of the plugin started: it serves this folder, with no code stamp.
+  const fake = `require('http').createServer((q, s) => s.end(JSON.stringify({ ok: true, data: ${JSON.stringify(dir)}, guests: true }))).listen(${p}, '127.0.0.1')`;
+  const old = spawn(process.execPath, ['-e', fake], { stdio: 'ignore' });
+  const oldExit = new Promise(done => old.on('exit', done));
+  for (let i = 0; i < 100 && !(await fetch(`http://127.0.0.1:${p}/api/health`).then(r => r.ok, () => false)); i++) {
+    await new Promise(r => setTimeout(r, 50));
+  }
+  writeFileSync(join(dir, '.server.json'), JSON.stringify({ pid: old.pid, port: p }));
+  try {
+    const out = await new Promise(done => {
+      let text = '';
+      const s = spawn(process.execPath, [SERVE, '--data', dir, '--detach'], { stdio: ['ignore', 'pipe', 'ignore'] });
+      s.stdout.on('data', d => { text += d; });
+      s.on('exit', () => done(text));
+    });
+    assert.match(out, /older copy of the plugin/);
+    assert.match(out, /reload any open book tab/);
+    await oldExit;
+    const health = await (await fetch(`http://127.0.0.1:${p}/api/health`)).json();
+    assert.equal(health.data, dir);
+    assert.equal(typeof health.code, 'string');
+  } finally {
+    old.kill();
+    const rec = JSON.parse(readFileSync(join(dir, '.server.json'), 'utf8'));
+    try {
+      process.kill(rec.pid);
+    } catch {
+      // already gone
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 const ISO = /^\d{4}-\d\d-\d\dT/;
 
 test('GET /api/book returns review, changelog and history counts, and stamps opened', async () => {
@@ -671,7 +708,7 @@ test('the server cleans the project .gitignore on start, as migrate-book does', 
   }
 });
 
-// A call made as a guest of a shared book (share.mjs sends this header).
+// A call made as a guest of a shared book (the host tab sends this header).
 async function asGuest(method, path, body, who = { name: 'Ann', key: 'ann-key-0001' }) {
   const res = await fetch(base + path, {
     method,
