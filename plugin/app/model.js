@@ -53,13 +53,15 @@
 
   // ---- Items and reviews ----------------------------------------------------------------------------------------
   // A reviewable item has a key and a value: a requirement (its id; text, change, today, reason, screens), a screen
-  // (its id; name, kind, file, intro), a state (its key "<screen id>.<state id>"; name, when, sameAs, absent, change,
-  // reason, and the text of its mockup and today files, each only when the state has that path), a section heading ("<chapter>-<section>"; title, intro, shows)
+  // (its id; name, kind, file, intro, variables, undrawn), a state (its key "<screen id>.<state id>"; when, sameAs,
+  // absent, change, reason, also, name, and the text of its mockup and today files, each only when the state has that
+  // path), a section heading ("<chapter>-<section>"; title, intro, shows)
   // and a chapter heading (the chapter id; title, intro). Screens and states belong to no section or chapter; the
   // sections that show them count their reviews. Stage, label and decisions are not reviewed.
   var REQ_FIELDS = ['text', 'change', 'today', 'reason', 'screens'];
-  var SCREEN_FIELDS = ['name', 'kind', 'file', 'intro'];
-  var STATE_FIELDS = ['name', 'when', 'sameAs', 'absent', 'change', 'reason'];
+  // Only fields a screen or state has: a screen with no variables or undrawn keeps the value it had before them.
+  var SCREEN_FIELDS = ['name', 'kind', 'file', 'intro', 'variables', 'undrawn'];
+  var STATE_FIELDS = ['when', 'sameAs', 'absent', 'change', 'reason', 'also', 'name'];
 
   function has(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
 
@@ -576,6 +578,8 @@
     var roles = ((book && book.roles) || []).map(function (r) { return r.id; });
     var rank = function (st) {
       var r = st && st.when && st.when.role;
+      // A list of roles (an absent or sameAs state) sorts by its first.
+      if (Array.isArray(r)) { r = r[0]; }
       if (!r) { return roles.length + 1; }
       if (r === 'anyone') { return -1; }
       return roles.indexOf(r) < 0 ? roles.length : roles.indexOf(r);
@@ -585,15 +589,174 @@
       .map(function (x) { return x.st; });
   }
 
-  // Book roles that no state of a screen covers. Components, and screens with an "anyone" state, miss none.
-  function missingRoles(book, screenId) {
+  // ---- State variables ---------------------------------------------------------------------------------------------
+  // A screen lists the variables it uses (`variables`: ids of the book's variables, "role", or inline declarations
+  // { id, label, values }). A state's `when` sets some of them; one left out is any value. A variable's first value is
+  // its default; role has none, and its values are the book's roles ("anyone" is also allowed in a `when`). A screen
+  // that lists no variables uses only role; a component that lists none has none.
+  function rolesOf(book) { return ((book && book.roles) || []).filter(function (r) { return r && r.id; }); }
+
+  function variableIds(screen) {
+    if (Array.isArray(screen.variables)) { return screen.variables; }
+    return screen.kind === 'component' ? [] : ['role'];
+  }
+
+  // A screen's list entry resolved to { id, label, values, isRole }, or null when it is not declared.
+  function resolveVariable(book, entry) {
+    if (entry === 'role') {
+      return { id: 'role', label: 'Role', values: rolesOf(book).map(function (r) { return { id: r.id, label: r.label || r.id }; }), isRole: true };
+    }
+    var v = null;
+    if (typeof entry === 'string') {
+      ((book && book.variables) || []).forEach(function (d) { if (!v && d && d.id === entry) { v = d; } });
+    } else if (entry && typeof entry === 'object') {
+      v = entry;
+    }
+    if (!v || typeof v.id !== 'string' || !Array.isArray(v.values)) { return null; }
+    return { id: v.id, label: v.label || v.id, values: v.values, isRole: false };
+  }
+
+  function variablesIn(book, screen) {
+    var out = [];
+    variableIds(screen).forEach(function (e) {
+      var v = resolveVariable(book, e);
+      if (v) { out.push(v); }
+    });
+    return out;
+  }
+
+  function variablesOf(book, screenId) {
     var screen = screenIndex(book).screens[screenId];
-    if (!screen || screen.kind === 'component') { return []; }
-    var covered = [];
-    (screen.states || []).forEach(function (st) { if (st.when && st.when.role) { covered.push(st.when.role); } });
-    if (covered.indexOf('anyone') >= 0) { return []; }
-    return ((book && book.roles) || []).map(function (r) { return r.id; })
-      .filter(function (id) { return id !== 'anyone' && covered.indexOf(id) < 0; });
+    return screen ? variablesIn(book, screen) : [];
+  }
+
+  function valueLabel(v, id) {
+    for (var i = 0; i < v.values.length; i++) {
+      if (v.values[i] && v.values[i].id === id) { return v.values[i].label || id; }
+    }
+    return String(id);
+  }
+
+  function rolesIn(when) {
+    var r = when && when.role;
+    if (Array.isArray(r)) { return r.slice(); }
+    return typeof r === 'string' && r ? [r] : [];
+  }
+
+  // A state's caption: the role ids for its pills (none on a component, or when the state is for any role), and the
+  // labels of the values that are not defaults, in the screen's variable order, joined by ", ". A component shows every
+  // value's label, defaults included. A typed `name` overrides the text.
+  function stateCaption(book, key) {
+    var hit = screenIndex(book).states[key];
+    if (!hit) { return { roles: [], text: '' }; }
+    var when = hit.state.when || {};
+    var component = hit.screen.kind === 'component';
+    var labels = [];
+    variablesIn(book, hit.screen).forEach(function (v) {
+      if (v.isRole || !has(when, v.id) || when[v.id] === undefined) { return; }
+      var isDefault = v.values.length > 0 && v.values[0] && v.values[0].id === when[v.id];
+      if (component || !isDefault) { labels.push(valueLabel(v, when[v.id])); }
+    });
+    var name = hit.state.name;
+    return {
+      roles: component ? [] : rolesIn(when),
+      text: typeof name === 'string' && name ? name : labels.join(', ')
+    };
+  }
+
+  // Every combination a screen accounts for: each state (drawn, same as another, or absent), then each `undrawn` entry
+  // (a combination its requirements imply that has no picture), in that order.
+  function coverage(book, screenId) {
+    var screen = screenIndex(book).screens[screenId];
+    if (!screen) { return []; }
+    var out = [];
+    (screen.states || []).forEach(function (st) {
+      if (!st || typeof st !== 'object') { return; }
+      out.push({ when: st.when || {}, kind: st.sameAs ? 'same' : st.absent ? 'absent' : 'drawn', key: stateKey(screen.id, st.id) });
+    });
+    (Array.isArray(screen.undrawn) ? screen.undrawn : []).forEach(function (u) {
+      if (!u || typeof u !== 'object') { return; }
+      var row = { when: u.when || {}, kind: 'undrawn', about: Array.isArray(u.about) ? u.about : [] };
+      if (u.note !== undefined) { row.note = u.note; }
+      out.push(row);
+    });
+    return out;
+  }
+
+  // What is wrong with one `when` on a screen, in words after `who` ("State X.y"), or null. Roles are always checked; the
+  // rest only on a screen that lists its variables (one that does not may still hold free words in `when`). `vars` is
+  // the screen's resolved variables, or null when it lists none.
+  function whenProblem(book, screen, vars, who, when, mayList) {
+    var w = when || {};
+    var roles = rolesOf(book).map(function (r) { return r.id; });
+    if (Array.isArray(w.role) && !mayList) {
+      return who + ' lists several roles, which only an absent or sameAs state may';
+    }
+    var rs = rolesIn(w);
+    for (var r = 0; r < rs.length; r++) {
+      // "anyone" covers every role, whether or not the book lists it.
+      if (rs[r] !== 'anyone' && roles.indexOf(rs[r]) < 0) {
+        return who + ' names the role ' + rs[r] + ', which the book does not define';
+      }
+    }
+    if (!vars) { return null; }
+    var keys = Object.keys(w);
+    for (var k = 0; k < keys.length; k++) {
+      var v = null;
+      vars.forEach(function (x) { if (x.id === keys[k]) { v = x; } });
+      if (!v) { return who + ' sets ' + keys[k] + ', which ' + screen.id + ' does not list in its variables'; }
+      var known = v.values.some(function (x) { return x && x.id === w[keys[k]]; });
+      if (!v.isRole && !known) {
+        return who + ' sets ' + keys[k] + ' to ' + w[keys[k]] + ', which is not a value of ' + keys[k];
+      }
+    }
+    return null;
+  }
+
+  // The first way a screen's variables, its states' `when`s and its `undrawn` entries are invalid, or null.
+  function variableProblem(book, screen, reqIds) {
+    var vars = null;
+    if (Array.isArray(screen.variables)) {
+      vars = [];
+      for (var i = 0; i < screen.variables.length; i++) {
+        var e = screen.variables[i];
+        var v = resolveVariable(book, e);
+        if (!v) {
+          var id = e && typeof e === 'object' ? e.id : e;
+          return 'Screen ' + screen.id + ' uses the variable ' + id + ', which is not declared';
+        }
+        vars.push(v);
+      }
+    }
+    var states = screen.states || [];
+    var drawn = [];
+    for (var j = 0; j < states.length; j++) {
+      var st = states[j];
+      var key = stateKey(screen.id, st.id);
+      var p = whenProblem(book, screen, vars, 'State ' + key, st.when, !!(st.absent || st.sameAs));
+      if (p) { return p; }
+      if (vars && st.mockup) {
+        for (var d = 0; d < drawn.length; d++) {
+          if (sameValue(drawn[d].when || {}, st.when || {})) {
+            return 'States ' + stateKey(screen.id, drawn[d].id) + ' and ' + key + ' have the same when';
+          }
+        }
+        drawn.push(st);
+      }
+    }
+    var undrawn = Array.isArray(screen.undrawn) ? screen.undrawn : [];
+    for (var u = 0; u < undrawn.length; u++) {
+      var who = 'Screen ' + screen.id + '\'s undrawn entry ' + (u + 1);
+      var entry = undrawn[u];
+      if (!entry || typeof entry !== 'object') { return who + ' is not an object'; }
+      var up = whenProblem(book, screen, vars, who, entry.when, false);
+      if (up) { return up; }
+      var about = Array.isArray(entry.about) ? entry.about : [];
+      for (var a = 0; a < about.length; a++) {
+        if (!has(reqIds, about[a])) { return who + ' names ' + about[a] + ', which is not a requirement'; }
+      }
+    }
+    return null;
   }
 
   // The first way the screens in a book are invalid, in words; null when valid (the spec's "Validity" list).
@@ -603,7 +766,10 @@
     var ix = screenIndex(book);
     var ids = {};
     var names = {};
-    var roles = ((book && book.roles) || []).map(function (r) { return r.id; });
+    var reqIds = {};
+    eachSection(book, function (ch, sec) {
+      (sec.requirements || []).forEach(function (r) { if (r && typeof r === 'object' && r.id) { reqIds[r.id] = true; } });
+    });
     for (var g = 0; g < screens.length; g++) {
       var sg = screens[g];
       if (!sg || typeof sg !== 'object' || !sg.id) { return 'Screen entry ' + (g + 1) + ' is not an object with an id'; }
@@ -634,10 +800,6 @@
         if (st.change !== undefined && ['add', 'change', 'remove'].indexOf(st.change) < 0) {
           return 'State ' + key + ' has the change ' + st.change + ', which is not add, change or remove';
         }
-        // "anyone" covers every role, whether or not the book lists it.
-        if (st.when && st.when.role && st.when.role !== 'anyone' && roles.indexOf(st.when.role) < 0) {
-          return 'State ' + key + ' names the role ' + st.when.role + ', which the book does not define';
-        }
         var files = pictureOf(st);
         for (var f = 0; f < files.length; f++) {
           if (!exists(files[f])) { return 'State ' + key + ' points at a missing picture, ' + files[f]; }
@@ -656,6 +818,8 @@
           }
         }
       }
+      var vp = variableProblem(book, s, reqIds);
+      if (vp) { return vp; }
     }
     // A picture's component tags, and theirs in turn, walked as expandMockup draws them: each names a component state
     // that draws a picture, and none leads back to a state already on the way (`path`, the drawn keys so far).
@@ -735,7 +899,9 @@
     shownIn: shownIn,
     gateKeys: gateKeys,
     requirementsFor: requirementsFor,
-    missingRoles: missingRoles,
+    variablesOf: variablesOf,
+    stateCaption: stateCaption,
+    coverage: coverage,
     offPageKeys: offPageKeys,
     screenOrder: screenOrder,
     byRole: byRole,

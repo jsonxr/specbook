@@ -18,8 +18,8 @@ const fixture = () => ({
     {
       id: 'SCR-CARD', name: 'VisitorsCard', kind: 'component',
       states: [
-        { id: 'waiting', name: '3 waiting', when: { also: 'visitors waiting' }, mockup: 'mockups/card-waiting.html' },
-        { id: 'none', name: 'None waiting', when: { also: 'nobody waiting' }, mockup: 'mockups/card-none.html' }
+        { id: 'waiting', name: '3 waiting', also: 'visitors waiting', mockup: 'mockups/card-waiting.html' },
+        { id: 'none', name: 'None waiting', also: 'nobody waiting', mockup: 'mockups/card-none.html' }
       ]
     }
   ],
@@ -109,14 +109,158 @@ test('requirementsFor lists direct and via-component requirements in book order'
   assert.equal(r1.via, 'SCR-CARD');
 });
 
-test('missingRoles', () => {
-  const book = fixture();
-  assert.deepEqual(M.missingRoles(book, 'SCR-HOME'), []);
-  assert.deepEqual(M.missingRoles(book, 'SCR-CARD'), []);
-  book.screens[0].states.pop();
-  assert.deepEqual(M.missingRoles(book, 'SCR-HOME'), ['visitor']);
-  book.screens[0].states[0].when.role = 'anyone';
-  assert.deepEqual(M.missingRoles(book, 'SCR-HOME'), []);
+// ---- State variables -------------------------------------------------------------------------------------------
+// A book that declares shared variables; Home uses role, sharing (its own, inline) and connection; the tabs component
+// lists its own variable and has no role.
+const varBook = () => ({
+  roles: [{ id: 'member', label: 'Member' }, { id: 'admin', label: 'Admin' }, { id: 'visitor', label: 'Visitor' }],
+  variables: [
+    { id: 'connection', label: 'Connection', values: [{ id: 'online', label: 'Online' }, { id: 'offline', label: 'Offline' }, { id: 'unreachable', label: 'Server unreachable' }] },
+    { id: 'data', label: 'Data', values: [{ id: 'some', label: 'Has items' }, { id: 'empty', label: 'Empty' }] }
+  ],
+  screens: [
+    {
+      id: 'SCR-HOME', name: 'HomeScreen', kind: 'screen',
+      variables: ['role', { id: 'sharing', label: 'Sharing', values: [{ id: 'shared', label: 'Shared' }, { id: 'notshared', label: 'Not shared yet' }] }, 'connection'],
+      states: [
+        { id: 'header', when: { role: 'member' }, mockup: 'mockups/home.html' },
+        { id: 'member', when: { role: 'member', sharing: 'notshared' }, mockup: 'mockups/home-notshared.html' },
+        { id: 'offline', when: { role: 'admin', connection: 'offline' }, mockup: 'mockups/home-offline.html' },
+        { id: 'both', when: { role: 'admin', sharing: 'notshared', connection: 'unreachable' }, mockup: 'mockups/home-both.html' },
+        { id: 'shared', when: { role: 'admin', sharing: 'shared' }, sameAs: 'header' },
+        { id: 'any', when: { connection: 'offline' }, mockup: 'mockups/home-any.html', also: 'any role at all' },
+        { id: 'everyone', when: { role: 'anyone' }, mockup: 'mockups/home-everyone.html' },
+        { id: 'named', name: 'Brand new', when: { role: 'visitor', sharing: 'notshared' }, mockup: 'mockups/home-named.html' },
+        { id: 'never', when: { role: ['visitor', 'admin'], connection: 'unreachable' }, absent: true }
+      ],
+      undrawn: [{ when: { role: 'admin', sharing: 'notshared' }, about: ['R1'], note: 'No groups yet' }, { when: { role: 'visitor' } }]
+    },
+    {
+      id: 'SCR-TABS', name: 'Tabs', kind: 'component',
+      variables: [{ id: 'tab', label: 'Tab', values: [{ id: 'home', label: 'Home' }, { id: 'people', label: 'People' }] }, 'data'],
+      states: [
+        { id: 'home', when: { tab: 'home', data: 'some' }, mockup: 'mockups/tabs-home.html' },
+        { id: 'people', when: { tab: 'people' }, mockup: 'mockups/tabs-people.html' }
+      ]
+    }
+  ],
+  chapters: [{ id: 'c', sections: [{ id: 'a', requirements: [{ id: 'R1', text: 'one' }, { id: 'R2', text: 'two' }] }] }]
+});
+
+test('variablesOf resolves a screen\'s variables in its order: role from the book\'s roles, shared and inline ones', () => {
+  const book = varBook();
+  assert.deepEqual(M.variablesOf(book, 'SCR-HOME'), [
+    { id: 'role', label: 'Role', values: [{ id: 'member', label: 'Member' }, { id: 'admin', label: 'Admin' }, { id: 'visitor', label: 'Visitor' }], isRole: true },
+    { id: 'sharing', label: 'Sharing', values: [{ id: 'shared', label: 'Shared' }, { id: 'notshared', label: 'Not shared yet' }], isRole: false },
+    { id: 'connection', label: 'Connection', values: book.variables[0].values, isRole: false }
+  ]);
+  assert.deepEqual(M.variablesOf(book, 'SCR-TABS').map(v => v.id), ['tab', 'data']);
+  // A role without a label reads as its id.
+  book.roles[0] = { id: 'member' };
+  assert.deepEqual(M.variablesOf(book, 'SCR-HOME')[0].values[0], { id: 'member', label: 'member' });
+  // A screen that lists no variables uses only role; a component that lists none has none.
+  assert.deepEqual(M.variablesOf(fixture(), 'SCR-HOME').map(v => v.id), ['role']);
+  assert.deepEqual(M.variablesOf(fixture(), 'SCR-CARD'), []);
+  assert.deepEqual(M.variablesOf(book, 'SCR-NOPE'), []);
+});
+
+test('stateCaption: the role pill, then the labels of non-default values in the screen\'s order; name overrides', () => {
+  const book = varBook();
+  const cap = id => M.stateCaption(book, id);
+  // Only the role differs: the pill alone.
+  assert.deepEqual(cap('SCR-HOME.header'), { roles: ['member'], text: '' });
+  // One non-default value.
+  assert.deepEqual(cap('SCR-HOME.member'), { roles: ['member'], text: 'Not shared yet' });
+  assert.deepEqual(cap('SCR-HOME.offline'), { roles: ['admin'], text: 'Offline' });
+  // Two values, in the screen's variable order (sharing before connection).
+  assert.deepEqual(cap('SCR-HOME.both'), { roles: ['admin'], text: 'Not shared yet, Server unreachable' });
+  // A default value is left out.
+  assert.deepEqual(cap('SCR-HOME.shared'), { roles: ['admin'], text: '' });
+  // No role: any role, no pill; `also` never reaches the caption.
+  assert.deepEqual(cap('SCR-HOME.any'), { roles: [], text: 'Offline' });
+  assert.deepEqual(cap('SCR-HOME.everyone'), { roles: ['anyone'], text: '' });
+  // A typed name overrides the text, not the pill.
+  assert.deepEqual(cap('SCR-HOME.named'), { roles: ['visitor'], text: 'Brand new' });
+  // A list of roles on an absent state: one pill each.
+  assert.deepEqual(cap('SCR-HOME.never'), { roles: ['visitor', 'admin'], text: 'Server unreachable' });
+  // A component: no pill, every value's label, defaults included, in its variable order.
+  assert.deepEqual(cap('SCR-TABS.home'), { roles: [], text: 'Home, Has items' });
+  assert.deepEqual(cap('SCR-TABS.people'), { roles: [], text: 'People' });
+  assert.deepEqual(cap('SCR-HOME.ghost'), { roles: [], text: '' });
+});
+
+test('stateCaption follows a variable\'s label, so renaming a label changes the caption but not the state\'s value', () => {
+  const book = varBook();
+  const before = M.itemsOf(book, {})['SCR-HOME.offline'].value;
+  book.variables[0].values[1].label = 'No connection';
+  assert.equal(M.stateCaption(book, 'SCR-HOME.offline').text, 'No connection');
+  assert.ok(M.sameValue(M.itemsOf(book, {})['SCR-HOME.offline'].value, before));
+});
+
+test('coverage: one entry per state, then per undrawn entry, in order', () => {
+  const book = varBook();
+  const rows = M.coverage(book, 'SCR-HOME');
+  assert.equal(rows.length, 11);
+  assert.deepEqual(rows[0], { when: { role: 'member' }, kind: 'drawn', key: 'SCR-HOME.header' });
+  assert.deepEqual(rows[4], { when: { role: 'admin', sharing: 'shared' }, kind: 'same', key: 'SCR-HOME.shared' });
+  // A state with no role counts for every role.
+  assert.deepEqual(rows[5], { when: { connection: 'offline' }, kind: 'drawn', key: 'SCR-HOME.any' });
+  assert.deepEqual(rows[8], { when: { role: ['visitor', 'admin'], connection: 'unreachable' }, kind: 'absent', key: 'SCR-HOME.never' });
+  assert.deepEqual(rows[9], { when: { role: 'admin', sharing: 'notshared' }, kind: 'undrawn', about: ['R1'], note: 'No groups yet' });
+  assert.deepEqual(rows[10], { when: { role: 'visitor' }, kind: 'undrawn', about: [] });
+  // A state with no `when` is any combination.
+  assert.deepEqual(M.coverage(fixture(), 'SCR-CARD')[0], { when: {}, kind: 'drawn', key: 'SCR-CARD.waiting' });
+  assert.deepEqual(M.coverage(book, 'SCR-NOPE'), []);
+});
+
+test('screenProblem checks state variables', () => {
+  assert.equal(M.screenProblem(varBook(), all, {}), null);
+  const bad = (mutate, re) => {
+    const b = varBook();
+    mutate(b);
+    const p = M.screenProblem(b, all, {});
+    assert.ok(p && re.test(p), String(p));
+  };
+  const home = b => b.screens[0];
+  // Every variable a screen lists is declared, in the book or inline.
+  bad(b => { home(b).variables.push('weather'); }, /Screen SCR-HOME uses the variable weather, which is not declared/);
+  bad(b => { home(b).variables.push({ id: 'view' }); }, /Screen SCR-HOME uses the variable view, which is not declared/);
+  // Every key of a state's `when` is in its screen's list.
+  bad(b => { home(b).states[0].when.data = 'empty'; }, /State SCR-HOME\.header sets data, which SCR-HOME does not list in its variables/);
+  bad(b => { home(b).variables.shift(); }, /State SCR-HOME\.header sets role, which SCR-HOME does not list/);
+  // Every value is one of that variable's values.
+  bad(b => { home(b).states[2].when.connection = 'flaky'; }, /State SCR-HOME\.offline sets connection to flaky, which is not a value of connection/);
+  bad(b => { b.screens[1].states[0].when.tab = 'settings'; }, /State SCR-TABS\.home sets tab to settings, which is not a value of tab/);
+  bad(b => { home(b).states[0].when.role = 'wizard'; }, /SCR-HOME\.header names the role wizard/);
+  bad(b => { home(b).states[8].when.role = ['visitor', 'wizard']; }, /SCR-HOME\.never names the role wizard/);
+  // No two drawn states of one screen have the same `when`.
+  bad(b => { home(b).states[1].when = { sharing: 'notshared', role: 'member' }; home(b).states[0].when = { role: 'member', sharing: 'notshared' }; }, /States SCR-HOME\.header and SCR-HOME\.member have the same when/);
+  // A list of roles only on an absent or sameAs state.
+  bad(b => { home(b).states[0].when.role = ['member', 'admin']; }, /State SCR-HOME\.header lists several roles, which only an absent or sameAs state may/);
+  // `undrawn` entries use declared variables and values, and name existing requirements.
+  bad(b => { home(b).undrawn[0].about = ['R1', 'R9']; }, /Screen SCR-HOME's undrawn entry 1 names R9, which is not a requirement/);
+  bad(b => { home(b).undrawn[1].when.weather = 'rain'; }, /Screen SCR-HOME's undrawn entry 2 sets weather, which SCR-HOME does not list in its variables/);
+  bad(b => { home(b).undrawn[1].when.role = 'wizard'; }, /Screen SCR-HOME's undrawn entry 2 names the role wizard/);
+  bad(b => { home(b).undrawn[0].when.sharing = 'maybe'; }, /Screen SCR-HOME's undrawn entry 1 sets sharing to maybe, which is not a value of sharing/);
+  bad(b => { home(b).undrawn = [7]; }, /Screen SCR-HOME's undrawn entry 1 is not an object/);
+});
+
+test('screenProblem allows the same when on a drawn state and a sameAs or absent one, and a list on sameAs', () => {
+  const b = varBook();
+  b.screens[0].states[4].when = { role: ['member', 'visitor'] };
+  b.screens[0].states[8].when = { role: 'member' };
+  assert.equal(M.screenProblem(b, all, {}), null);
+});
+
+test('screenProblem: a screen that lists no variables uses only role and keeps its free words', () => {
+  // The starter's screens list no variables yet: several drawn states share a role, and a component's `when` holds
+  // free words. Its roles are still checked.
+  const b = fixture();
+  b.screens[0].states[1].when.role = 'member';
+  b.screens[1].states[0].when = { also: 'visitors waiting' };
+  assert.equal(M.screenProblem(b, all, mockups()), null);
+  b.screens[0].states[0].when.role = ['member', 'admin'];
+  assert.match(M.screenProblem(b, all, mockups()), /SCR-HOME\.member lists several roles/);
 });
 
 test('screenProblem is null for a valid book and names the culprit otherwise', () => {
@@ -210,6 +354,9 @@ test('byRole: anyone, then the book\'s roles in order, then unknown roles, then 
   const states = [st('none1'), st('vis', 'visitor'), st('mem1', 'member'), st('odd', 'guest'), st('all', 'anyone'), st('mem2', 'member'), st('none2'), st('adm', 'admin')];
   assert.deepEqual(M.byRole(book, states).map(s => s.id), ['all', 'mem1', 'mem2', 'adm', 'vis', 'odd', 'none1', 'none2']);
   assert.deepEqual(M.byRole(book, undefined), []);
+  // A list of roles (an absent or sameAs state) sorts by its first role.
+  const list = [st('vis', 'visitor'), { id: 'pair', when: { role: ['admin', 'member'] } }, st('mem', 'member')];
+  assert.deepEqual(M.byRole(book, list).map(s => s.id), ['mem', 'pair', 'vis']);
 });
 
 test('componentsIn reads id and state, not data-id or data-state', () => {
