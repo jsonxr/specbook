@@ -1,0 +1,7 @@
+{
+  "name": "specbook-plugin",
+  "private": true,
+  "dependencies": {
+    "node-datachannel": "0.33.6"
+  }
+}
