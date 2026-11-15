@@ -26,11 +26,9 @@ const URL = `http://localhost:${PORT}/`;
 
 const data = mkdtempSync(join(tmpdir(), 'specbook-smoke-'));
 cpSync(join(PLUGIN, 'starter'), data, { recursive: true });
-// The book does not share itself here: no tab may reach a real share server from a test.
 {
   const bookFile = join(data, 'book.json');
   const b = JSON.parse(readFileSync(bookFile, 'utf8'));
-  b.settings = { ...(b.settings ?? {}), share: false };
   // A long path among the sources, as real books have: it must wrap on a phone.
   b.sources = [...(b.sources ?? []), { label: 'SMS program (planned)', path: 'docs/specs/notifications/design-sms-program-and-other-long-names.md' }];
   writeFileSync(bookFile, JSON.stringify(b, null, 2));
@@ -58,8 +56,14 @@ exports.createHost = ({ broker, saved, onState }) => {
   const view = () => ({ state, room: kept ? kept.room : null, hostToken: kept ? kept.hostToken : null, pin, expiresAt: kept ? kept.expiresAt : null, guests: guests(), error: null });
   const report = () => onState(view());
   return {
-    async start() {
+    async start({ pin: chosen } = {}) {
+      if (/^\\d{6}$/.test(chosen || '')) { pin = chosen; }
       if (state !== 'live') {
+        // A moment to connect, as the real host takes: the owner sees "connecting" meanwhile.
+        state = 'starting';
+        report();
+        await new Promise(r => setTimeout(r, 800));
+        if (state !== 'starting') { return; }
         kept = kept || { room: newId(), hostToken: newId(), expiresAt: '2099-01-01T00:00:00.000Z' };
         state = 'live';
         report();
@@ -683,40 +687,61 @@ try {
     await page.keyboard.press('Escape');
   });
 
-  await check('the share pill follows the server\'s share: Share, the link without its pin, Copy pin link, New pin, Stop', async () => {
+  await check('Share asks for a pin, Start shares, and the menu then has the link, this computer\'s address, who is here and only Stop sharing', async () => {
     await open();
-    // The book does not share itself (settings.share: false): the pill offers to.
+    // The book does not share itself: the pill offers to.
     await page.waitForSelector('.share-pill .share-start', { timeout: 3000 });
-    if (await page.evaluate(() => window.SpecHost.link() !== null || window.SpecHost.pinLink() !== null)) {
+    if (await page.evaluate(() => window.SpecHost.link() !== null)) {
       throw new Error('an unshared book has a link');
     }
     await page.locator('.share-pill .share-start').click();
-    await page.waitForSelector('.share-pill .share-copy', { timeout: 3000 });
+    await page.waitForSelector('.share-menu .share-start-pin', { timeout: 3000 });
+    await page.fill('.share-menu .share-start-pin', '123');
+    await page.locator('.share-menu .share-start-go').click();
+    if (await page.locator('.share-menu .share-pin-error').isHidden()) {
+      throw new Error('a 3-digit pin was not refused');
+    }
+    if (await page.evaluate(() => window.SpecHost.state()) !== 'off') {
+      throw new Error('a refused pin started the share');
+    }
+    await page.fill('.share-menu .share-start-pin', '135790');
+    await page.locator('.share-menu .share-start-go').click();
+    // The same menu turns into the shared one at once, with You connecting, before the share is live.
+    const early = await page.evaluate(() => ({
+      stop: !!document.querySelector('.share-menu .share-stop'),
+      you: [...document.querySelectorAll('.share-menu .share-people li')].map(li => li.textContent).find(t => t.startsWith('You')),
+      solo: document.querySelector('.share-pill .share-solo')?.textContent,
+      state: window.SpecHost.state(),
+    }));
+    if (!early.stop || early.you !== 'Youconnecting' || early.solo !== 'Connecting…' || early.state === 'live') {
+      throw new Error(`right after Start the menu is not the connecting one: ${JSON.stringify(early)}`);
+    }
+    await page.waitForSelector('.share-pill .share-more', { timeout: 3000 });
+    await page.waitForSelector('.share-menu .share-stop', { timeout: 3000 });
     // Ana, reading on the link, has a face beside the owner's.
     await page.waitForFunction(() => document.querySelectorAll('.share-pill .face').length === 2, null, { timeout: 3000 });
-    const links = await page.evaluate(() => ({ link: window.SpecHost.link(), pin: window.SpecHost.pinLink() }));
-    if (!/\/s\/[A-Za-z0-9]{22}$/.test(links.link || '') || links.pin !== null && !links.pin.startsWith(links.link + '#pin=')) {
-      throw new Error(`the links are wrong: ${JSON.stringify(links)}`);
+    const link = await page.evaluate(() => window.SpecHost.link());
+    if (!/\/s\/[A-Za-z0-9]{22}$/.test(link || '')) {
+      throw new Error(`the link is wrong: ${link}`);
+    }
+    const view = await page.evaluate(() => fetch('/api/share').then(r => r.json()));
+    if (view.pinUrl !== `${link}#pin=135790`) {
+      throw new Error(`the share does not have the chosen pin: ${view.pinUrl}`);
     }
     // The owner's tab said hello, as the owner, through the server.
     await waitFor(() => existsSync(join(data, 'live.log')) && readFileSync(join(data, 'live.log'), 'utf8').split('\n').some(l => l && JSON.parse(l).kind === 'hello' && JSON.parse(l).role === 'owner'), 3000, 'the owner\'s hello to reach the host');
-    await page.locator('.share-pill .share-more').click();
     const menu = await page.evaluate(() => ({
-      input: document.querySelector('.share-menu .share-link')?.value,
-      pin: !!document.querySelector('.share-menu .share-pin-copy'),
-      newPin: document.querySelector('.share-menu .share-new-pin')?.textContent,
+      input: document.querySelector('.share-menu .share-url')?.textContent,
+      copy: !!document.querySelector('.share-menu .share-copy-link'),
+      local: !!document.querySelector('.share-menu .share-local'),
+      oneLine: (() => { const u = document.querySelector('.share-menu .share-url'); return u && u.getBoundingClientRect().height < parseFloat(getComputedStyle(u).fontSize) * 2.2; })(),
+      fields: document.querySelectorAll('.share-menu input').length,
+      label: document.querySelector('.share-pill .share-more')?.textContent,
+      acts: [...document.querySelectorAll('.share-menu .share-acts button')].map(b => b.textContent),
       people: [...document.querySelectorAll('.share-menu .share-people li')].map(li => li.textContent),
     }));
-    if (menu.input !== links.link || !menu.pin || menu.newPin !== 'New pin' || !menu.people.some(t => t.startsWith('Ana'))) {
+    if (menu.input !== link || !menu.copy || menu.fields !== 0 || menu.local || !menu.oneLine || menu.label !== 'Share ▾' || menu.acts.join() !== 'Stop sharing' || !menu.people.some(t => t.startsWith('Ana'))) {
       throw new Error(`the share menu is wrong: ${JSON.stringify(menu)}`);
-    }
-    if ((await page.locator('.share-menu .share-pin-copy').textContent()) !== 'Copy pin link') {
-      throw new Error('the pin link button does not read "Copy pin link"');
-    }
-    await page.locator('.share-menu .share-new-pin').click();
-    await page.waitForFunction(was => window.SpecHost.pinLink() && window.SpecHost.pinLink() !== was, links.pin, { timeout: 3000 });
-    if ((await page.evaluate(() => window.SpecHost.link())) !== links.link) {
-      throw new Error('New pin changed the link');
     }
     // A reloaded tab hears who is reading already (Ana says no new hello): her face is back.
     await open();
@@ -727,6 +752,55 @@ try {
     if (await page.evaluate(() => window.SpecHost.link() !== null || document.querySelectorAll('.share-pill .face').length)) {
       throw new Error('Stop sharing left a link or faces');
     }
+    // A reload does not share it again.
+    await open();
+    await page.waitForSelector('.share-pill .share-start', { timeout: 3000 });
+  });
+
+  await check('a second tab has the whole Share menu too, shared or not (who is reading included), and no tab flashes "Sharing…" on load', async () => {
+    await open();
+    await page.waitForSelector('.share-pill .share-start', { timeout: 3000 });
+    const second = await context.newPage();
+    try {
+      // Every text the pill shows from the first moment.
+      await second.addInitScript(() => {
+        window.__pillTexts = [];
+        new MutationObserver(() => {
+          const t = document.querySelector('.share-pill')?.textContent;
+          if (t && window.__pillTexts.at(-1) !== t) { window.__pillTexts.push(t); }
+        }).observe(document, { subtree: true, childList: true, characterData: true });
+      });
+      await second.goto(URL);
+      await second.waitForSelector('.share-pill .share-start', { timeout: 6000 });
+      await page.evaluate(() => window.SpecHost.startSharing('135790'));
+      // Each tab hears the server on its own stream: no polling.
+      await page.waitForFunction(() => document.querySelectorAll('.share-pill .face').length === 2, null, { timeout: 8000 });
+      await second.waitForFunction(() => document.querySelectorAll('.share-pill .face').length === 2, null, { timeout: 300 });
+      await second.click('.share-pill .share-more');
+      const menu = await second.evaluate(() => ({
+        url: document.querySelector('.share-menu .share-url')?.textContent,
+        people: [...document.querySelectorAll('.share-menu .share-people li')].map(li => li.textContent),
+      }));
+      if (menu.url !== await page.evaluate(() => window.SpecHost.link()) || !menu.people.some(t => t.startsWith('Ana'))) {
+        throw new Error(`the second tab's menu: ${JSON.stringify(menu)}`);
+      }
+      // Each of the owner's open tabs is a line of its own, this one first.
+      const you = menu.people.filter(t => t.startsWith('You'));
+      if (you.join() !== 'Youthis tab,Youanother tab') {
+        throw new Error(`the owner's tabs in the second tab's menu: ${JSON.stringify(you)}`);
+      }
+      // Stop sharing from the second tab.
+      await second.click('.share-menu .share-stop');
+      await page.waitForSelector('.share-pill .share-start', { timeout: 8000 });
+      await second.waitForSelector('.share-pill .share-start', { timeout: 8000 });
+      const texts = await second.evaluate(() => window.__pillTexts);
+      if (texts.some(t => /Sharing…|Live sharing runs|in your other tab/.test(t))) {
+        throw new Error(`the second tab's pill showed ${JSON.stringify(texts)}`);
+      }
+    } finally {
+      await second.close();
+    }
+    await page.waitForSelector('.share-pill .share-start', { timeout: 3000 });
   });
 
   await check('the down arrow goes on to the next change each time it is pressed', async () => {
@@ -795,6 +869,45 @@ try {
       }
     } finally {
       await page.setViewportSize({ width: 1400, height: 900 });
+    }
+  });
+
+  await check('on a phone every menu in the bar fits on the screen: Contents, View, Claude, and Share before and while sharing', async () => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const inside = sel => page.evaluate(s => {
+      const e = document.querySelector(s);
+      if (!e || !e.getClientRects().length) { return `${s} is not showing`; }
+      const r = e.getBoundingClientRect();
+      const w = document.documentElement.clientWidth;
+      return r.left >= 0 && r.right <= w && r.top >= 0 ? null : `${s} is at ${Math.round(r.left)}..${Math.round(r.right)} on a ${w}-pixel screen`;
+    }, sel);
+    const close = async () => { await page.keyboard.press('Escape'); await page.mouse.click(200, 600); };
+    const bad = [];
+    try {
+      await open();
+      for (const [btn, menu] of [['#where', '#toc-nav'], ['#view-btn', '#view-menu'], ['#claude-btn', '#claude-pop']]) {
+        await page.click(btn);
+        await page.waitForTimeout(200);
+        const why = await inside(menu);
+        if (why) { bad.push(why); }
+        await close();
+      }
+      await page.click('.share-pill .share-start');
+      await page.waitForSelector('.share-menu .share-start-pin', { timeout: 3000 });
+      const before = await inside('.share-menu');
+      if (before) { bad.push(`before sharing: ${before}`); }
+      await page.fill('.share-menu .share-start-pin', '135790');
+      await page.click('.share-menu .share-start-go');
+      await page.waitForSelector('.share-menu .share-copy-link:not([disabled])', { timeout: 5000 });
+      const live = await inside('.share-menu');
+      if (live) { bad.push(`while sharing: ${live}`); }
+      await page.click('.share-menu .share-stop');
+      await page.waitForSelector('.share-pill .share-start', { timeout: 5000 });
+    } finally {
+      await page.setViewportSize({ width: 1400, height: 900 });
+    }
+    if (bad.length) {
+      throw new Error(bad.join('; '));
     }
   });
 
@@ -965,7 +1078,7 @@ try {
         await p.addInitScript(() => {
           const no = () => {};
           window.SpecShare = { protocol: 3, me: { name: 'Owner' }, role: 'owner', ownerName: 'Owner', ready: Promise.resolve(),
-            request: () => new Promise(no), send: () => false, onLive: no, onPeerState: no, onChanged: no, status: no, showError: no, forgetPin: no };
+            request: () => new Promise(no), send: () => false, onLive: no, onPeerState: no, onChanged: no, status: no, showError: no };
         });
       }
       await p.route('**/api/book', async route => {

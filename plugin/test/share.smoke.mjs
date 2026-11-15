@@ -2,7 +2,7 @@
 // Smoke test for sharing a book: the share server (wrangler dev), the book server as the share's host
 // (lib/host.mjs, over WebRTC with node-datachannel), the owner's localhost tab, and readers on the website's link
 // (the reader the share server publishes under /r/<version>/): one link for everyone, the pin for the owner's powers,
-// book HTML that never runs, live typing and following, a link that lasts across restarts, and New link.
+// book HTML that never runs, live typing and following, a link that comes back with a Start after a restart, and Stop sharing.
 //
 //   GLOBAL_ROOT=$(npm root -g)/playwright node plugin/test/share.smoke.mjs
 //
@@ -117,7 +117,7 @@ function run(cmd, args, opts) {
   return p;
 }
 
-// serve.mjs, as /specbook:open runs it (detached), with the share library from DEPS. Resolves with what it printed.
+// serve.mjs, as /specbook:start runs it (detached), with the share library from DEPS. Resolves with what it printed.
 const serve = (...args) => new Promise(done => {
   const p = spawn(process.execPath, [join(PLUGIN, 'server', 'serve.mjs'), '--data', data, ...args], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, SPECBOOK_DEPS: DEPS } });
   let out = '';
@@ -125,15 +125,8 @@ const serve = (...args) => new Promise(done => {
   p.stderr.on('data', d => { out += d; });
   p.on('exit', () => done(out));
 });
-// The two links serve.mjs --detach prints.
-function linksOf(out) {
-  const url = /^Share link: (\S+)$/m.exec(out)?.[1];
-  const pinUrl = /^Your pin link \(opens with your powers; never send it to anyone\): (\S+)$/m.exec(out)?.[1];
-  if (!url || !pinUrl) {
-    throw new Error(`serve.mjs --detach printed no links:\n${out}`);
-  }
-  return { url, pinUrl };
-}
+// The pin the owner chooses when they press Share and Start.
+const PIN = '135790';
 
 // Its own state each run, so earlier runs' rooms do not count against the rate limit.
 const brokerState = mkdtempSync(join(tmpdir(), 'specbook-share-state-'));
@@ -164,11 +157,14 @@ try {
   await waitFor(() => up(`${BROKER}/`), 60000, 'the broker (wrangler dev)').catch(e => {
     throw new Error(`${e.message}\n${brokerLog}`);
   });
+  // The book server starts unshared: it prints no link.
   const started = await serve('--port', String(PORT), '--detach');
-  let { url: link, pinUrl } = linksOf(started);
+  if (/Share link|pin link/.test(started)) {
+    throw new Error(`serve.mjs --detach printed a link for a book that is not shared:\n${started}`);
+  }
   await waitFor(() => up(`${OWNER}api/health`), 5000, 'the book server');
-  if (!link.startsWith(`${BROKER}/s/`) || pinUrl !== `${link}#pin=${pinUrl.split('#pin=')[1]}` || !/^\d{6}$/.test(pinUrl.split('#pin=')[1])) {
-    throw new Error(`unexpected links: ${link} ${pinUrl}`);
+  if ((await shareOf()).state !== 'off') {
+    throw new Error('the book shared itself');
   }
 
   // Both pages run in one headless browser, which cannot resolve the mDNS names Chrome hides local addresses behind.
@@ -176,13 +172,20 @@ try {
   const guestCtx = await newCtx();
   const guest = await pageIn(guestCtx, 'guest');
   let owner = await pageIn(await newCtx(), 'owner');
-  // The owner's localhost tab follows the share the server hosts.
+  // The owner's localhost tab: Share, a pin, Start. The server hosts the share; the tab follows it.
   await owner.goto(OWNER);
   await owner.waitForSelector('#todos-list');
-  await owner.waitForFunction(() => document.querySelector('.share-pill .share-solo')?.textContent === 'Only you', null, { timeout: 8000 });
+  await owner.click('.share-pill .share-start');
+  await owner.fill('.share-menu .share-start-pin', PIN);
+  await owner.click('.share-menu .share-start-go');
+  await owner.waitForFunction(() => document.querySelector('.share-pill .share-solo')?.textContent === 'Only you', null, { timeout: 15000 });
+  await owner.keyboard.press('Escape');
+  await owner.mouse.click(5, 300);
   const ownerName = await owner.evaluate(() => window.SpecBook.me().name);
-  if (await owner.evaluate(() => window.SpecHost.link()) !== link || await owner.evaluate(() => window.SpecHost.pinLink()) !== pinUrl) {
-    throw new Error('the owner tab\'s links are not the ones serve.mjs printed');
+  const link = await owner.evaluate(() => window.SpecHost.link());
+  const pinUrl = `${link}#pin=${PIN}`;
+  if (!link?.startsWith(`${BROKER}/s/`) || (await shareOf()).pinUrl !== pinUrl) {
+    throw new Error(`unexpected links: ${link} ${(await shareOf()).pinUrl}`);
   }
 
   const spot = page => page.evaluate(() => {
@@ -601,33 +604,34 @@ try {
     }
   });
 
-  await check('Forget pin on this device', async () => {
+  await check('the pin holder\'s menu on the link, and without the saved pin the page is a guest', async () => {
     await phone.click('.share-pill .share-more');
-    await phone.waitForSelector('.share-menu .share-forget-pin', { timeout: 3000 });
-    // The pin holder's menu on the link: Copy pin link, New pin and Stop sharing; New link stays on localhost.
-    for (const sel of ['.share-pin-copy', '.share-new-pin', '.share-stop']) {
-      if (!(await phone.locator(`.share-menu ${sel}`).count())) {
-        throw new Error(`the pin holder's menu on the link has no ${sel}`);
-      }
+    await phone.waitForSelector('.share-menu .share-stop', { timeout: 3000 });
+    // The pin holder's menu on the link: Stop sharing, and no other button.
+    const acts = await phone.evaluate(() => [...document.querySelectorAll('.share-menu .share-acts button')].map(b => b.textContent));
+    if (acts.join() !== 'Stop sharing') {
+      throw new Error(`the pin holder's menu on the link has ${JSON.stringify(acts)}`);
     }
-    if (await phone.locator('.share-menu button', { hasText: 'New link' }).count()) {
-      throw new Error('the menu on the link offers New link');
+    // The menu has no Forget pin, and no localhost address.
+    if (await phone.locator('.share-menu .share-forget-pin, .share-menu .share-local').count()) {
+      throw new Error('the menu on the link offers Forget pin or a localhost address');
     }
-    await Promise.all([phone.waitForNavigation(), phone.click('.share-menu .share-forget-pin')]);
-    // Reloaded as a guest: asked for a name, then the book with a guest's rights.
+    // The browser's saved pin cleared: reloaded as a guest, asked for a name, then the book with a guest's rights.
+    await phone.evaluate(k => localStorage.removeItem(k), pinKeyOf(link));
+    await phone.reload();
     await phone.waitForSelector('.share-join input', { timeout: 8000 });
     await phone.fill('.share-join input', 'Phone');
     await phone.click('.share-join button');
     await phone.waitForSelector('#todos-list', { timeout: 20000 });
     await phone.waitForFunction(() => window.SpecShare.role === 'guest', null, { timeout: 5000 });
     if (!(await isGuestPage(phone))) {
-      throw new Error('after Forget pin the page still has the owner\'s powers');
+      throw new Error('without its pin the page still has the owner\'s powers');
     }
     if (await phone.evaluate(k => localStorage.getItem(k), pinKeyOf(link)) !== null) {
       throw new Error('the pin is still saved');
     }
     if (await phone.evaluate(() => fetch('/api/requests', { method: 'POST' }).then(r => r.status)) !== 403) {
-      throw new Error('a reader who forgot the pin may still call owner routes');
+      throw new Error('a reader without the pin may still call owner routes');
     }
   });
 
@@ -648,79 +652,10 @@ try {
     }
   });
 
-  await check('New pin makes the old pin say: This pin no longer works.', async () => {
-    // The phone takes the pin again, then the owner makes a new one from the localhost tab's menu.
-    // The same tab, already on the link: only the address's # changes, and the page takes the pin from there too.
-    await phone.goto(pinUrl);
-    await phone.waitForFunction(() => window.SpecShare && window.SpecShare.role === 'owner' && !/pin=/.test(location.href), null, { timeout: 20000 }).catch(async e => {
-      throw new Error(`${e.message}: the phone at ${await phone.evaluate(() => location.href)}, chip ${await chipOf(phone)}`);
-    });
-    const old = pinUrl;
-    await owner.click('.share-pill .share-more');
-    await owner.waitForSelector('.share-menu .share-new-pin', { timeout: 3000 });
-    if (!(await owner.locator('.share-menu .share-pin-copy').count())) {
-      throw new Error('the owner tab\'s menu has no Copy pin link');
-    }
-    await owner.click('.share-menu .share-new-pin');
-    pinUrl = await waitFor(async () => {
-      const v = await shareOf();
-      return v.pinUrl && v.pinUrl !== old && v.pinUrl;
-    }, 5000, 'a new pin link');
-    if (!pinUrl.startsWith(`${link}#pin=`)) {
-      throw new Error(`the new pin link is not on the same link: ${pinUrl}`);
-    }
-    await owner.keyboard.press('Escape');
-    await owner.mouse.click(5, 300);
-    // The phone, connected with the old pin, is let go, reconnects, and hears that the pin no longer works.
-    await phone.waitForFunction(() => document.querySelector('.share-join-bad')?.textContent === 'This pin no longer works.', null, { timeout: 20000 }).catch(async e => {
-      throw new Error(`${e.message}: chip ${await chipOf(phone)}`);
-    });
-    if (await phone.evaluate(k => localStorage.getItem(k), pinKeyOf(link)) !== null) {
-      throw new Error('the old pin is still saved');
-    }
-    await Promise.all([phone.waitForNavigation(), phone.click('.share-join button')]);
-    await phone.waitForSelector('#todos-list', { timeout: 20000 });
-    await phone.waitForFunction(() => window.SpecShare.role === 'guest', null, { timeout: 5000 });
-    // The old pin link, opened fresh, says the same and gives a guest's rights.
-    const late = await pageIn(await newCtx(), 'late');
-    try {
-      await late.goto(old);
-      await late.waitForFunction(() => document.querySelector('.share-join-bad')?.textContent === 'This pin no longer works.', null, { timeout: 20000 });
-      if (await late.evaluate(() => location.href) !== link) {
-        throw new Error('the old pin stayed in the address');
-      }
-    } finally {
-      await late.context().close();
-    }
-  });
-
-  // The owner's phone with the new pin, for the restart.
+  // The owner's phone with the pin, for the restart.
   const pinned = await pageIn(await newCtx(), 'pinned');
   await pinned.goto(pinUrl);
   await pinned.waitForFunction(() => window.SpecShare && window.SpecShare.role === 'owner', null, { timeout: 20000 });
-
-  await check('New pin from the link: this page keeps the owner\'s powers with the new pin', async () => {
-    const before = pinUrl;
-    await pinned.click('.share-pill .share-more');
-    await pinned.waitForSelector('.share-menu .share-new-pin', { timeout: 3000 });
-    await pinned.click('.share-menu .share-new-pin');
-    pinUrl = await waitFor(async () => {
-      const v = await shareOf();
-      return v.pinUrl && v.pinUrl !== before && v.pinUrl;
-    }, 5000, 'a new pin link');
-    const saved = await waitFor(async () => {
-      const k = await pinned.evaluate(key => localStorage.getItem(key), pinKeyOf(link));
-      return k === pinUrl.split('#pin=')[1] && k;
-    }, 5000, 'the new pin saved on the link page');
-    if (!saved || (await pinned.evaluate(() => window.SpecShare.role)) !== 'owner' || !(await isOwnerPage(pinned))) {
-      throw new Error('after New pin the link page lost the owner\'s powers');
-    }
-    if ((await pinned.evaluate(() => window.SpecShare.pinLink())) !== pinUrl) {
-      throw new Error('Copy pin link on the link page does not give the new pin link');
-    }
-    await pinned.keyboard.press('Escape');
-    await pinned.mouse.click(5, 300);
-  });
 
   await check('the owner tab can close and the guest stays connected', async () => {
     await guest.locator('.share-pill .face:not(.me)').first().click();
@@ -750,7 +685,7 @@ try {
     await owner.waitForFunction(() => window.SpecHost.people().some(p => p.name === 'Ann'), null, { timeout: 8000 });
   });
 
-  await check('a restart keeps the link and the pin', async () => {
+  await check('a restart does not share; Start with the same pin takes up the same link, and readers come back', async () => {
     await guest.evaluate(() => { window.__noReload = true; });
     await pinned.evaluate(() => { window.__noReload = true; });
     const before = errors.length;
@@ -760,7 +695,16 @@ try {
     for (let i = errors.length - 1; i >= before; i--) {
       if (/^owner: Failed to load resource: net::ERR_INCOMPLETE_CHUNKED_ENCODING/.test(errors[i])) { errors.splice(i, 1); }
     }
-    const again = linksOf(await serve('--port', String(PORT), '--detach'));
+    await serve('--port', String(PORT), '--detach');
+    await owner.waitForFunction(() => window.SpecHost.state() === 'off', null, { timeout: 15000 });
+    if ((await shareOf()).state !== 'off') {
+      throw new Error('the restarted server shared the book by itself');
+    }
+    await owner.evaluate(pin => window.SpecHost.startSharing(pin), PIN);
+    const again = await waitFor(async () => {
+      const v = await shareOf();
+      return v.state === 'live' && v;
+    }, 15000, 'the share to be live again');
     if (again.url !== link || again.pinUrl !== pinUrl) {
       throw new Error(`the links changed: ${link} ${pinUrl} -> ${again.url} ${again.pinUrl}`);
     }
@@ -830,18 +774,20 @@ try {
     }
   });
 
-  await check('New link ends the old link: This share has ended', async () => {
+  await check('Stop sharing ends the link (This share has ended); the next Start opens a new link with the new pin', async () => {
     const before = errors.length;
     await owner.waitForFunction(() => window.SpecHost.state() === 'live', null, { timeout: 15000 });
-    await owner.evaluate(() => window.SpecHost.newLink());
+    await owner.evaluate(() => window.SpecHost.stopSharing());
     await guest.waitForFunction(() => /This share has ended/.test(document.querySelector('.share-chip')?.textContent ?? ''), null, { timeout: 15000 });
     await pinned.waitForFunction(() => /This share has ended/.test(document.querySelector('.share-chip')?.textContent ?? ''), null, { timeout: 15000 });
+    await owner.waitForFunction(() => window.SpecHost.state() === 'off', null, { timeout: 15000 });
+    await owner.evaluate(() => window.SpecHost.startSharing('975310'));
     const now = await waitFor(async () => {
       const v = await shareOf();
       return v.state === 'live' && v.url && v.url !== link && v;
     }, 10000, 'a new link');
-    if (!now.pinUrl.startsWith(`${now.url}#pin=`) || now.pinUrl === `${now.url}#pin=${pinUrl.split('#pin=')[1]}`) {
-      throw new Error('New link kept the old pin');
+    if (now.pinUrl !== `${now.url}#pin=975310`) {
+      throw new Error(`the new share does not have the new pin: ${now.pinUrl}`);
     }
     // A reader asking for its ended room is answered 410, as it should be: not a page error.
     for (let i = errors.length - 1; i >= before; i--) {

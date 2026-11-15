@@ -63,9 +63,9 @@ export function rightsOf(hello, pin) {
   return sameSecret(hello.pin, pin) ? 'owner' : 'guest';
 }
 
-// The share calls the owner may make over the link: New pin (answered by the host itself) and Stop sharing. Starting
-// the share, New link and the owner tabs' event stream stay on localhost.
-const OWNER_SHARE = new Set(['POST /api/share/new-pin', 'POST /api/share/stop']);
+// The share call the owner may make over the link: Stop sharing. Starting the share and the owner tabs' event stream
+// stay on localhost.
+const OWNER_SHARE = new Set(['POST /api/share/stop']);
 
 // Whether a connection may make this call. `path` is the decoded path, without the query. The owner may call anything
 // but /api/live and the share itself (OWNER_SHARE aside); a guest only what guestMay allows (checked again by the

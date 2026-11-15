@@ -2,6 +2,13 @@
 
 2026-11-15. A project; agreed in conversation.
 
+**Changed 2026-11-15, at the owner's request: no sharing by default.** The book server never shares on its own (not
+at start, not when a tab opens; `settings.share` is ignored). **Share** in the bar opens a box for a 6-digit pin the
+owner chooses; **Start** shares with that pin, and the same menu then shows the link, the `localhost` address and who
+is here, with **Stop sharing** as its only button. **New pin**, **New link** and **Copy pin link** are gone (Stop
+sharing then Start makes a new link). A restart leaves the book unshared; a Start after it takes up the same room.
+Where this section and the rest of the spec disagree, this section wins.
+
 ## Why
 
 Three problems with the way a book is shared today, where the owner's open book tab is the host:
@@ -87,7 +94,8 @@ The owner wants to copy the address bar of any reader's browser, owner or guest,
   forgets it and says "This pin no longer works."
 - **New pin** in the share menu (my call) makes a new pin and keeps the room: guests keep their link, and
   every saved pin stops working. New link makes a new pin too.
-- A reader with the pin has **Forget pin on this device** in the bar's menu.
+- ~~A reader with the pin has **Forget pin on this device** in the bar's menu.~~ (Removed 2026-11-15 at the owner's
+  request.)
 - `localhost` keeps working, with owner rights and no pin.
 
 ### The interface from the website
@@ -134,8 +142,11 @@ The owner wants to copy the address bar of any reader's browser, owner or guest,
   owner's name.
 - It passes live messages (presence, drafts, following) between everyone connected, as `host.js` does. An owner on
   `localhost` still sees and is seen by readers on the link.
-- `plugin/app/host.js` goes away, and the book tab no longer hosts. The share pill's **Copy link** copies the plain
-  link.
+- `plugin/app/host.js` goes away, and the book tab no longer hosts. The share pill's **Share ▾** (it was **Copy
+  link**, renamed 2026-11-15) opens the menu with the plain link and, on `localhost`, the book's `localhost:<port>`
+  address.
+- **`/specbook:open` opens `localhost`** (changed 2026-11-15 at the owner's request: it opened the link with the pin).
+  It still prints the share link and the pin link.
 - The share server's host endpoints take the book server as host. A request from Node carries no browser `Origin`, so
   the host token authenticates it, as it does today.
 

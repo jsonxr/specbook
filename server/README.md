@@ -24,8 +24,7 @@ The book server opens its room (`POST /api/rooms`) directly; of browser pages, o
 `http://localhost` origin) may, by CORS. A room lasts until it expires (at most 24 hours) or its host ends it (`POST /api/rooms/<room>/end` with the host
 token). Its host keeps the link by opening the room again with `{ room, hostToken }`: a live room is renewed, and one
 that expired is opened again under the same id, but only with the token it was held under (the server keeps a hash
-of it for 30 days past the room's expiry; another token gets 409 `taken`, and the book server then opens a new room
-with a new pin). An ended room never is: for a week its address answers 410, so its
+of it for 30 days past the room's expiry; another token gets 409 `taken`, and the book server then opens a new room). An ended room never is: for a week its address answers 410, so its
 readers are told it ended. While the host is away (its book server stopped), readers wait on their socket and hear
 `host-online` when it comes back: only in a room a host has opened, three at most from one address, and for an hour
 at most (then the socket closes with 4408 and the page asks for a reload). The host and the readers also pass live

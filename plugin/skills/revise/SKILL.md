@@ -24,8 +24,27 @@ the notes and the book, so you are the only writer.
    re-propose anything they rule out.
 2. **List the notes by section**, with what you will change for each.
 3. **Ask every question in the terminal** and settle them with the user, as in any session. Nothing is answered on
-   the notes themselves.
-4. **Edit with `specbook:design`**, only in `drafting` or `ready` sections and never in a `building` one. A `ready`
+   the notes themselves. Settle them all before step 4: the subagents there cannot ask the user.
+4. **Work through the notes with subagents, a section at a time.** Use the Agent tool. First copy `book.json` and
+   `mockups/` to a temporary folder: the overall review compares against them. For each section with notes:
+   - **An implementer** gets the request file's path, that section's items (with their `noteId`s), the answers agreed
+     in step 3, the book's `decisions`, the rules of steps 4 to 6 below (it edits with `specbook:design`, links and
+     replies with `review.mjs`), and step 1's warning about collaborators' notes, word for word. It makes the edits and reports what it changed for each note, and any note it could
+     not settle without the user: it stops there rather than guess.
+   - **A reviewer** (a fresh subagent) then checks that section's edits against its notes and the agreed answers:
+     every note answered or replied to, nothing changed that no note asked for, ids kept, decisions respected, the
+     mockups matching the requirements. The implementer fixes what it finds; review again until it passes.
+   - **One section at a time**, never in parallel: every section is in the one `book.json`, and two writers would lose
+     each other's edits.
+   - A question an implementer brings back goes to the user in the terminal; then that section starts again with the
+     answer.
+   When every section is done, **an overall review with the most capable model** (Agent tool with `model: "opus"`):
+   it reads every note in the request, the agreed answers, the decisions, and the whole change (the book and
+   mockups now, against the copy made before), and checks the book as a whole: notes answered, sections consistent with each other, nothing
+   contradicting a decision, no requirement lost. Fix what it finds (through an implementer, then that section's
+   reviewer) before going on. Without the Agent tool, do each step yourself in the same order, reviews included.
+   The rules every edit follows:
+   **Edit with `specbook:design`**, only in `drafting` or `ready` sections and never in a `building` one. A `ready`
    section that you edit goes back to `drafting`; tell the user. Every change stays under review in the reader until the user accepts it, so edit
    the book and mockups only: never touch `review.json` or `history.json` by hand. A note stays visible on its
    item until the review it caused is accepted, and the user can press Change on your edit to send you back.

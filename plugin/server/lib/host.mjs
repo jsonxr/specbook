@@ -256,11 +256,6 @@ export function createHost({ broker, port, version, ownerName, saved = null, rtc
     if (!current(peer)) {
       return undefined;
     }
-    // New pin from the link: the host answers it, so the caller hears the new pin and stays connected.
-    if (method === 'POST' && path.replace(/\/+/g, '/') === '/api/share/new-pin') {
-      newPin(peer);
-      return reply(200, 'application/json', jsonBytes({ pin }));
-    }
     if (peer.inFlight >= IN_FLIGHT || inFlight >= SHARE_IN_FLIGHT) {
       return reply(429, 'application/json', jsonBytes({ error: 'busy' }));
     }
@@ -648,19 +643,20 @@ export function createHost({ broker, port, version, ownerName, saved = null, rtc
     try {
       return await openRoom(keep);
     } catch (e) {
+      // Taken under another token: a new room. The pin stays: the owner chose it for this start.
       if (e.status === 409) {
-        if (e.code === 'taken') {
-          forgetPin();
-        }
         return openRoom(null);
       }
       throw e;
     }
   }
 
-  // Resolves once the room is open (or could not be).
+  // Resolves once the room is open (or could not be). `pin`, the owner's choice of 6 digits, replaces the pin first.
   let pending = null;
-  function start() {
+  function start({ pin: chosen } = {}) {
+    if (typeof chosen === 'string' && PIN.test(chosen) && chosen !== pin) {
+      newPin(chosen);
+    }
     if (share) {
       report();
       return Promise.resolve();
@@ -756,14 +752,14 @@ export function createHost({ broker, port, version, ownerName, saved = null, rtc
     await ended;
   }
 
-  // A new pin: the room stays, every saved pin stops working, and readers connected with the old one are let go
-  // (they connect again, and hear pin-bad). `keep`, the reader who asked for it over the link, stays: it hears the pin.
-  function newPin(keep = null) {
-    pin = makePin();
+  // A new pin (`next`, or a random one): the room stays, every saved pin stops working, and readers connected with the
+  // old one are let go (they connect again, and hear pin-bad).
+  function newPin(next = makePin()) {
+    pin = next;
     wrongPins = 0;
     pinsWaitUntil = 0;
     for (const p of share ? Object.values(share.peers) : []) {
-      if (p.rights === 'owner' && p !== keep) {
+      if (p.rights === 'owner') {
         try {
           p.channel?.close();
         } catch {
@@ -775,8 +771,8 @@ export function createHost({ broker, port, version, ownerName, saved = null, rtc
     report();
   }
 
-  // The kept room is held at the share server under another token: whoever holds it may have heard the pin from a
-  // reader, so the pin is not carried to the new room.
+  // The room was taken under another token while it was shared: whoever holds it may have heard the pin from a
+  // reader, so the pin is not kept (the owner chooses another at the next Start).
   function forgetPin() {
     pin = makePin();
     report();

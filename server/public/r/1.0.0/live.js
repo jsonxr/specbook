@@ -191,15 +191,11 @@
   }
   function initials(n) { return (String(n || '?').trim().charAt(0) || '?').toUpperCase(); }
   function hostState() { return guest ? 'live' : Host.state(); }
-  // The plain link: it never carries the pin (Copy pin link, for the owner, does).
+  // The plain link: it never carries the pin.
   function link() {
     if (!guest) { return Host.link(); }
     var m = /^\/s\/([A-Za-z0-9_-]+)/.exec(location.pathname);
     return m ? location.origin + '/s/' + m[1] : null;
-  }
-  function pinLink() {
-    if (guest) { return window.SpecShare.pinLink ? window.SpecShare.pinLink() : null; }
-    return Host.pinLink ? Host.pinLink() : null;
   }
   // The owner: the localhost tab, or a reader on the link who opened it with the pin.
   function owner() { return !guest || window.SpecShare.role === 'owner'; }
@@ -210,12 +206,17 @@
     return e ? (e.dataset.label || '') : '';
   }
   function statusOf(p) {
-    if (p.id === myId) { return guest ? 'you' : 'you · host'; }
+    if (p.id === myId) { return guest ? 'you' : connectingNow ? 'connecting' : 'you · host'; }
     if (p.typing) { return 'typing'; }
     if (p.following === myId) { return 'following you'; }
     return whereLabel(p);
   }
   var menuOpen = false;
+  // Start pressed: the menu turns into the shared one at once, with You "connecting", until the share is live (or
+  // failed: then the pin box comes back with why). `asked`: the server has answered the Start.
+  var connecting = false;
+  var asked = false;
+  var connectingNow = false;
   function copy(btn, url) {
     if (!url) { return; }
     var done = function () { var t = btn.textContent; btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = t; }, 1200); };
@@ -231,24 +232,28 @@
     var followers = others.filter(function (p) { return p.following === myId; });
     pill.innerHTML = '';
     pill.className = 'share-pill';
-    if (st === 'off') {
+    if (connecting && (st === 'live' || (asked && st === 'off'))) { connecting = false; }
+    connectingNow = !guest && (connecting || st === 'starting');
+    // Until the server has said whether the book is shared, the pill shows nothing rather than a guess.
+    pill.hidden = st === 'unknown' && !connecting;
+    if (st === 'unknown' && !connecting) {
+      // nothing yet
+    } else if (st === 'off' && !connectingNow) {
+      // Not shared: Share opens the menu, where the owner chooses a pin and presses Start.
       var b = document.createElement('button');
       b.type = 'button'; b.className = 'bar-btn share-start'; b.textContent = 'Share';
-      var why = Host.error ? Host.error() : null;
-      b.title = why ? 'Sharing failed: ' + why : 'Share this book: anyone with the link can read it and leave notes';
-      b.addEventListener('click', function () { Host.startSharing(); });
+      b.title = 'Share this book: anyone with the link can read it and leave notes';
+      b.setAttribute('aria-expanded', String(menuOpen));
+      b.addEventListener('click', function (e) { e.stopPropagation(); menuOpen = !menuOpen; render(); });
       pill.appendChild(b);
-    } else if (st === 'other-tab') {
-      pill.innerHTML = '<span class="share-note">Live sharing runs in your other tab</span>';
-    } else if (st === 'starting') {
-      pill.innerHTML = '<span class="share-note">Sharing…</span>';
+      if (menuOpen) { pill.appendChild(startMenu()); }
     } else {
       var faces = document.createElement('div');
       faces.className = 'faces';
       if (!others.length) {
         var solo = document.createElement('span');
         solo.className = 'share-solo';
-        solo.textContent = 'Only you';
+        solo.textContent = connectingNow ? 'Connecting…' : 'Only you';
         pill.appendChild(solo);
       } else {
         [meP].concat(others).forEach(function (p) {
@@ -273,14 +278,10 @@
         });
         pill.appendChild(faces);
       }
-      var cp = document.createElement('button');
-      cp.type = 'button'; cp.className = 'share-copy'; cp.textContent = 'Copy link';
-      cp.title = 'Copy the link: anyone with it can read the book and leave notes';
-      cp.addEventListener('click', function () { copy(cp, link()); });
-      pill.appendChild(cp);
+      // Share ▾ opens the menu: the link and Copy, who is here, and (for the owner) the pin and the share's controls.
       var more = document.createElement('button');
-      more.type = 'button'; more.className = 'share-more'; more.textContent = '▾';
-      more.setAttribute('aria-label', 'Sharing');
+      more.type = 'button'; more.className = 'share-more'; more.textContent = 'Share ▾';
+      more.title = 'The link: anyone with it can read the book and leave notes';
       more.setAttribute('aria-expanded', String(menuOpen));
       more.addEventListener('click', function (e) { e.stopPropagation(); menuOpen = !menuOpen; render(); });
       pill.appendChild(more);
@@ -303,34 +304,70 @@
     document.body.style.setProperty('--follower', followers.length ? (followers[0].color || '#f27aa0') : 'transparent');
     document.body.classList.toggle('following', !!leader);
   }
+  // The menu before sharing: a 6-digit pin of the owner's choice, and Start. The pin gives the owner's powers on the
+  // link (Revise, Build, Accept), typed into Use pin on another device. The typed digits outlast a redraw.
+  var startPin = '';
+  var startError = '';
+  function startMenu() {
+    var m = document.createElement('div');
+    m.className = 'share-menu';
+    m.addEventListener('click', function (e) { e.stopPropagation(); });
+    var h = document.createElement('p');
+    h.className = 'share-menu-head';
+    h.textContent = 'Choose a 6-digit pin, then Start. Anyone with the link can read and leave notes; the pin gives your powers on the link. Never send it to anyone.';
+    m.appendChild(h);
+    var f = document.createElement('form');
+    f.className = 'share-link-row share-start-form';
+    var i = document.createElement('input');
+    i.type = 'text'; i.inputMode = 'numeric'; i.maxLength = 6; i.autocomplete = 'off'; i.className = 'share-link share-start-pin';
+    i.placeholder = '6-digit pin'; i.setAttribute('aria-label', 'Your 6-digit pin'); i.value = startPin;
+    i.addEventListener('input', function () { startPin = i.value; });
+    var go = document.createElement('button');
+    go.type = 'submit'; go.className = 'bar-btn share-start-go'; go.textContent = 'Start';
+    var err = document.createElement('p');
+    err.className = 'share-pin-error';
+    var failed = Host.error ? Host.error() : null;
+    err.textContent = startError || (failed ? 'Sharing failed: ' + failed : '');
+    err.hidden = !err.textContent;
+    f.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var pin = i.value.replace(/\s+/g, '');
+      if (!/^\d{6}$/.test(pin)) { startError = 'A pin is 6 digits.'; render(); return; }
+      startError = '';
+      startPin = '';
+      connecting = true;
+      asked = false;
+      Host.startSharing(pin).then(function (r) {
+        asked = true;
+        if (r && r.status === 400) { connecting = false; startError = 'A pin is 6 digits.'; }
+        render();
+      }, function () { connecting = false; startError = 'The book server did not answer.'; render(); });
+      render();
+    });
+    f.appendChild(i); f.appendChild(go);
+    m.appendChild(f);
+    m.appendChild(err);
+    setTimeout(function () { if (i.isConnected) { i.focus(); } }, 0);
+    return m;
+  }
   function menu(list) {
     var m = document.createElement('div');
     m.className = 'share-menu';
     m.addEventListener('click', function (e) { e.stopPropagation(); });
     var h = document.createElement('p');
     h.className = 'share-menu-head';
-    h.textContent = owner() ? 'Shared while the book is served. Anyone with the link can read and leave notes.' : 'Anyone with this link can read and leave notes.';
+    h.textContent = connectingNow ? 'Connecting to the share server… Anyone with the link can read and leave notes.' : owner() ? 'Shared. Anyone with the link can read and leave notes.' : 'Anyone with this link can read and leave notes.';
     m.appendChild(h);
-    var row = document.createElement('div');
-    row.className = 'share-link-row';
-    var input = document.createElement('input');
-    input.readOnly = true; input.value = link() || ''; input.className = 'share-link';
-    input.setAttribute('aria-label', 'The link');
+    // The link as plain text, with Copy under it.
+    var url = document.createElement('p');
+    url.className = 'share-url';
+    url.textContent = link() || 'Connecting…';
+    m.appendChild(url);
     var c = document.createElement('button');
-    c.type = 'button'; c.className = 'bar-btn'; c.textContent = 'Copy';
+    c.type = 'button'; c.className = 'bar-btn share-copy-link'; c.textContent = 'Copy';
+    c.disabled = !link();
     c.addEventListener('click', function () { copy(c, link()); });
-    row.appendChild(input); row.appendChild(c);
-    m.appendChild(row);
-    // On the website, a reader who opened the book with the owner's pin can take it off this browser.
-    if (guest && window.SpecShare.role === 'owner' && window.SpecShare.forgetPin) {
-      var fp = document.createElement('button');
-      fp.type = 'button'; fp.className = 'bar-btn share-forget-pin'; fp.textContent = 'Forget pin on this device';
-      fp.title = 'Remove the owner’s pin from this browser; the plain link still opens the book as a guest';
-      fp.addEventListener('click', function () { window.SpecShare.forgetPin(); location.reload(); });
-      var fpActs = document.createElement('div'); fpActs.className = 'share-acts';
-      fpActs.appendChild(fp);
-      m.appendChild(fpActs);
-    }
+    m.appendChild(c);
     // A guest who has the owner's pin types it here (the pin link does the same).
     if (guest && !owner() && window.SpecShare.usePin) {
       var pf = document.createElement('form');
@@ -353,41 +390,34 @@
     if (owner()) {
       var ul = document.createElement('ul');
       ul.className = 'share-people';
+      // On localhost, one line for each of the owner's open tabs of the book, this one first.
+      var rows = [];
       list.forEach(function (p) {
+        var tabs = !guest && p.id === myId && Host.tabs ? Host.tabs() : [];
+        if (tabs.length > 1) {
+          rows.push({ p: p, status: connectingNow ? 'connecting' : 'this tab' });
+          tabs.filter(function (t) { return t !== Host.tab; }).forEach(function () { rows.push({ p: p, status: 'another tab' }); });
+        } else {
+          rows.push({ p: p, status: statusOf(p) });
+        }
+      });
+      rows.forEach(function (r) {
+        var p = r.p;
         var li = document.createElement('li');
         var dot = document.createElement('span'); dot.className = 'dot'; dot.style.background = p.color || '#888';
         var nm = document.createElement('span'); nm.textContent = p.id === myId ? 'You' : p.name;
-        var stx = document.createElement('span'); stx.className = 'share-st'; stx.textContent = statusOf(p);
+        var stx = document.createElement('span'); stx.className = 'share-st'; stx.textContent = r.status;
         li.appendChild(dot); li.appendChild(nm); li.appendChild(stx);
         ul.appendChild(li);
       });
       m.appendChild(ul);
-      var nl = document.createElement('button');
-      nl.type = 'button'; nl.className = 'bar-btn'; nl.textContent = 'New link';
-      nl.title = 'Make a new link; the old one stops working';
-      nl.addEventListener('click', function () { menuOpen = false; Host.newLink(); render(); });
       // On the link, Stop sharing also closes this page's own connection: it says the book is not open.
       var sharer = guest ? window.SpecShare : Host;
       var stop = document.createElement('button');
       stop.type = 'button'; stop.className = 'bar-btn share-stop'; stop.textContent = 'Stop sharing';
-      stop.title = 'Stop sharing until you reopen the book';
-      stop.addEventListener('click', function () { menuOpen = false; sharer.stopSharing(); render(); });
+      stop.title = 'Stop sharing: the link stops working, and the next Share makes a new one';
+      stop.addEventListener('click', function () { menuOpen = false; connecting = false; sharer.stopSharing(); render(); });
       var acts = document.createElement('div'); acts.className = 'share-acts';
-      // The pin link opens the book as its owner, on another device of theirs.
-      if (pinLink()) {
-        var pl = document.createElement('button');
-        pl.type = 'button'; pl.className = 'bar-btn share-pin-copy'; pl.textContent = 'Copy pin link';
-        pl.title = 'Copy the link with your pin: it opens the book as you, on another device of yours';
-        pl.addEventListener('click', function () { copy(pl, pinLink()); });
-        acts.appendChild(pl);
-      }
-      var np = document.createElement('button');
-      np.type = 'button'; np.className = 'bar-btn share-new-pin'; np.textContent = 'New pin';
-      np.title = 'Make a new pin; the old pin link stops working, the plain link keeps working';
-      np.addEventListener('click', function () { sharer.newPin().then(render, render); });
-      acts.appendChild(np);
-      // New link ends this room, and with it a link page's own connection: it is made on localhost.
-      if (!guest) { acts.appendChild(nl); }
       acts.appendChild(stop);
       m.appendChild(acts);
     }

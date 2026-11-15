@@ -252,11 +252,11 @@
     <div class="wrap share">
       <div>
         <h2>Share a live book with a link</h2>
-        <p class="intro" style="margin-bottom:24px">Your book is shared while its server runs: press <strong>Copy link</strong> and send it by text or Slack. Collaborators read the live book, on a phone or a laptop, and write notes with you: everyone can edit every note, and sees it typed and moved as it happens.</p>
+        <p class="intro" style="margin-bottom:24px">Press <strong>Share</strong>, choose a pin, press <strong>Start</strong>, then copy the link and send it by text or Slack. Collaborators read the live book, on a phone or a laptop, and write notes with you: everyone can edit every note, and sees it typed and moved as it happens.</p>
         <ul>
           <li><strong>Only you run Claude.</strong> Guests can't Revise, Build or Accept. Their notes reach you as yours do, and Revise passes them on.</li>
           <li><strong>The book goes straight from your machine to theirs,</strong> encrypted end to end. This site serves the reader and introduces the two; it never sees the book.</li>
-          <li><strong>One link for everyone, you too.</strong> Your pin link opens it with your powers on your phone; close your tab and the share goes on. The same link works after a restart. <strong>New link</strong> cuts off the old one.</li>
+          <li><strong>One link for everyone, you too.</strong> Your pin opens it with your powers on your phone; close your tab and the share goes on. <strong>Stop sharing</strong> cuts off the link, and the next Start makes a new one.</li>
         </ul>
       </div>
       <div class="link-card" aria-label="An example share">
@@ -276,7 +276,8 @@
         <thead><tr><th scope="col">Command</th><th scope="col">What it does</th></tr></thead>
         <tbody>
           <tr><td><code>/specbook</code></td><td>Creates a book for the project and lays out the whole app, or serves the one it has.</td></tr>
-          <tr><td><code>/specbook:open</code></td><td>Opens the book in your browser, starting its server if it isn't running.</td></tr>
+          <tr><td><code>/specbook:start</code></td><td>Starts the book's server if it isn't running, and opens the book in your browser.</td></tr>
+          <tr><td><code>/specbook:stop</code></td><td>Stops the book's server. The share link stops answering until you start it again.</td></tr>
           <tr><td><code>/specbook:design</code></td><td>Writes or revises a part of the book with you: chapters, requirements and mockups.</td></tr>
           <tr><td><code>/specbook:revise</code></td><td>Works through the notes you sent with Revise, and edits the spec from them.</td></tr>
           <tr><td><code>/specbook:build</code></td><td>Builds the sections marked Ready, proves each requirement with tests, and collects the evidence.</td></tr>

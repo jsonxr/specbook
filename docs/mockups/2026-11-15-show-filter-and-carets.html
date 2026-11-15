@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup: one filter, the toolbar at the bottom, and a screen before Claude acts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  /* The reader's own tokens (plugin/app/book.css). */
+  :root {
+    --bg: #17181a; --side: #1d1f22; --surface: #212327; --ink: #e8e9eb; --muted: #9a9ea6; --line: #33363b;
+    --accent: #6aa8ff; --proposed: #f2b45a; --built: #3ecf8e; --note: #ffd479; --req: #c2413b; --claude: #d97757;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    --sans: "IBM Plex Sans", "Helvetica Neue", system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #0f1012; color: var(--ink); font: 15px/1.55 var(--sans); }
+  body { overflow-x: clip; }
+  .page { max-width: 1520px; margin: 0 auto; padding: 32px 24px 80px; }
+  .page > h1 { margin: 0 0 6px; font-size: 28px; }
+  .page > .sub { color: var(--muted); margin: 0 0 20px; max-width: 80ch; }
+  .try { display: inline-block; font: 600 12px var(--mono); color: var(--note); border: 1px dashed var(--note); border-radius: 6px; padding: 2px 8px; margin-bottom: 16px; }
+  .stage { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+  .cap { font: 600 12px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin: 0 0 8px; }
+  .desk-wrap { flex: 0 1 942px; min-width: 0; }
+  .desk-scroll { overflow-x: auto; border-radius: 12px; }
+  .phone-wrap { flex: 0 0 auto; }
+  section.what { border-top: 1px solid var(--line); padding-top: 24px; margin-top: 30px; }
+  section.what h2 { margin: 0 0 8px; font-size: 20px; }
+  section.what h2 .n { font: 600 17px var(--mono); color: var(--accent); margin-right: 8px; }
+  .notes { color: var(--muted); max-width: 84ch; margin: 0; padding-left: 20px; }
+  .notes li { margin: 5px 0; }
+  .notes b { color: var(--ink); }
+
+  /* Frames ---------------------------------------------------------------------------------------------------- */
+  .frame { position: relative; overflow: hidden; background: var(--bg); border: 1px solid #2b2e33; border-radius: 12px; box-shadow: 0 20px 50px rgba(0,0,0,.5); }
+  .desk { width: 940px; height: 640px; }
+  .phone { width: 393px; height: 800px; border-radius: 44px; border: 10px solid #000; outline: 1px solid #333; }
+  .phone .notch { position: absolute; top: 8px; left: 50%; width: 110px; height: 30px; margin-left: -55px; border-radius: 20px; background: #000; z-index: 99; }
+  .phone .status { height: 46px; background: var(--side); }
+
+  /* Shared bits ----------------------------------------------------------------------------------------------- */
+  .ico { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .chev { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; color: var(--muted); }
+  .count { font: 700 11px/1.5 var(--sans); background: var(--note); color: #222; border-radius: 8px; padding: 0 6px; }
+
+  /* The header: title, View, Share, Claude. No Contents, no review buttons. */
+  .bar { display: flex; align-items: center; gap: 14px; padding: 9px 16px; background: rgba(29,31,34,.96); border-bottom: 1px solid var(--line); font-size: 14px; position: relative; z-index: 8; height: 51px; }
+  .phone .bar { gap: 8px; padding: 8px 12px; }
+  .bar-title { font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .spacer { flex: 1; }
+  .ghost { display: inline-flex; align-items: center; gap: 4px; font: 600 14px var(--sans); color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 6px 8px; white-space: nowrap; }
+  .pill { display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); padding: 2px 2px 2px 10px; }
+  .pill .solo { color: var(--muted); font: 600 12px var(--sans); white-space: nowrap; }
+  .pill .more { display: inline-flex; align-items: center; gap: 2px; font: 600 13px var(--sans); color: var(--ink); padding: 5px 9px; border-radius: 999px; }
+  .phone .pill { padding: 2px; }
+  .phone .pill .solo { display: none; }
+  .claude-wrap { position: relative; }
+  .claude { position: relative; display: inline-flex; align-items: center; gap: 7px; font: 700 14px var(--sans); color: var(--claude); background: #2a1c16; border: 1px solid #5c3a2c; border-radius: 9px; padding: 6px 10px; white-space: nowrap; cursor: pointer; }
+  .claude .spark { fill: currentColor; }
+  .claude .chev { color: var(--claude); }
+  .claude .count { position: absolute; top: -7px; right: -7px; border: 2px solid var(--side); }
+  .phone .claude .lbl { display: none; }
+  /* The Claude menu, as today, with the notes count on Revise */
+  .claude-pop { position: absolute; z-index: 9; top: calc(100% + 8px); right: 0; width: 300px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 6px; box-shadow: 0 12px 30px rgba(0,0,0,.5); display: none; }
+  .claude-pop.open { display: grid; gap: 2px; }
+  .phone .claude-wrap { position: static; }
+  .phone .claude-pop { left: 8px; right: 8px; width: auto; }
+  .act { display: block; width: 100%; text-align: left; background: transparent; border: 0; color: var(--ink); padding: 9px 10px; border-radius: 8px; cursor: pointer; font: 600 14px var(--sans); }
+  .act:hover { background: #2a2c31; }
+  .act .count { margin-left: 6px; vertical-align: 1px; }
+  .act small { display: block; font: 400 12px var(--sans); color: var(--muted); margin-top: 2px; }
+
+  /* The bottom toolbar: the phone's strip, now on the desktop too (floating, centered, under the book). */
+  .tools { position: absolute; z-index: 7; display: flex; align-items: center; gap: 2px; border: 1px solid var(--line); background: var(--surface); padding: 4px; }
+  .desk .tools { left: calc(50% + 110px); transform: translateX(-50%); bottom: 16px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.55); }
+  .desk.toc-off .tools { left: 50%; }
+  .phone .tools { left: 0; right: 0; bottom: 0; justify-content: space-between; gap: 0; border-width: 1px 0 0; border-radius: 0; padding: 4px 8px 24px; box-shadow: 0 -6px 18px rgba(0,0,0,.35); }
+  .tool { position: relative; height: 36px; min-width: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 0; background: transparent; color: var(--ink); border-radius: 8px; padding: 0 6px; cursor: pointer; font: 600 13px var(--sans); }
+  .tool:hover { background: #2c2f34; }
+  .phone .tool { height: 44px; min-width: 44px; border-radius: 10px; }
+  .phone .tool .ico { width: 22px; height: 22px; }
+  .tool-cmt { color: var(--note); }
+  .tool.on, .tool[aria-pressed="true"]:not(.tool-cmt) { background: var(--accent); color: #0b1a33; }
+  .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+  .phone .sep { margin: 0; }
+  .pos { font: 600 12px var(--sans); color: var(--muted); padding: 0 4px; white-space: nowrap; min-width: 3.6em; text-align: center; }
+  .phone .pos { font-size: 13px; }
+
+  /* The book ------------------------------------------------------------------------------------------------- */
+  .layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); height: calc(100% - 51px); }
+  .desk.toc-off .layout { grid-template-columns: minmax(0, 1fr); }
+  .desk.toc-off .side { display: none; }
+  .side { background: var(--side); border-right: 1px solid var(--line); padding: 16px 12px; font-size: 13px; overflow: hidden; }
+  .side b { display: block; margin: 0 0 4px; }
+  .side a { display: block; color: var(--muted); text-decoration: none; padding: 2px 0 2px 26px; }
+  .side a.here { color: var(--ink); }
+  .side .n { font: 500 12px var(--mono); color: var(--muted); margin-right: 8px; }
+  main { position: relative; padding: 22px 28px 120px; overflow: hidden; }
+  .phone main { padding: 16px 16px 120px; height: calc(100% - 46px - 51px); }
+  .eyebrow { font: 500 12px var(--mono); color: var(--accent); letter-spacing: .08em; text-transform: uppercase; margin: 0 0 4px; }
+  h3.ch { margin: 0 0 10px; font-size: 24px; }
+  .sec { margin: 18px 0 0; }
+  .sec h4 { margin: 0 0 6px; font-size: 16px; }
+  .sec h4 .num { font: 600 15px var(--mono); color: var(--accent); margin-right: 6px; }
+  .reqs { list-style: none; margin: 0; padding: 8px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; font-size: 13.5px; }
+  .reqs li { display: flex; gap: 10px; padding: 6px 6px; border-radius: 6px; }
+  .reqs .id { font: 600 11px var(--mono); color: var(--muted); padding-top: 2px; min-width: 52px; }
+  .reqs li.chg { background: rgba(106,168,255,.12); }
+  .reqs li.new { background: rgba(62,207,142,.12); box-shadow: -3px 0 0 var(--built); }
+  .reqs li.noted { box-shadow: -3px 0 0 var(--note); }
+  .tag { font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .05em; margin-left: 6px; }
+  .tag.c { color: var(--accent); } .tag.n { color: var(--built); }
+  .pin { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--note); color: #222; font: 700 10px var(--sans); margin-left: 6px; vertical-align: 1px; }
+  .banner { background: var(--surface); border: 1px solid var(--accent); border-radius: 10px; padding: 8px 12px; font-size: 13px; margin: 0 0 12px; display: none; }
+  /* The filter: only what is not accepted yet (changed, new) or has a note. */
+  .frame.filtered .banner { display: block; }
+  .frame.filtered .sec.same { display: none; }
+  .frame.filtered .reqs li:not(.chg):not(.new):not(.noted) { opacity: .4; }
+
+  /* The phone's contents: a sheet from the bottom, as today */
+  .toc-scrim { position: absolute; inset: 0; z-index: 18; background: rgba(10,10,12,.6); display: none; }
+  /* As tall as the screen allows: from just under the status bar (a strip of the book stays in view, so it reads as a
+     sheet) to the bottom; a short contents only takes what it needs. It scrolls inside. */
+  .toc-sheet { position: absolute; z-index: 19; left: 0; right: 0; bottom: 0; max-height: calc(100% - 58px); overflow-y: auto; overscroll-behavior: contain; display: none; background: var(--side);
+    border-top: 1px solid var(--line); border-radius: 16px 16px 0 0; padding: 26px 16px 36px; box-shadow: 0 -14px 40px rgba(0,0,0,.6); font-size: 15px; }
+  .toc-sheet::before { content: ''; position: absolute; top: 9px; left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: var(--line); }
+  .phone.toc-open .toc-scrim, .phone.toc-open .toc-sheet { display: block; }
+  .toc-sheet b { display: block; margin: 6px 0 2px; }
+  .toc-sheet .n { font: 500 12px var(--mono); color: var(--muted); margin-right: 10px; }
+  .toc-sheet a { display: block; color: var(--muted); text-decoration: none; padding: 6px 6px 6px 30px; margin: 0 -6px; border-radius: 6px; font-size: 14px; cursor: pointer; }
+  .toc-sheet a.here { background: var(--surface); color: var(--ink); }
+
+  /* The screen before Claude acts ---------------------------------------------------------------------------- */
+  .scrim { position: absolute; inset: 0; z-index: 20; background: rgba(10,10,12,.6); display: none; }
+  .frame.sending .scrim { display: block; }
+  .sheet { position: absolute; z-index: 21; display: none; flex-direction: column; background: var(--side); border: 1px solid var(--line); box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+  .frame.sending .sheet { display: flex; }
+  .desk .sheet { left: 50%; top: 50%; transform: translate(-50%, -50%); width: 560px; max-height: 560px; border-radius: 14px; }
+  .phone .sheet { left: 0; right: 0; bottom: 0; top: 70px; border-radius: 16px 16px 0 0; border-width: 1px 0 0; }
+  .phone .sheet::before { content: ''; position: absolute; top: 8px; left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: var(--line); }
+  .sh-head { padding: 18px 20px 12px; border-bottom: 1px solid var(--line); }
+  .phone .sh-head { padding: 22px 16px 12px; }
+  .sh-head h5 { margin: 0 0 4px; font-size: 18px; display: flex; align-items: center; gap: 8px; }
+  .sh-head h5 .spark { fill: var(--claude); }
+  .sh-head p { margin: 0; color: var(--muted); font-size: 13px; }
+  .sh-body { overflow-y: auto; padding: 14px 20px; flex: 1; }
+  .phone .sh-body { padding: 12px 16px; }
+  .sh-body ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .sh-body li { display: grid; grid-template-columns: 24px 1fr; gap: 2px 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; font-size: 13.5px; }
+  .sh-body li .pin { margin: 1px 0 0; grid-row: 1 / span 2; }
+  .sh-body li .at { font: 600 11px var(--mono); color: var(--muted); }
+  .sh-body li .at a { color: var(--accent); text-decoration: none; }
+  .sh-body li .by { color: var(--muted); font-size: 12px; }
+  .sh-body .grp { margin: 0 0 14px; }
+  .sh-body .grp h6 { margin: 0 0 6px; font-size: 13px; color: var(--ink); }
+  .sh-body .grp h6 .num { font: 600 12px var(--mono); color: var(--accent); margin-right: 6px; }
+  .sh-body .grp h6 a { color: var(--muted); font: 600 12px var(--sans); text-decoration: none; margin-left: 6px; }
+  .noted-req { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-bottom: 8px; }
+  .noted-req .req { display: flex; gap: 10px; padding: 8px 12px; font-size: 13px; color: var(--muted); }
+  .noted-req .req .id { font: 600 11px var(--mono); padding-top: 2px; min-width: 50px; }
+  .noted-req .req.chg { background: rgba(106,168,255,.08); }
+  .noted-req .note { display: flex; gap: 10px; align-items: flex-start; padding: 8px 12px 9px; border-top: 1px dashed var(--line); font-size: 13.5px; color: var(--ink); }
+  .noted-req .note .pin { margin: 1px 0 0; flex: none; }
+  .noted-req .note .by { color: var(--muted); font-size: 12px; }
+  .sh-body .sec-ready { display: flex; align-items: center; gap: 10px; }
+  .sh-body .sec-ready .num { font: 600 13px var(--mono); color: var(--accent); }
+  .sh-body .sec-ready .st-ready { font: 600 10px var(--mono); color: var(--accent); border: 1px solid var(--accent); border-radius: 10px; padding: 1px 7px; margin-left: auto; text-transform: uppercase; }
+  .linkbtn { margin-top: 4px; background: none; border: 0; padding: 0; color: var(--accent); font: 600 13px var(--sans); cursor: pointer; }
+  /* What Claude receives: the words themselves, as you would paste them into Claude, over the Revise screen */
+  .rx-scrim { position: absolute; inset: 0; z-index: 30; background: rgba(10,10,12,.55); display: none; }
+  .rx { position: absolute; z-index: 31; display: none; flex-direction: column; background: var(--bg); border: 1px solid var(--line); box-shadow: 0 20px 60px rgba(0,0,0,.7); }
+  .frame.reading .rx-scrim { display: block; }
+  .frame.reading .rx { display: flex; }
+  .desk .rx { left: 50%; top: 50%; transform: translate(-50%, -50%); width: 640px; max-height: 580px; border-radius: 14px; }
+  .phone .rx { left: 0; right: 0; bottom: 0; top: 58px; border-radius: 16px 16px 0 0; border-width: 1px 0 0; }
+  .rx-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .phone .rx-head { padding: 20px 16px 12px; }
+  .rx-head h6 { margin: 0; font-size: 15px; flex: 1; }
+  .rx-head p { margin: 2px 0 0; color: var(--muted); font: 400 12px var(--sans); }
+  .rx pre { margin: 0; padding: 14px 16px; overflow: auto; flex: 1; font: 12.5px/1.6 var(--mono); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .rx-foot { display: flex; gap: 10px; justify-content: flex-end; padding: 12px 16px; border-top: 1px solid var(--line); }
+  .phone .rx-foot { padding: 12px 16px 30px; }
+  .phone .rx-foot .btn { flex: 1; }
+  .sh-foot { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--line); }
+  .phone .sh-foot { padding: 12px 16px 30px; }
+  .sh-foot .spacer { flex: 1; }
+  .btn { font: 600 14px var(--sans); border-radius: 8px; padding: 8px 14px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+  .btn.go { border: 0; background: var(--claude); color: #1a0f0a; }
+  .phone .btn { flex: 1; padding: 11px 14px; }
+  .phone .sh-foot .spacer { display: none; }
+  .when-build { display: none; }
+  .frame.building .when-build { display: block; }
+  .frame.building .when-revise { display: none; }
+
+  /* Before and after, close up */
+  .compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; margin-top: 12px; }
+  .compare .box { background: var(--side); border: 1px solid var(--line); border-radius: 12px; padding: 16px; overflow-x: auto; }
+  .compare .row { display: flex; align-items: center; gap: 12px; min-width: max-content; }
+  .compare .row .tools { position: static; transform: none; box-shadow: none; border-radius: 10px; }
+  .verdict { font: 600 12px var(--mono); margin: 0 0 12px; }
+  .verdict.old { color: var(--muted); } .verdict.new { color: var(--built); }
+  .caret-old { font-size: 12px; color: var(--muted); }
+  @media (max-width: 700px) { .page { padding: 20px 12px 60px; } .phone-wrap { margin: 0 auto; } }
+  /* A phone frame is wider than a phone: shown smaller there. */
+  @media (max-width: 440px) { .phone { zoom: .86; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>One filter, the toolbar at the bottom, and a screen before Claude acts</h1>
+  <p class="sub">A desktop window and a phone (393 by 852, an iPhone 16) side by side. Both work. Nothing here is
+    built yet.</p>
+  <span class="try">Try it: press the filter in the toolbar, then Claude ▸ Revise (or Build) in the header</span>
+  <div class="stage">
+    <div class="desk-wrap">
+      <p class="cap">Desktop</p>
+      <div class="desk-scroll"><div class="frame desk" id="desk"></div></div>
+    </div>
+    <div class="phone-wrap">
+      <p class="cap">Phone</p>
+      <div class="frame phone" id="phone"></div>
+    </div>
+  </div>
+
+  <section class="what">
+    <h2><span class="n">1</span>One filter: what still needs you</h2>
+    <ul class="notes">
+      <li>The toolbar keeps one toggle, the funnel. On, the book shows only what still needs you: every line not
+        accepted yet (changed or new) and every line with a note. Sections with none hide; the rest of a shown section
+        is dimmed. Off, the whole book.</li>
+      <li>The arrows step through those same lines, on or off, so <b>1 / 6</b> counts what needs you.</li>
+      <li>The Requests button and its panel go: notes stay where you dropped them in the book, and the full list is
+        on the screen before Revise (below).</li>
+      <li><b>F</b> still toggles the filter.</li>
+    </ul>
+  </section>
+
+  <section class="what">
+    <h2><span class="n">2</span>A screen before Claude acts</h2>
+    <ul class="notes">
+      <li><b>Revise</b> no longer sends at once. It opens a screen with every note that will go to Claude, grouped by
+        section: the requirement it is on (its id and text, marked if it changed), then the note under it, and who wrote
+        it when it was not you. <b>Go to ›</b> takes you to that spot in the book. <b>Send to Claude</b> sends them; Cancel goes
+        back to the book. On a desktop it is a dialog over the book; on a phone a sheet from the bottom, its buttons in
+        reach of the thumb.</li>
+      <li><b>Build</b> gets the same: the sections marked Ready that it will build, then <b>Build</b> or Cancel.</li>
+      <li>The Claude button carries the notes count, and so does Revise in its menu, so you see notes waiting without
+        opening anything.</li>
+      <li><b>Show what Claude receives</b> opens the words themselves, as you would paste them into Claude, with
+        <b>Copy</b>: each note with where it is, the requirement it is on, and the note, and a collaborator's note
+        marked as theirs. To make it true, the request would carry this text and the watch would hand it to Claude
+        as it is, so what you read here is exactly what Claude gets.</li>
+    </ul>
+  </section>
+
+  <section class="what">
+    <h2><span class="n">3</span>The toolbar at the bottom everywhere, and a header with less in it</h2>
+    <ul class="notes">
+      <li>The review toolbar (Contents, Comment, previous and next, the filter) sits at the bottom on a desktop too:
+        floating, centered under the book. On a phone it is the bottom strip, as today.</li>
+      <li>The header drops <b>Contents ▾</b> and the review buttons. It keeps the book's title, <b>View</b>,
+        <b>Share</b> and <b>Claude</b>.</li>
+      <li>On a desktop, the toolbar's Contents button hides and shows the contents sidebar (open by default; hidden,
+        the book takes the whole width). On a phone it is a plain button that opens the contents as a sheet from the
+        bottom, as tall as the screen allows (a strip of the book stays in view above it), scrolling inside; choosing a
+        section or tapping outside closes it.</li>
+      <li>Every dropdown arrow is the toolbar's chevron: 18 pixels, the same stroke, in the button's own color.</li>
+    </ul>
+    <div class="compare">
+      <div class="box">
+        <p class="verdict old">The desktop header today</p>
+        <div class="row" id="old-desk"></div>
+      </div>
+      <div class="box">
+        <p class="verdict new">Proposed</p>
+        <div class="row" id="new-desk"></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+  'use strict';
+  var P = {
+    toc: '<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>',
+    cmt: '<path d="M3 21V12a9 9 0 1 1 9 9z"/>',
+    up: '<path d="M6 15l6-6 6 6"/>',
+    down: '<path d="M6 9l6 6 6-6"/>',
+    filter: '<path d="M3 5h18l-7 8v6l-4-2v-4z"/>',
+    notes: '<path d="M4 6h16M4 12h16M4 18h10"/>',
+    spark: '<path d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8z"/>'
+  };
+  function ico(p, cls) { return '<svg class="' + (cls || 'ico') + '" viewBox="0 0 24 24" aria-hidden="true">' + p + '</svg>'; }
+  function spark(size) { return '<svg class="spark" viewBox="0 0 24 24" width="' + size + '" height="' + size + '" aria-hidden="true">' + P.spark + '</svg>'; }
+  var DOWN = ico(P.down, 'chev');
+
+  function header() {
+    var claude = '<span class="claude-wrap"><button type="button" class="claude" aria-haspopup="menu" aria-expanded="false">' + spark(14) +
+      '<span class="lbl">Claude</span>' + DOWN + '<span class="count">4</span></button>' +
+      '<div class="claude-pop" role="menu">' +
+        '<button type="button" class="act" data-act="revise">Revise<span class="count">4</span><small>Review your notes, then send them. Claude revises the book and you review each change.</small></button>' +
+        '<button type="button" class="act" data-act="build">Build<small>See the sections marked Ready, then build them, with tests as evidence.</small></button>' +
+      '</div></span>';
+    var share = '<span class="pill"><span class="solo">Only you</span><span class="more">Share' + DOWN + '</span></span>';
+    return '<div class="bar"><span class="bar-title">Tribes</span><span class="spacer"></span>' +
+      '<span class="ghost">View' + DOWN + '</span>' + share + claude + '</div>';
+  }
+  function toolbar() {
+    return '<div class="tools" role="group" aria-label="Review">' +
+      '<button class="tool toc on" aria-label="Contents" aria-pressed="true">' + ico(P.toc) + '</button><span class="sep"></span>' +
+      '<button class="tool tool-cmt" aria-label="Comment">' + ico(P.cmt) + '</button><span class="sep"></span>' +
+      '<button class="tool" aria-label="Previous">' + ico(P.up) + '</button><span class="pos">1 / 6</span>' +
+      '<button class="tool" aria-label="Next">' + ico(P.down) + '</button><span class="sep"></span>' +
+      '<button class="tool filter" aria-pressed="false" aria-label="Show only what needs you (F)" title="Only what needs you · F">' + ico(P.filter) + '</button>' +
+      '</div>';
+  }
+  var BOOK =
+    '<p class="banner"><b>6 to look at</b>: 4 changes not accepted yet and 2 notes. Sections with none are hidden.</p>' +
+    '<p class="eyebrow">Chapter 02</p><h3 class="ch">Onboarding</h3>' +
+    '<div class="sec same"><h4><span class="num">§2.1</span>Opening the app</h4><ul class="reqs">' +
+      '<li><span class="id">ONB-1</span><span>The app opens on the last community you used.</span></li>' +
+      '<li><span class="id">ONB-2</span><span>With no network, it shows what it last loaded.</span></li></ul></div>' +
+    '<div class="sec"><h4><span class="num">§2.2</span>Joining a community</h4><ul class="reqs">' +
+      '<li><span class="id">JOIN-1</span><span>Join Community asks for an email, then a code.</span></li>' +
+      '<li class="chg"><span class="id">JOIN-2</span><span>The code is six digits and lasts ten minutes.<span class="tag c">changed</span></span></li>' +
+      '<li class="new"><span class="id">JOIN-7</span><span>A wrong code three times waits a minute before the next.<span class="tag n">new</span></span></li>' +
+      '<li class="noted"><span class="id">JOIN-3</span><span>The invite link names the community and who sent it.<span class="pin">1</span></span></li></ul></div>' +
+    '<div class="sec same"><h4><span class="num">§2.3</span>Passkeys</h4><ul class="reqs">' +
+      '<li><span class="id">PK-1</span><span>After the first sign-in, the app offers a passkey.</span></li></ul></div>' +
+    '<div class="sec"><h4><span class="num">§2.5</span>Accepting an invitation</h4><ul class="reqs">' +
+      '<li class="chg noted"><span class="id">INV-2</span><span>An expired invitation says who to ask for a new one.<span class="tag c">changed</span><span class="pin">2</span></span></li>' +
+      '<li><span class="id">INV-3</span><span>Accepting lands on the community\'s Home.</span></li></ul></div>';
+  var SHEET =
+    '<div class="scrim"></div><div class="sheet" role="dialog" aria-modal="true">' +
+      '<div class="sh-head when-revise"><h5>' + spark(16) + 'Revise: 4 notes to send</h5><p>Claude revises the book from these notes; then you review each change it makes.</p></div>' +
+      '<div class="sh-head when-build"><h5>' + spark(16) + 'Build: 2 sections marked Ready</h5><p>Claude builds these, with tests as evidence. You review the calls it makes on its own.</p></div>' +
+      '<div class="sh-body when-revise">' +
+        '<div class="grp"><h6><span class="num">§2.2</span>Joining a community<a href="#">Go to ›</a></h6>' +
+          '<div class="noted-req"><div class="req"><span class="id">JOIN-3</span><span>The invite link names the community and who sent it.</span></div>' +
+          '<div class="note"><span class="pin">1</span><span>Should say who sent it by first name only.</span></div></div></div>' +
+        '<div class="grp"><h6><span class="num">§2.5</span>Accepting an invitation<a href="#">Go to ›</a></h6>' +
+          '<div class="noted-req"><div class="req chg"><span class="id">INV-2</span><span>An expired invitation says who to ask for a new one. <span class="tag c">changed</span></span></div>' +
+          '<div class="note"><span class="pin">2</span><span>"Who to ask": the person who invited them, or an admin? <span class="by">· Ana</span></span></div></div></div>' +
+        '<div class="grp"><h6><span class="num">§3.1</span>The header and tabs<a href="#">Go to ›</a></h6>' +
+          '<div class="noted-req"><div class="req"><span class="id">HDR-2</span><span>The tabs are Home, Groups, Calendar and Directory, in that order.</span></div>' +
+          '<div class="note"><span class="pin">3</span><span>The header tabs are too close together on small phones.</span></div></div></div>' +
+        '<div class="grp"><h6><span class="num">§4.3</span>Staying signed in<a href="#">Go to ›</a></h6>' +
+          '<div class="noted-req"><div class="req"><span class="id">SES-1</span><span>A session lasts 14 days from the last time the app was opened.</span></div>' +
+          '<div class="note"><span class="pin">4</span><span>Staying signed in: 30 days, not 14.</span></div></div></div>' +
+      '<button type="button" class="linkbtn show-text">Show what Claude receives</button></div>' +
+      '<div class="sh-body when-build"><ol>' +
+        '<li class="sec-ready"><span class="num">§2.4</span><span>Starting a community</span><span class="st-ready">ready</span></li>' +
+        '<li class="sec-ready"><span class="num">§6.2</span><span>Privacy and posting</span><span class="st-ready">ready</span></li>' +
+      '</ol></div>' +
+      '<div class="sh-foot"><span class="spacer"></span><button type="button" class="btn cancel">Cancel</button>' +
+        '<button type="button" class="btn go when-revise">✦ Send to Claude</button><button type="button" class="btn go when-build">✦ Build</button></div>' +
+    '</div>' +
+    '<div class="rx-scrim"></div><div class="rx" role="dialog" aria-modal="true" aria-label="What Claude receives">' +
+      '<div class="rx-head"><div><h6>What Claude receives</h6><p>Word for word. Copy it to paste into any Claude session.</p></div></div>' +
+      '<pre class="rx-text"></pre>' +
+      '<div class="rx-foot"><button type="button" class="btn rx-close">Close</button><button type="button" class="btn rx-copy">Copy</button></div>' +
+    '</div>';
+  var RX_TEXT = [
+    'Revise the spec book in docs/specbook/ from these 4 notes (Revise request 2026-11-15T10:42, use specbook:revise).',
+    'Each note says where it is, the requirement it is on, and what the reader asked.',
+    '',
+    '1. §2.2 Joining a community · JOIN-3',
+    '   Requirement: The invite link names the community and who sent it.',
+    '   Note: Should say who sent it by first name only.',
+    '',
+    '2. §2.5 Accepting an invitation · INV-2 (changed, not accepted yet)',
+    '   Requirement: An expired invitation says who to ask for a new one.',
+    '   Note from Ana, a collaborator: "Who to ask": the person who invited them, or an admin?',
+    '',
+    '3. §3.1 The header and tabs · HDR-2',
+    '   Requirement: The tabs are Home, Groups, Calendar and Directory, in that order.',
+    '   Note: The header tabs are too close together on small phones.',
+    '',
+    '4. §4.3 Staying signed in · SES-1',
+    '   Requirement: A session lasts 14 days from the last time the app was opened.',
+    '   Note: Staying signed in: 30 days, not 14.'
+  ].join('\n');
+
+  function build(el, phone) {
+    var side = '<nav class="side"><b><span class="n">01</span>How to read this book</b><b><span class="n">02</span>Onboarding</b>' +
+      '<a>§2.1 Opening the app</a><a class="here">§2.2 Joining a community</a><a>§2.3 Passkeys</a><a>§2.5 Accepting an invitation</a>' +
+      '<b><span class="n">03</span>Communities and the header</b><b><span class="n">04</span>Profile</b></nav>';
+    el.innerHTML = (phone ? '<div class="notch"></div><div class="status"></div>' : '') + header() +
+      (phone ? '<main>' + BOOK + '</main>' : '<div class="layout">' + side + '<main>' + BOOK + '</main></div>') + toolbar() + SHEET +
+      (phone ? '<div class="toc-scrim"></div><nav class="toc-sheet" aria-label="Contents">' +
+        '<b><span class="n">01</span>How to read this book</b><b><span class="n">02</span>Onboarding</b>' +
+        '<a>§2.1 Opening the app</a><a class="here">§2.2 Joining a community</a><a>§2.3 Passkeys</a><a>§2.4 Starting a community</a><a>§2.5 Accepting an invitation</a>' +
+        '<b><span class="n">03</span>Communities and the header</b><a>§3.1 The header and tabs</a><a>§3.2 Switching communities</a>' +
+        '<b><span class="n">04</span>Profile</b><a>§4.1 The profile screen</a><a>§4.2 Editing your details</a><a>§4.3 Staying signed in</a>' +
+        '<b><span class="n">05</span>Home</b><a>§5.1 Groups on Home</a><a>§5.2 Action cards</a><a>§5.3 Posts and messages</a>' +
+        '<b><span class="n">06</span>Groups</b><a>§6.1 The conversation</a><a>§6.2 Privacy and posting</a><a>§6.3 The group screen</a>' +
+        '<b><span class="n">07</span>Calendar</b><a>§7.1 The Calendar tab</a><a>§7.2 An event\'s page</a>' +
+        '<b><span class="n">08</span>Directory</b><a>§8.1 Why the Directory is changing</a></nav>' : '');
+    var toc = el.querySelector('.toc');
+    var filter = el.querySelector('.filter');
+    var cbtn = el.querySelector('.claude');
+    var pop = el.querySelector('.claude-pop');
+    if (phone) { toc.classList.remove('on'); toc.setAttribute('aria-pressed', 'false'); }
+    filter.addEventListener('click', function () {
+      var on = el.classList.toggle('filtered');
+      filter.setAttribute('aria-pressed', String(on));
+    });
+    function openMenu(on) { pop.classList.toggle('open', on); cbtn.setAttribute('aria-expanded', String(on)); }
+    cbtn.addEventListener('click', function (e) { e.stopPropagation(); openMenu(!pop.classList.contains('open')); });
+    pop.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var a = e.target.closest('.act');
+      if (!a) { return; }
+      openMenu(false);
+      el.classList.toggle('building', a.dataset.act === 'build');
+      el.classList.add('sending');
+    });
+    el.querySelectorAll('.cancel, .go, .scrim').forEach(function (b) { b.addEventListener('click', function () { el.classList.remove('sending'); }); });
+    el.querySelector('.rx-text').textContent = RX_TEXT;
+    el.querySelector('.show-text').addEventListener('click', function () { el.classList.add('reading'); });
+    el.querySelectorAll('.rx-close, .rx-scrim').forEach(function (b) { b.addEventListener('click', function () { el.classList.remove('reading'); }); });
+    var copyBtn = el.querySelector('.rx-copy');
+    copyBtn.addEventListener('click', function () {
+      var done = function () { copyBtn.textContent = 'Copied'; setTimeout(function () { copyBtn.textContent = 'Copy'; }, 1200); };
+      if (navigator.clipboard) { navigator.clipboard.writeText(RX_TEXT).then(done, done); } else { done(); }
+    });
+    document.addEventListener('click', function () { openMenu(false); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { openMenu(false); if (el.classList.contains('reading')) { el.classList.remove('reading'); } else { el.classList.remove('sending'); } el.classList.remove('toc-open'); } });
+    if (phone) {
+      // On a phone, Contents is a button: it opens the contents as a sheet from the bottom; a choice or a tap outside closes it.
+      toc.removeAttribute('aria-pressed');
+      toc.addEventListener('click', function () { el.classList.add('toc-open'); });
+      el.querySelectorAll('.toc-scrim, .toc-sheet a').forEach(function (x) { x.addEventListener('click', function () { el.classList.remove('toc-open'); }); });
+    } else {
+      toc.addEventListener('click', function () {
+        var off = el.classList.toggle('toc-off');
+        toc.classList.toggle('on', !off);
+        toc.setAttribute('aria-pressed', String(!off));
+      });
+    }
+  }
+  build(document.getElementById('desk'), false);
+  build(document.getElementById('phone'), true);
+
+  // Close up: the desktop header today, and as proposed.
+  var OLD = ' <span class="caret-old">▾</span>';
+  var oldTools = '<span class="tools"><button class="tool tool-cmt">' + ico(P.cmt) + '</button><span class="sep"></span>' +
+    '<button class="tool">' + ico(P.up) + '</button><span class="pos">1 / 6</span><button class="tool">' + ico(P.down) + '</button>' +
+    '<button class="tool">' + ico(P.filter) + '</button><span class="sep"></span><button class="tool">' + ico(P.notes) + '</button></span>';
+  document.getElementById('old-desk').innerHTML = '<span class="bar-title">Tribes</span><span class="ghost">View' + OLD + '</span>' + oldTools +
+    '<span class="pill"><span class="solo">Only you</span><span class="more">Share' + OLD + '</span></span>' +
+    '<span class="claude">' + spark(14) + 'Claude' + OLD + '</span>';
+  document.getElementById('new-desk').innerHTML = '<span class="bar-title">Tribes</span><span class="ghost">View' + DOWN + '</span>' +
+    '<span class="pill"><span class="solo">Only you</span><span class="more">Share' + DOWN + '</span></span>' +
+    '<span class="claude">' + spark(14) + 'Claude' + DOWN + '</span>';
+</script>
+</body>
+</html>

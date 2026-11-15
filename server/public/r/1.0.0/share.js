@@ -423,7 +423,7 @@
     setTimeout(open, Math.min(15000, 1000 * Math.pow(2, Math.min(tries, 4))));
   }
 
-  // The pin was wrong (or replaced by a New pin): it is forgotten, and this reader goes on as a guest. The page asks
+  // The pin was wrong (or the share was started again with another pin): it is forgotten, and this reader goes on as a guest. The page asks
   // for a name, then reloads, so the book is drawn afresh with a guest's rights and that name.
   var askedAfterPin = false;
   function pinGone() {
@@ -557,7 +557,6 @@
     onChanged: function (fn) { changedHandlers.push(fn); },
     status: status,
     showError: showError,
-    forgetPin: forgetPin,
     // A pin typed on this page: saved for this room, and the page opens again with it. False when it is not 6 digits.
     usePin: function (code) {
       var c = String(code || '').replace(/\s+/g, '');
@@ -566,17 +565,7 @@
       location.reload();
       return true;
     },
-    // For a reader who opened the book with the pin: the pin link, a new pin, and Stop sharing.
-    pinLink: function () { return role === 'owner' && pin ? location.origin + '/s/' + ROOM + '#pin=' + pin : null; },
-    newPin: function () {
-      return request('POST', '/api/share/new-pin', new TextEncoder().encode('{}')).then(function (r) {
-        var got = r.status === 200 ? JSON.parse(new TextDecoder().decode(r.bytes)) : null;
-        if (!got || !PIN_OK.test(got.pin)) { throw new Error('The book did not make a new pin.'); }
-        pin = got.pin;
-        try { localStorage.setItem(PIN_KEY, pin); } catch (e) { /* only this tab has it */ }
-        return pin;
-      });
-    },
+    // For a reader who opened the book with the pin: Stop sharing.
     stopSharing: function () { return request('POST', '/api/share/stop', new TextEncoder().encode('{}')).catch(function () {}); },
   };
 

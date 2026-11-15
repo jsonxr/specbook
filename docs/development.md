@@ -7,18 +7,21 @@
 - **The reader on localhost.** A book's server (`plugin/server/serve.mjs`) serves `plugin/app/` straight from the
   plugin folder at `http://localhost:4180/` (or the book's own port). Load the plugin from this checkout
   (`claude --plugin-dir ./plugin`, or the `specbook-dev` marketplace in `.claude-plugin/`), edit `plugin/app/`, and
-  reload the page. After a change under `plugin/server/`, run `/specbook:open`: it sees that the server's code
+  reload the page. After a change under `plugin/server/`, run `/specbook:start`: it sees that the server's code
   changed and restarts it.
-- **At phone size.** Chrome's device mode on this Mac, or Safari in the iOS Simulator (Xcode), which shares the Mac's
-  network, so `http://localhost:4180/` works there unchanged. The reader smoke test checks phone widths too.
+- **Every screen works on a phone.** Anything the plugin draws (the reader, its bar, every menu and dialog) must fit a
+  390-pixel-wide screen: nothing cut off, nothing scrolling sideways. Check new UI at phone size before calling it
+  done, and give it a phone-width check in the reader smoke test (it has one for every menu in the bar). Chrome's
+  device mode on this Mac, or Safari in the iOS Simulator (Xcode), which shares the Mac's network, so
+  `http://localhost:4180/` works there unchanged.
 - **The share link, end to end.** `plugin/test/share.smoke.mjs` runs a copy of the share server (`server/`) with
   `wrangler dev`, publishes the current reader into it, and drives a book server and readers on the link. It never
   touches the public share server.
 - **Releasing a reader.** Raise the plugin's version, `node server/publish-reader.mjs`, commit, deploy the share
   server (`server/README.md`). That is the only time a reader is published.
 
-`/specbook:open` opens the book on its share link, which runs the **released** reader. To see unreleased work, open
-localhost yourself.
+`/specbook:start` opens the book on `localhost`, which runs the reader from this checkout. The share link runs the
+**released** reader.
 
 ## What is hard, and why
 

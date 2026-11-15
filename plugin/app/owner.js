@@ -1,12 +1,12 @@
 // The owner's book tab on localhost while the book server shares the book. The server hosts the share itself
 // (server/lib/host.mjs); this tab only follows it: it hears the share's state, the readers' live messages and changes
 // on disk on /api/share/events, and passes its own live messages (presence, drafts, following: live.js) to the readers
-// through POST /api/live. Opening a tab asks the server to share (unless the book says settings.share: false), as
-// closing one no longer stops anything. The readers' half is the share server's reader.
+// through POST /api/live. Opening a tab shares nothing: the share starts when the owner presses Share and Start with a
+// 6-digit pin of their choice. The readers' half is the share server's reader.
 (function () {
   'use strict';
   if (/^\/s\//.test(location.pathname)) { return; }
-  // This tab's id, sent on the events stream: a tab open at Stop sharing that only reconnects does not start it again.
+  // This tab's id, sent on the events stream.
   var TAB = (function () {
     var bytes = crypto.getRandomValues(new Uint8Array(12));
     var s = '';
@@ -19,12 +19,11 @@
   }
 
   // What the server says of the share: { state: 'off'|'starting'|'live'|'failed', url, pinUrl, expiresAt, guests,
-  // error, stopped }.
-  var view = { state: 'starting', url: null, pinUrl: null, expiresAt: null, guests: [], error: null, stopped: false };
-  var listening = false; // this tab follows the share
-  var lockWait = true; // the lock has not been answered yet (a moment): until then this tab is 'starting', not 'other-tab'
-  var waiting = true; // no state from the server yet
+  // error }.
+  var view = { state: 'off', url: null, pinUrl: null, expiresAt: null, guests: [], error: null };
+  var waiting = true; // no state from the server yet: 'unknown', and the pill shows nothing rather than a guess
   var readers = {}; // id -> { id, name, color, role }: who is reading on the link, from their hello and bye
+  var ownerTabs = []; // the ids of the owner's open localhost tabs of this book, this one among them
   var watchers = [];
   function changedState() { watchers.forEach(function (fn) { try { fn(); } catch (e) { /* the page's problem */ } }); }
 
@@ -33,17 +32,18 @@
   function people() {
     return [hostFace()].concat(Object.keys(readers).map(function (k) { return readers[k]; }));
   }
+  // 'unknown' (not heard yet), 'off', 'starting' or 'live'.
   function state() {
-    if (!listening) { return lockWait ? 'starting' : 'other-tab'; }
-    if (waiting) { return 'starting'; }
+    if (waiting) { return 'unknown'; }
     if (view.state === 'live') { return 'live'; }
     return view.state === 'starting' ? 'starting' : 'off';
   }
 
-  // Live messages from this tab: to every reader, stamped as the host's by the server. Only the tab that follows the
-  // share speaks for the owner.
+  // Live messages from this tab: to every reader, stamped as the host's by the server. Every localhost tab of the book
+  // speaks for the owner; a hidden one keeps quiet, so the owner's face follows the tab in front.
   function sendLive(msg) {
-    if (!listening || view.state !== 'live') { return; }
+    if (view.state !== 'live') { return; }
+    if (document.visibilityState === 'hidden' && msg && msg.kind !== 'bye') { return; }
     var m = {};
     Object.keys(msg || {}).forEach(function (k) { m[k] = msg[k]; });
     delete m.t; delete m.from;
@@ -65,8 +65,8 @@
     if (view.state === 'live' && was !== 'live') { sayHello(); }
     changedState();
   }
-  function ask(path) {
-    return post(path, {}).then(function (r) {
+  function ask(path, body) {
+    return post(path, body || {}).then(function (r) {
       return r.json().then(function (j) { apply(j); return r; }, function () { return r; });
     });
   }
@@ -100,34 +100,24 @@
     }
   }
 
-  // One tab per book listens (the browser allows few connections to one server, and every open stream holds one): the
-  // tab that holds the lock. When it closes, the next tab takes over. Until then, this tab says the share is followed in
-  // the other one.
-  function listenOnce() {
-    if (navigator.locks && navigator.locks.request) {
-      navigator.locks.request('specbook-share-host:' + location.host, function () {
-        listen();
-        return new Promise(function () { /* held until the tab closes */ });
-      });
-      setTimeout(function () { lockWait = false; changedState(); }, 400);
-    } else {
-      listen();
-    }
-  }
   var events = null;
+  // Every localhost tab of the book listens on its own stream (a browser allows six connections to one server over
+  // plain http; a few tabs leave plenty).
   function listen() {
-    listening = true;
     waiting = true;
     changedState();
     events = new EventSource('/api/share/events?tab=' + TAB);
     events.addEventListener('state', function (e) { try { apply(JSON.parse(e.data)); } catch (err) { /* bad event */ } });
     events.addEventListener('live', function (e) { try { onLive(JSON.parse(e.data)); } catch (err) { /* bad event */ } });
     events.addEventListener('changed', changed);
+    events.addEventListener('tabs', function (e) {
+      try { var t = JSON.parse(e.data).tabs; ownerTabs = Array.isArray(t) ? t : []; changedState(); } catch (err) { /* bad event */ }
+    });
     events.onerror = function () {
       // The server went away (stopped, or restarted), and the share with it. The stream reconnects by itself, with the
       // same tab id; one the browser gave up on is opened again.
       readers = {};
-      view = { state: 'off', url: null, pinUrl: null, expiresAt: null, guests: [], error: null, stopped: view.stopped };
+      view = { state: 'off', url: null, pinUrl: null, expiresAt: null, guests: [], error: null };
       changedState();
       if (events.readyState === 2) { setTimeout(listen, 5000); }
     };
@@ -138,14 +128,15 @@
     send: sendLive,
     people: people,
     link: function () { return state() === 'live' ? view.url : null; },
-    pinLink: function () { return state() === 'live' ? view.pinUrl : null; },
     error: function () { return view.error; },
+    // This tab's id, and every open localhost tab's: the share menu lists each.
+    tab: TAB,
+    tabs: function () { return ownerTabs.slice(); },
     state: state,
     onChange: function (fn) { watchers.push(fn); },
-    newLink: function () { return ask('/api/share/new-link'); },
-    newPin: function () { return ask('/api/share/new-pin'); },
     stopSharing: function () { return ask('/api/share/stop'); },
-    startSharing: function () { return ask('/api/share'); },
+    // Starts the share with the owner's 6-digit pin. Resolves with the server's answer (400 for a bad pin).
+    startSharing: function (pin) { return ask('/api/share', { pin: pin }); },
   };
-  listenOnce();
+  listen();
 })();

@@ -206,7 +206,7 @@ test('start() with a saved room renews that room and keeps its link and pin', as
   assert.ok(FakeSocket.all.at(-1).url.endsWith(`/api/rooms/${saved.room}/host?token=${saved.hostToken}`));
 });
 
-test('start() with a saved room taken under another token opens a new room with a new pin', async t => {
+test('start() with a saved room taken under another token opens a new room and keeps the pin', async t => {
   const saved = { room: 'SavedRoom0000000000003', hostToken: 'H'.repeat(32), pin: '424242', expiresAt: null };
   const views = [];
   const { host, broker, brokerUrl } = await setup(t, { saved, onState: v => views.push(v) });
@@ -216,10 +216,17 @@ test('start() with a saved room taken under another token opens a new room with 
   assert.equal(broker.posts[1].room, undefined);
   const { url, pinUrl } = host.links();
   assert.equal(url, `${brokerUrl}/s/Room000000000000000001`);
-  const pin = /#pin=(.*)$/.exec(pinUrl)[1];
-  assert.notEqual(pin, saved.pin);
-  assert.match(pin, /^\d{6}$/);
-  assert.equal(views.at(-1).pin, pin);
+  assert.equal(/#pin=(.*)$/.exec(pinUrl)[1], saved.pin);
+  assert.equal(views.at(-1).pin, saved.pin);
+});
+
+test('start({ pin }) shares with the pin the owner chose; a pin that is not 6 digits is ignored', async t => {
+  const { host } = await setup(t);
+  await host.start({ pin: '123456' });
+  assert.ok(host.links().pinUrl.endsWith('#pin=123456'));
+  await host.stop({ end: true });
+  await host.start({ pin: '12a456' });
+  assert.ok(host.links().pinUrl.endsWith('#pin=123456'));
 });
 
 test('a room taken while it is being reopened is let go, and the next start has a new pin', async t => {
@@ -291,7 +298,7 @@ test('rights follow the pin', async t => {
   assert.equal(made.url, '/api/requests');
   assert.equal(made.body, '{"a":1}');
   assert.equal(made.headers['x-specbook-guest'], undefined);
-  // Over the link the owner may make a new pin or stop sharing, never make a new link or start the share.
+  // Over the link the owner may stop sharing, never start the share.
   assert.equal(await call(owner, 2, 'POST', '/api/share/new-link', '{}'), 403);
   assert.equal(await call(owner, 3, 'POST', '/api/share', '{}'), 403);
 
@@ -446,42 +453,6 @@ async function ownerChannel(host) {
 function sendAnyway(ch, f) {
   ch.onmessage?.({ data: JSON.stringify(f) });
 }
-
-// The body of the answer to request `id`.
-function bodyOf(ch, id) {
-  return JSON.parse(Buffer.from(ch.sent.filter(f => f.t === 'res' && f.id === id).map(f => f.data).join(''), 'base64').toString('utf8'));
-}
-
-test('New pin over the link: the caller hears the new pin and stays connected; other pinned readers are let go', async t => {
-  const states = [];
-  const { host, book } = await setup(t, { onState: v => states.push(v) });
-  await host.start();
-  const old = host.links().pinUrl.split('#pin=')[1];
-  const other = await ownerChannel(host);
-  const me = await ownerChannel(host);
-  assert.equal(await call(me, 1, 'POST', '/api/share/new-pin', '{}'), 200);
-  const { pin } = bodyOf(me, 1);
-  assert.match(pin, /^\d{6}$/);
-  assert.notEqual(pin, old);
-  assert.equal(host.links().pinUrl.split('#pin=')[1], pin);
-  assert.equal(states.at(-1).pin, pin);
-  assert.equal(other.readyState, 'closed');
-  assert.equal(me.readyState, 'open');
-  // The book server never sees the call: the host answers it itself.
-  assert.equal(book.calls.length, 0);
-  assert.equal(await call(me, 2, 'POST', '/api/requests', '{}'), 200);
-});
-
-test('a guest cannot make a new pin over the link', async t => {
-  const { host } = await setup(t);
-  await host.start();
-  const old = host.links().pinUrl;
-  const ch = await connect(host);
-  ch.frame({ t: 'hello', protocol: 3, version: '1.0.0' });
-  await until(() => ch.sent.find(f => f.t === 'welcome'), 'welcome');
-  assert.equal(await call(ch, 1, 'POST', '/api/share/new-pin', '{}'), 403);
-  assert.equal(host.links().pinUrl, old);
-});
 
 test('after newPin(), the old owner channel can make no call', async t => {
   const { host, book } = await setup(t);
