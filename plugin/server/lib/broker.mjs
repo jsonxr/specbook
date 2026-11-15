@@ -4,11 +4,9 @@ export const DEFAULT_SHARE_BROKER = 'https://specbook.jasonrowland.com';
 
 const BROKER = /^(https:\/\/[^/\s]+|http:\/\/(localhost|127\.0\.0\.1)(:\d+)?)\/?$/;
 
-// The broker for these book settings, or null when the book names one that is not a valid address. `override` is
-// SPECBOOK_SHARE_BROKER: when set, it wins over the book, so a share server under development (server/dev.mjs) serves
-// every book on this machine without touching book.json.
-export function shareBrokerOf(settings, override = '') {
-  const url = override || settings?.shareBroker;
+// The broker for these book settings, or null when the book names one that is not a valid address.
+export function shareBrokerOf(settings) {
+  const url = settings?.shareBroker;
   if (url === undefined || url === null || url === '') {
     return DEFAULT_SHARE_BROKER;
   }

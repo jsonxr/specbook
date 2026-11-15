@@ -83,17 +83,3 @@ TURN costs $0.05 a GB after the first 1,000 GB a month (shared with the Realtime
 `wrangler dev --port 8798` runs it locally; `node --test src/ publish-reader.test.mjs` runs the unit tests;
 `plugin/test/share.smoke.mjs` (from the repository root) runs a copy of this folder with the current reader published
 into it, a book server as the host, and readers on the link, end to end.
-
-### Try changes without publishing or deploying
-
-From the repository root, `node server/dev.mjs` runs this share server on `http://127.0.0.1:8787` with this
-checkout's reader (`plugin/app/`) published into `server/.dev/` (git-ignored) under the plugin's version. It
-publishes again after every save, and serves the reader uncached (`DEBUG_NO_CACHE`), so a reload of the book's page
-picks the change up; changes to `src/` reload by themselves. Rooms live in `server/.dev/state`, never at the public
-share server.
-
-Point book servers at it with `SPECBOOK_SHARE_BROKER=http://127.0.0.1:8787` in their environment: for every Claude
-Code session, put it under `env` in `~/.claude/settings.json` (or one project's `.claude/settings.local.json`), then
-start a new session. It wins over a book's `settings.shareBroker`, and `/specbook:open` restarts a book server that
-was started for another share server. Its links work on this machine only. Remove the setting (and run
-`/specbook:open`) to go back to the public share server.

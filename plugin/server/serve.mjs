@@ -49,8 +49,6 @@ const CODE = (() => {
   for (const f of files) {
     hash.update(readFileSync(f));
   }
-  // The share server it was started for, too: a server started with another SPECBOOK_SHARE_BROKER is replaced.
-  hash.update(`broker:${process.env.SPECBOOK_SHARE_BROKER ?? ''}`);
   return hash.digest('hex').slice(0, 12);
 })();
 
@@ -217,7 +215,7 @@ if (arg('detach') && (await alreadyServing()) === 'old') {
   for (let i = 0; i < 50 && !(await portFree(PORT)); i++) {
     await new Promise(r => setTimeout(r, 100));
   }
-  console.log('The server running this book was started by another copy of the plugin, or for another share server; restarted it. Please reload any open book tab.');
+  console.log('The server running this book was started by an older copy of the plugin; restarted it. Please reload any open book tab.');
 }
 
 if ((await alreadyServing()) === true) {
@@ -639,7 +637,7 @@ function sendEvent(event, data) {
 }
 function shareBroker() {
   try {
-    return shareBrokerOf(readBook().settings, process.env.SPECBOOK_SHARE_BROKER ?? '');
+    return shareBrokerOf(readBook().settings);
   } catch {
     return null;
   }
@@ -706,7 +704,7 @@ function startShare() {
   }
   const broker = shareBroker();
   if (!broker) {
-    setShare({ state: 'failed', error: process.env.SPECBOOK_SHARE_BROKER ? 'SPECBOOK_SHARE_BROKER is not a valid share server address.' : 'book.json settings.shareBroker is not a valid share server address.' });
+    setShare({ state: 'failed', error: 'book.json settings.shareBroker is not a valid share server address.' });
     return false;
   }
   hostFor(broker).start().catch(() => {});
