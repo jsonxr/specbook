@@ -327,7 +327,7 @@ const ISO = /^\d{4}-\d\d-\d\dT/;
 
 test('GET /api/book returns review, changelog and history counts, and stamps opened', async () => {
   const r = (await api('GET', '/api/book')).body;
-  assert.deepEqual(Object.keys(r).sort(), ['book', 'changelog', 'claude', 'evidence', 'historyCounts', 'media', 'review', 'viewer']);
+  assert.deepEqual(Object.keys(r).sort(), ['book', 'changelog', 'claude', 'evidence', 'historyCounts', 'media', 'owner', 'review', 'viewer']);
   assert.ok(ISO.test(r.review.opened.R1));
   assert.deepEqual(r.review.where.R1, { kind: 'req', section: 'c-d', chapter: 'c' });
   assert.deepEqual(r.historyCounts, {});
@@ -695,7 +695,7 @@ test('a guest may read the book, its data and history, and says who is reading',
   const book = await asGuest('GET', '/api/book');
   assert.equal(book.status, 200);
   assert.deepEqual(book.body.viewer, { guest: true, name: 'Ann', key: 'ann-key-0001' });
-  assert.deepEqual((await api('GET', '/api/book')).body.viewer, { guest: false });
+  assert.deepEqual((await api('GET', '/api/book')).body.viewer.guest, false);
   assert.equal((await asGuest('GET', '/data/mockups/d.html')).status, 200);
   assert.equal((await asGuest('GET', '/api/health')).body.data, undefined);
   assert.equal((await asGuest('GET', '/api/history/R1')).status, 200);
@@ -768,43 +768,132 @@ test('a guest cannot write a note on an item that does not exist', async () => {
   assert.equal((await asGuest('PUT', '/api/notes', { rev: 0, notes: { a: { ...note, item: 'NOPE' } } })).status, 400);
 });
 
-test('a share asks the newest listening tab to host, goes live on its word, and ends when that tab goes', async () => {
-  const book = freshBook();
-  book.settings = { shareBroker: 'http://share.example' };
-  writeFileSync(join(data, 'book.json'), JSON.stringify(book));
-  assert.equal((await api('POST', '/api/share', { hours: 2 })).body.error, 'no-broker');
-  book.settings = { shareBroker: 'https://share.example' };
-  writeFileSync(join(data, 'book.json'), JSON.stringify(book));
-  assert.equal((await api('POST', '/api/share', { hours: 2 })).body.error, 'no-tab');
+// One owner tab's events stream: hear(text) waits until the stream has said it.
+async function listenAs(tab) {
   const ctl = new AbortController();
-  const stream = await fetch(`${base}/api/share/events?tab=tab-one-0001`, { signal: ctl.signal });
+  const stream = await fetch(`${base}/api/share/events?tab=${tab}`, { signal: ctl.signal });
   const reader = stream.body.getReader();
   let heard = '';
-  const hear = async want => {
-    while (!heard.includes(want)) {
-      heard += new TextDecoder().decode((await reader.read()).value);
-    }
+  return {
+    get heard() { return heard; },
+    async hear(want) {
+      const deadline = Date.now() + 3000;
+      while (!heard.includes(want)) {
+        if (Date.now() > deadline) { throw new Error(`did not hear ${want}; heard ${heard}`); }
+        heard += new TextDecoder().decode((await reader.read()).value);
+      }
+    },
+    close() { ctl.abort(); },
   };
-  await hear(': listening');
-  assert.equal((await api('GET', '/api/share')).body.tabs, 1);
-  // Another site's <script src> cannot pose as a tab.
-  assert.equal((await raw('GET', '/api/share/events?tab=evil-tab-001', { host: `127.0.0.1:${port}`, 'sec-fetch-dest': 'script' })).status, 403);
-  assert.equal((await api('POST', '/api/share', { hours: 2 })).status, 202);
-  await hear('event: start');
-  assert.match(heard, /"broker":"https:\/\/share.example"/);
-  assert.match(heard, /"hours":2/);
-  assert.equal((await api('POST', '/api/share/live', { tab: 'someone-else', url: 'https://share.example/s/r#k' })).status, 409);
-  assert.equal((await api('POST', '/api/share/live', { tab: 'tab-one-0001', url: 'https://evil.example/s/r#k' })).status, 400);
-  assert.equal((await api('POST', '/api/share/live', { tab: 'tab-one-0001', url: 'https://share.example/s/room#key', expiresAt: 'later' })).status, 200);
-  assert.equal((await api('POST', '/api/share/guests', { tab: 'tab-one-0001', guests: ['Ann'] })).status, 200);
-  const live = (await api('GET', '/api/share')).body;
-  assert.deepEqual([live.state, live.url, live.guests], ['live', 'https://share.example/s/room#key', ['Ann']]);
-  // A guest can neither see nor change the share.
-  assert.equal((await asGuest('GET', '/api/share')).status, 403);
-  assert.equal((await asGuest('POST', '/api/share/stop', {})).status, 403);
-  ctl.abort();
-  for (let i = 0; i < 50 && (await api('GET', '/api/share')).body.state !== 'idle'; i++) {
+}
+async function idle() {
+  for (let i = 0; i < 50 && (await api('GET', '/api/share')).body.tabs !== 0; i++) {
     await new Promise(r => setTimeout(r, 20));
   }
-  assert.equal((await api('GET', '/api/share')).body.state, 'idle');
+}
+function sharedBook(settings) {
+  const book = freshBook();
+  book.settings = { shareBroker: 'https://share.example', ...settings };
+  writeFileSync(join(data, 'book.json'), JSON.stringify(book));
+}
+const ROOM = { room: 'room-0000000000001', hostToken: 'token-0000000000000000001', secret: 'k'.repeat(43), expiresAt: '2099-01-01T00:00:00.000Z' };
+const liveBody = (tab, room = ROOM) => ({ tab, ...room, url: `https://share.example/s/${room.room}#${room.secret}` });
+
+test('an owner tab shares as soon as it listens, and a reopened tab gets the same room back', async () => {
+  sharedBook();
+  const one = await listenAs('tab-one-0001');
+  await one.hear('event: start');
+  assert.match(one.heard, /"broker":"https:\/\/share.example"/);
+  assert.match(one.heard, /"room":null/);
+  assert.equal((await api('POST', '/api/share/live', liveBody('someone-else'))).status, 409);
+  assert.equal((await api('POST', '/api/share/live', { ...liveBody('tab-one-0001'), url: 'https://evil.example/s/r#k' })).status, 400);
+  assert.equal((await api('POST', '/api/share/live', liveBody('tab-one-0001'))).status, 200);
+  assert.equal((await api('POST', '/api/share/guests', { tab: 'tab-one-0001', guests: ['Ann'] })).status, 200);
+  const live = (await api('GET', '/api/share')).body;
+  assert.deepEqual([live.state, live.url, live.guests, live.room], ['live', `https://share.example/s/${ROOM.room}#${ROOM.secret}`, ['Ann'], true]);
+  // A guest can neither see nor change the share.
+  assert.equal((await asGuest('GET', '/api/share')).status, 403);
+  assert.equal((await asGuest('POST', '/api/share/new-link', {})).status, 403);
+  // Another site's <script src> cannot pose as a tab.
+  assert.equal((await raw('GET', '/api/share/events?tab=evil-tab-001', { host: `127.0.0.1:${port}`, 'sec-fetch-dest': 'script' })).status, 403);
+  one.close();
+  await idle();
+  const two = await listenAs('tab-two-0002');
+  await two.hear('event: start');
+  assert.match(two.heard, new RegExp(`"room":\\{"room":"${ROOM.room}","hostToken":"${ROOM.hostToken}","secret":"${ROOM.secret}"`));
+  assert.equal((await api('GET', '/api/share')).body.url, `https://share.example/s/${ROOM.room}#${ROOM.secret}`);
+  await api('POST', '/api/share/stop', {});
+  two.close();
+  await idle();
+});
+
+test('New link ends the room and starts a new one', async () => {
+  sharedBook();
+  const tab = await listenAs('tab-new-0001');
+  await tab.hear('event: start');
+  await api('POST', '/api/share/live', liveBody('tab-new-0001'));
+  assert.equal((await api('POST', '/api/share/new-link', {})).status, 202);
+  await tab.hear('event: end-room');
+  await tab.hear('"room":null}');
+  assert.equal((await api('GET', '/api/share')).body.room, false);
+  await api('POST', '/api/share/stop', {});
+  tab.close();
+  await idle();
+});
+
+test('Stop sharing lasts until the book is reopened', async () => {
+  sharedBook();
+  const tab = await listenAs('tab-stop-0001');
+  await tab.hear('event: start');
+  await api('POST', '/api/share/live', liveBody('tab-stop-0001'));
+  await api('POST', '/api/share/stop', {});
+  await tab.hear('event: stop');
+  const view = (await api('GET', '/api/share')).body;
+  assert.deepEqual([view.state, view.stopped, view.room], ['idle', true, false]);
+  tab.close();
+  await idle();
+  const again = await listenAs('tab-stop-0002');
+  await again.hear('event: start');
+  assert.equal((await api('GET', '/api/share')).body.stopped, false);
+  await api('POST', '/api/share/stop', {});
+  again.close();
+  await idle();
+});
+
+test('settings.share false keeps a book from sharing until asked', async () => {
+  sharedBook({ share: false });
+  const tab = await listenAs('tab-off-0001');
+  await tab.hear(': listening');
+  await new Promise(r => setTimeout(r, 150));
+  assert.doesNotMatch(tab.heard, /event: start/);
+  assert.equal((await api('POST', '/api/share', {})).status, 202);
+  await tab.hear('event: start');
+  await api('POST', '/api/share/stop', {});
+  tab.close();
+  await idle();
+});
+
+test('per-note saves never drop another\'s change, and say who changed a note last', async () => {
+  const a = await api('PUT', '/api/notes', { changes: { own: note } });
+  assert.equal(a.status, 200);
+  const b = await asGuest('PUT', '/api/notes', { changes: { hers: { ...note, text: 'from Ann' } } });
+  assert.equal(b.status, 200);
+  const c = await api('PUT', '/api/notes', { changes: { hers: { ...note, text: 'tidied' } } });
+  assert.equal(c.status, 200);
+  const notes = readReview(data).notes;
+  assert.equal(notes.own.text, 'hi');
+  assert.equal(notes.hers.text, 'tidied');
+  assert.equal(notes.hers.author, 'Ann');
+  assert.equal(typeof notes.hers.lastBy, 'string');
+  assert.ok(c.body.rev > a.body.rev);
+  assert.equal((await api('PUT', '/api/notes', { changes: [] })).status, 400);
+  assert.equal((await asGuest('PUT', '/api/notes', { changes: { own: null } })).status, 200);
+  assert.ok(readReview(data).notes.own);
+});
+
+test('the book names its owner for guests', async () => {
+  const book = (await api('GET', '/api/book')).body;
+  assert.equal(typeof book.owner.name, 'string');
+  assert.ok(book.owner.name.length > 0);
+  assert.equal((await asGuest('GET', '/api/book')).body.owner.name, book.owner.name);
 });

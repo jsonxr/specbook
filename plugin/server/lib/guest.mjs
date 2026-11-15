@@ -17,7 +17,7 @@ export function guestMay(method, path) {
 }
 
 // Fields only the server writes on a draft; a page's copy of the note never carries them.
-export const SERVER_FIELDS = ['causes', 'closedFor', 'reply', 'from', 'author', 'authorKey'];
+export const SERVER_FIELDS = ['causes', 'closedFor', 'reply', 'from', 'author', 'authorKey', 'lastBy'];
 
 const KEY = /^[A-Za-z0-9_-]{8,64}$/;
 
@@ -115,6 +115,44 @@ export function mergeGuestNotes(stored, sent, guest) {
     }
     out[id].author = guest.name;
     out[id].authorKey = guest.key;
+  }
+  return out;
+}
+
+// The notes to store after a per-note save (live sharing): `changes` maps a note id to its new draft (already cleaned)
+// or null to delete it. `writer` is { guest, name, key? }. The owner may change any draft; a guest only their own, or a
+// new id, which becomes theirs. A note past draft (sent to Claude, answered) is never changed. Saves are applied one
+// after another as they arrive, so a change to one note never drops another's: the later change to the same note
+// wins, and `lastBy` says who made it.
+export function applyNoteChanges(stored, changes, writer) {
+  const out = { ...stored };
+  for (const [id, next] of Object.entries(changes)) {
+    if (id === '__proto__') {
+      continue;
+    }
+    const was = Object.hasOwn(stored, id) ? stored[id] : null;
+    if (was && was.status !== 'draft') {
+      continue;
+    }
+    if (writer.guest && was && was.authorKey !== writer.key) {
+      continue;
+    }
+    if (next === null) {
+      delete out[id];
+      continue;
+    }
+    const note = { ...next, status: 'draft' };
+    for (const k of SERVER_FIELDS) {
+      if (was && was[k] !== undefined) {
+        note[k] = was[k];
+      }
+    }
+    if (writer.guest) {
+      note.author = writer.name;
+      note.authorKey = writer.key;
+    }
+    note.lastBy = writer.name;
+    out[id] = note;
   }
   return out;
 }

@@ -14,7 +14,7 @@
 import { createServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { createRequire } from 'node:module';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createReadStream, existsSync, readFileSync, readdirSync, realpathSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs';
 import { dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,7 +28,7 @@ import { findRequirement, findSection, listSections, setUserStage } from './lib/
 import { ensureIgnores, findProjectRoot } from './lib/gitignore.mjs';
 import { readJson, writeJsonAtomic } from './lib/json-file.mjs';
 import { shareBrokerOf } from './lib/broker.mjs';
-import { SERVER_FIELDS, checkGuestNotes, guestMay, guestOf, mergeGuestNotes, reviewForGuest } from './lib/guest.mjs';
+import { SERVER_FIELDS, applyNoteChanges, checkGuestNotes, guestMay, guestOf, mergeGuestNotes, reviewForGuest } from './lib/guest.mjs';
 
 const SpecModel = createRequire(import.meta.url)('../app/model.js');
 
@@ -480,11 +480,12 @@ function mergeNotes(stored, sent) {
   return out;
 }
 
-// Sharing (/specbook:share): the owner's open book tabs each hold /api/share/events; a share asks one of them to
-// host it (app/host.js), which reports back when the link is live and when it ends. Nothing about a share is written
-// to disk: it lives as long as the tab that hosts it.
+// Sharing. The book is shared whenever an owner tab is open (unless book.json says settings.share: false): every
+// owner tab holds /api/share/events, and the one listening (one per book, by a Web Lock in app/host.js) is asked to
+// host. That tab does the WebRTC; this server only remembers its room (id, host token, link key) in memory, so a
+// reloaded or reopened tab reuses it and the link lasts as long as this server runs. Nothing is written to disk.
 const shareTabs = new Map(); // tab id -> its events response, newest last
-let share = { state: 'idle' };
+let share = { state: 'idle', room: null, stopped: false };
 function sendEvent(tab, event, data) {
   const res = shareTabs.get(tab);
   if (res) {
@@ -494,9 +495,9 @@ function sendEvent(tab, event, data) {
 function shareView() {
   // A tab asked to host that has not answered in 30 seconds is not going to.
   if (share.state === 'starting' && Date.now() - share.at > 30000) {
-    share = { state: 'idle', error: 'The book tab did not start the share.' };
+    share = { ...share, state: 'idle', error: 'The book tab did not start the share.' };
   }
-  return { state: share.state, url: share.url ?? null, expiresAt: share.expiresAt ?? null, guests: share.guests ?? [], error: share.error ?? null, tabs: shareTabs.size };
+  return { state: share.state, url: share.room?.url ?? null, expiresAt: share.room?.expiresAt ?? null, guests: share.guests ?? [], error: share.error ?? null, tabs: shareTabs.size, room: !!share.room, stopped: !!share.stopped };
 }
 function shareBroker() {
   try {
@@ -505,21 +506,80 @@ function shareBroker() {
     return null;
   }
 }
+function shareOn() {
+  try {
+    return readBook().settings?.share !== false;
+  } catch {
+    return false;
+  }
+}
+// Asks a tab to host: with the remembered room when there is one, so the link stays the same.
+function askToHost(tab) {
+  const broker = shareBroker();
+  if (!broker || !shareTabs.has(tab)) {
+    return false;
+  }
+  share = { ...share, state: 'starting', tab, at: Date.now(), error: null };
+  sendEvent(tab, 'start', { hours: 24, broker, room: share.room ? { room: share.room.room, hostToken: share.room.hostToken, secret: share.room.secret, url: share.room.url, expiresAt: share.room.expiresAt } : null });
+  return true;
+}
+// Ends the remembered room at the share server (best effort: it also ends by itself when it expires).
+function endRoomAtBroker(room) {
+  const broker = shareBroker();
+  if (!room || !broker) {
+    return Promise.resolve();
+  }
+  return fetch(`${broker}/api/rooms/${encodeURIComponent(room.room)}/end`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token: room.hostToken }),
+    signal: AbortSignal.timeout(2000),
+  }).catch(() => {});
+}
 const SHARE_TAB = /^[A-Za-z0-9_-]{8,64}$/;
+const ROOM_ID = /^[A-Za-z0-9_-]{16,64}$/;
 
-// While a share is live, its host tab hears when the book or its notes change on disk, and tells the guests.
+// The owner's first name, which guests see on the owner's face and notes: git's user.name for the project.
+const OWNER_NAME = (() => {
+  try {
+    const name = execFileSync('git', ['config', 'user.name'], { cwd: DATA, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000 }).trim();
+    return cleanOwnerName(name.split(/\s+/)[0]);
+  } catch {
+    return 'Owner';
+  }
+})();
+function cleanOwnerName(name) {
+  const s = String(name ?? '').replace(/[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g, '').trim().slice(0, 40);
+  return s || 'Owner';
+}
+
+// The book or its notes changed on disk: the owner's listening tab hears it at once (it reloads, and passes it on to
+// the guests while it hosts).
 let changeTimer = null;
 try {
   watch(DATA, { recursive: true }, (_event, file) => {
     const f = String(file ?? '').split(sep).join('/');
-    if (share.state !== 'live' || !/^(book\.json|review\.json|history\.json|mockups\/|evidence\/|media\/)/.test(f)) {
+    if (!/^(book\.json|review\.json|history\.json|mockups\/|evidence\/|media\/)/.test(f)) {
       return;
     }
     clearTimeout(changeTimer);
-    changeTimer = setTimeout(() => sendEvent(share.tab, 'changed', {}), 200);
+    changeTimer = setTimeout(() => {
+      for (const tab of shareTabs.keys()) {
+        sendEvent(tab, 'changed', {});
+      }
+    }, 50);
   });
 } catch {
-  // no file watching here: guests still see changes on their next poll
+  // no file watching here: pages still see changes on their next poll
+}
+
+// Stopping this server ends its share's room, so the link stops working with it.
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  process.on(signal, () => {
+    const room = share.room;
+    share = { state: 'idle', room: null, stopped: false };
+    endRoomAtBroker(room).finally(() => process.exit(0));
+  });
 }
 
 const server = createServer(async (req, res) => {
@@ -570,7 +630,8 @@ const server = createServer(async (req, res) => {
         changelog: history.changelog,
         historyCounts: Object.fromEntries(Object.entries(history.items).map(([key, entries]) => [key, entries.length])),
         claude: claudeState(DATA),
-        viewer: guest ? { guest: true, name: guest.name, key: guest.key } : { guest: false },
+        viewer: guest ? { guest: true, name: guest.name, key: guest.key } : { guest: false, name: OWNER_NAME },
+        owner: { name: OWNER_NAME },
       });
       return;
     }
@@ -590,15 +651,20 @@ const server = createServer(async (req, res) => {
       res.write(': listening\n\n');
       shareTabs.delete(tab);
       shareTabs.set(tab, res);
+      // An opened (or reloaded) book shares again, even after Stop sharing.
+      share = { ...share, stopped: false };
+      if (shareOn()) {
+        askToHost(tab);
+      }
       const beat = setInterval(() => res.write(': beat\n\n'), 25000);
       req.on('close', () => {
         clearInterval(beat);
         if (shareTabs.get(tab) === res) {
           shareTabs.delete(tab);
         }
-        // The hosting tab closed: the share is over.
-        if (share.tab === tab && shareTabs.get(tab) !== res && !shareTabs.has(tab)) {
-          share = { state: 'idle' };
+        // The hosting tab closed: nobody hosts until a tab opens again. The room is kept for it.
+        if (share.tab === tab && !shareTabs.has(tab)) {
+          share = { ...share, state: 'idle', tab: null, guests: [] };
         }
       });
       return;
@@ -608,14 +674,12 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (path === '/api/share' && req.method === 'POST') {
-      const body = await readJsonBody(req);
-      const broker = shareBroker();
       const view = shareView();
       if (view.state !== 'idle') {
         json(res, 200, view);
         return;
       }
-      if (!broker) {
+      if (!shareBroker()) {
         json(res, 409, { error: 'no-broker' });
         return;
       }
@@ -623,23 +687,38 @@ const server = createServer(async (req, res) => {
         json(res, 409, { error: 'no-tab' });
         return;
       }
-      const tab = [...shareTabs.keys()].at(-1);
-      const hours = Math.min(24, Math.max(1, Number(body.hours) || 8));
-      share = { state: 'starting', tab, at: Date.now() };
-      sendEvent(tab, 'start', { hours, broker });
+      share = { ...share, stopped: false };
+      askToHost([...shareTabs.keys()].at(-1));
       json(res, 202, shareView());
       return;
     }
-    const shareMsg = /^\/api\/share\/(live|failed|ended|guests|stop)$/.exec(path);
+    const shareMsg = /^\/api\/share\/(live|failed|ended|guests|stop|new-link)$/.exec(path);
     if (shareMsg && req.method === 'POST') {
       const body = await readJsonBody(req);
       const kind = shareMsg[1];
       if (kind === 'stop') {
+        // The tab ends the room at the share server; the next opened book makes a new one.
         if (share.tab) {
           sendEvent(share.tab, 'stop', {});
+        } else {
+          endRoomAtBroker(share.room);
         }
-        share = { state: 'idle' };
+        share = { state: 'idle', room: null, stopped: true, tab: null };
         json(res, 200, shareView());
+        return;
+      }
+      if (kind === 'new-link') {
+        const tab = share.tab ?? [...shareTabs.keys()].at(-1);
+        if (!tab) {
+          endRoomAtBroker(share.room);
+          share = { ...share, room: null };
+          json(res, 409, { error: 'no-tab' });
+          return;
+        }
+        sendEvent(tab, 'end-room', {});
+        share = { ...share, room: null, stopped: false };
+        askToHost(tab);
+        json(res, 202, shareView());
         return;
       }
       if (body.tab !== share.tab) {
@@ -648,14 +727,17 @@ const server = createServer(async (req, res) => {
       }
       if (kind === 'live') {
         const broker = shareBroker();
-        if (typeof body.url !== 'string' || !broker || !body.url.startsWith(`${broker}/s/`)) {
+        const ok = broker && ROOM_ID.test(body.room ?? '') && typeof body.hostToken === 'string' && /^[A-Za-z0-9_-]{43}$/.test(body.secret ?? '') &&
+          body.url === `${broker}/s/${body.room}#${body.secret}`;
+        if (!ok) {
           throw badRequest('bad-share');
         }
-        share = { ...share, state: 'live', url: body.url, expiresAt: String(body.expiresAt ?? ''), guests: [] };
+        share = { ...share, state: 'live', room: { room: body.room, hostToken: body.hostToken, secret: body.secret, url: body.url, expiresAt: String(body.expiresAt ?? '') }, guests: [] };
       } else if (kind === 'guests') {
         share = { ...share, guests: Array.isArray(body.guests) ? body.guests.filter(g => typeof g === 'string').slice(0, 50).map(g => g.slice(0, 40)) : [] };
       } else {
-        share = { state: 'idle', error: kind === 'failed' ? String(body.error ?? 'The share could not start.').slice(0, 300) : null };
+        // The tab could not open a room, or its room is gone (expired or ended): the next start makes a new one.
+        share = { ...share, state: 'idle', room: null, tab: null, error: kind === 'failed' ? String(body.error ?? 'The share could not start.').slice(0, 300) : null };
       }
       json(res, 200, shareView());
       return;
@@ -681,6 +763,33 @@ const server = createServer(async (req, res) => {
     }
     if (path === '/api/notes' && req.method === 'PUT') {
       const body = await readJsonBody(req);
+      // A per-note save: only the notes this page changed (null deletes), applied on top of what is stored now.
+      if (body.changes !== undefined) {
+        if (!isPlain(body.changes)) {
+          json(res, 400, { error: 'bad-notes' });
+          return;
+        }
+        if (claudeState(DATA).state === 'revising') {
+          json(res, 409, { error: 'locked' });
+          return;
+        }
+        const snap = currentSnapshot(DATA);
+        const review = readReview(DATA);
+        const keys = new Set([...Object.keys(snap.items), ...Object.keys(review.accepted)]);
+        const changes = {};
+        for (const [id, n] of Object.entries(body.changes)) {
+          if (id !== '__proto__') {
+            changes[id] = n === null ? null : cleanDraft(n, keys);
+          }
+        }
+        const writer = guest ? { guest: true, name: guest.name, key: guest.key } : { guest: false, name: OWNER_NAME };
+        const next = applyNoteChanges(review.notes, changes, writer);
+        if (guest) {
+          checkGuestNotes(next, guest);
+        }
+        json(res, 200, writeReviewNotes(DATA, next, review.rev));
+        return;
+      }
       const notes = body.notes;
       if (!notes || typeof notes !== 'object' || Array.isArray(notes) || typeof body.rev !== 'number') {
         json(res, 400, { error: 'bad-notes' });
