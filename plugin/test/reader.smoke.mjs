@@ -35,6 +35,8 @@ cpSync(join(PLUGIN, 'starter'), data, { recursive: true });
   const reqOf = id => b.chapters.flatMap(c => c.sections).flatMap(s => s.requirements || []).find(r => r.id === id);
   reqOf('TOD-LGXT').screens = [{ screen: 'SCR-3WRX', state: 'empty' }];
   reqOf('FLT-36VG').screens = [{ screen: 'SCR-Y6S2' }];
+  // The filter bar outlined where the filters section shows it.
+  b.chapters.find(c => c.id === 'filters').sections.find(s => s.id === 'bar').shows = [{ state: 'SCR-3WRX.activeonly', highlight: 'SCR-Y6S2' }];
   writeFileSync(bookFile, JSON.stringify(b, null, 2));
 }
 
@@ -1775,6 +1777,11 @@ try {
     if (note.item !== `${BAR}.all` || note.section !== 'todos-list' || note.target !== LIST) {
       throw new Error(`the note is not on the filter bar's state: ${JSON.stringify(note)}`);
     }
+    // The element Claude is pointed at is in the filter bar's own picture, by a selector from that picture's top.
+    const el = note.pin?.element;
+    if (el?.mockup !== `mockups/screens/${BAR}/all.html` || !/^div\.seg\.filters\b/.test(el?.selector || '') || el.selector.includes('sb-component')) {
+      throw new Error(`the note's element is not described in the filter bar's picture: ${JSON.stringify(note.pin)}`);
+    }
     // Deleted again, so the checks that count notes are not changed.
     const on = await page.evaluate(() => {
       const x = [...document.querySelectorAll('.sticky')].find(e => e.querySelector('textarea').value === 'Make the filters bigger');
@@ -1785,6 +1792,23 @@ try {
     await page.waitForSelector('.sticky.selected:not(.editing)', { timeout: 3000 });
     await page.keyboard.press('Backspace');
     await waitFor(() => !Object.values(readNotesFile().notes).some(n => n.text === 'Make the filters bigger'), 3000, 'the note to leave review.json');
+  });
+
+  await check('a highlight outlines the component in the section\'s picture, and only there', async () => {
+    await open();
+    const seen = await page.evaluate(bar => {
+      const host = document.querySelector('#filters-bar figure.state[data-key="SCR-3WRX.activeonly"] .mock');
+      const comp = host && host.shadowRoot.querySelector(`.sb-component[data-key="${bar}.active"]`);
+      const list = [...document.querySelectorAll('#todos-list figure.state .mock')].map(h => h.shadowRoot.querySelector('.sb-component')).find(Boolean);
+      return {
+        hl: !!comp && comp.classList.contains('sb-hl'),
+        outline: comp ? getComputedStyle(comp.firstElementChild).outlineStyle : '',
+        elsewhere: !!list && list.classList.contains('sb-hl'),
+      };
+    }, BAR);
+    if (!seen.hl || seen.outline === 'none' || seen.elsewhere) {
+      throw new Error(`the highlight: ${JSON.stringify(seen)}`);
+    }
   });
 
   await check('a requirement about a screen shows a chip linking to it', async () => {
@@ -1807,10 +1831,10 @@ try {
         const r = await route.fetch();
         const j = await r.json();
         const todos = j.book.screens.find(s => s.id === 'SCR-3WRX');
-        todos.states.push({ id: 'mirror', name: 'Mirror', when: { role: 'user' }, sameAs: 'empty' }, { id: 'gone', name: 'Gone', when: { role: 'user' }, absent: 'Never seen by anyone.' });
+        todos.states.push({ id: 'mirror', name: 'Mirror', when: { role: 'anyone' }, sameAs: 'empty' }, { id: 'gone', name: 'Gone', when: { role: 'user' }, absent: 'Never seen by anyone.' });
         const add = j.book.chapters.find(c => c.id === 'todos').sections.find(s => s.id === 'add');
         add.shows = [...add.shows, { state: 'SCR-3WRX.mirror' }, { state: 'SCR-3WRX.gone' }, { state: 'SCR-ZZZZ.none' }];
-        add.requirements[0].screens = [{ screen: 'SCR-ZZZZ' }, { screen: 'SCR-3WRX', state: 'nope' }];
+        add.requirements[0].screens = [{ screen: 'SCR-ZZZZ' }, { screen: 'SCR-3WRX', state: 'nope' }, null, {}];
         j.media = [...(j.media || []), 'media/screens/SCR-3WRX.typing.png'];
         await route.fulfill({ response: r, json: j });
       });
@@ -1824,20 +1848,22 @@ try {
         const mirror = fig('SCR-3WRX.mirror');
         return {
           mirror: mirror.querySelector('figcaption').textContent,
+          mirrorRole: mirror.querySelector('figcaption .role')?.textContent,
           mirrorDraws: mirror.querySelector('.mock')?.dataset.mockup,
           gone: fig('SCR-3WRX.gone').textContent,
           goneMock: !!fig('SCR-3WRX.gone').querySelector('.mock'),
           missing: fig('SCR-ZZZZ.none')?.textContent || '',
           shot: fig('SCR-3WRX.typing').querySelector('img.shot')?.getAttribute('src'),
-          chips: [...document.querySelectorAll('#todos-add .reqs li a.screen-chip')].map(a => [a.textContent, a.classList.contains('missing')]),
+          chips: [...document.querySelectorAll('#todos-add .reqs li .screen-chip')].map(a => [a.textContent, a.classList.contains('missing'), a.getAttribute('href')]),
         };
       });
       const bad = [];
+      if (seen.mirrorRole !== 'Anyone') { bad.push(`the anyone role reads ${JSON.stringify(seen.mirrorRole)}`); }
       if (!seen.mirror.includes('TodosScreen · Mirror') || !seen.mirror.includes('Same as Empty') || seen.mirrorDraws !== 'mockups/screens/SCR-3WRX/empty.html') { bad.push(`sameAs: ${seen.mirror} drawing ${seen.mirrorDraws}`); }
       if (!seen.gone.includes('Never seen by anyone.') || seen.goneMock) { bad.push(`absent: ${seen.gone}`); }
       if (!seen.missing.includes('Missing')) { bad.push(`a missing state: ${JSON.stringify(seen.missing)}`); }
       if (seen.shot !== '/data/media/screens/SCR-3WRX.typing.png') { bad.push(`screenshot: ${seen.shot}`); }
-      if (JSON.stringify(seen.chips) !== JSON.stringify([['SCR-ZZZZ · missing', true], ['TodosScreen · nope · missing', true]])) { bad.push(`chips: ${JSON.stringify(seen.chips)}`); }
+      if (JSON.stringify(seen.chips) !== JSON.stringify([['SCR-ZZZZ · missing', true, '#screen/SCR-ZZZZ'], ['TodosScreen · nope · missing', true, '#screen/SCR-3WRX.nope'], ['Missing screen', true, null], ['Missing screen', true, null]])) { bad.push(`chips: ${JSON.stringify(seen.chips)}`); }
       if (pageErrors.length) { bad.push(`page errors: ${pageErrors.join('; ')}`); }
       if (bad.length) { throw new Error(bad.join('; ')); }
     } finally {

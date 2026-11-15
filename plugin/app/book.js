@@ -111,7 +111,8 @@
   function roleInfo(id) {
     var roles = state.book.roles || [];
     for (var i = 0; i < roles.length; i++) { if (roles[i].id === id) { return roles[i]; } }
-    return { id: id, label: id, color: '#c9ccd2' };
+    // "anyone" covers every role, whether or not the book defines it.
+    return { id: id, label: id === 'anyone' ? 'Anyone' : id, color: '#c9ccd2' };
   }
 
   // The book's screens and states by id and key (SpecModel.screenIndex), made again when the book is fetched again.
@@ -963,14 +964,17 @@
   // The chips under a requirement for the screens it is about, "<name>" or "<name> · <state name>", each linking to
   // the Screens view. One naming a screen or state that is not in the book says so.
   function screenChips(req) {
-    var list = (req && req.screens) || [];
+    var list = req && Array.isArray(req.screens) ? req.screens : [];
     if (!list.length) { return ''; }
     var ix = screens();
     return '<div class="screen-chips">' + list.map(function (e) {
-      var sid = e && e.screen;
-      var key = e && e.state ? window.SpecModel.stateKey(sid, e.state) : sid;
+      if (!e || typeof e !== 'object' || typeof e.screen !== 'string' || !e.screen) {
+        return '<span class="screen-chip missing">Missing screen</span>';
+      }
+      var sid = e.screen;
+      var key = e.state ? window.SpecModel.stateKey(sid, e.state) : sid;
       var sc = hasOwn(ix.screens, sid) ? ix.screens[sid] : null;
-      var found = e && e.state ? hasOwn(ix.states, key) : !!sc;
+      var found = e.state ? hasOwn(ix.states, key) : !!sc;
       var text = !sc ? String(sid) + ' · missing' : found ? screenLabel(key) : sc.name + ' · ' + e.state + ' · missing';
       return '<a class="screen-chip' + (found ? '' : ' missing') + '" href="#screen/' + esc(key) + '">' + esc(text) + '</a>';
     }).join('') + '</div>';
@@ -1750,10 +1754,15 @@
     return null;
   }
   // The mockup element under a point inside a screen, so Claude gets the exact element and not only the screen:
-  // { mockup, selector, text, html }. Null outside a mockup.
+  // { mockup, selector, text, html }. Null outside a mockup. Inside a placed component it names the component state's
+  // own picture, with the selector from that picture's top (the reader's wrapper is in no file).
   function mockupElementAt(t, clientX, clientY) {
     var hit = mockupHit(t, clientX, clientY);
-    return hit ? describeElement(hit.e, hit.root, hit.host.dataset.mockup) : null;
+    if (!hit) { return null; }
+    var comp = hit.e.closest('.sb-component[data-key]');
+    var drawn = comp ? window.SpecModel.drawnState(state.book, comp.dataset.key) : null;
+    if (comp && drawn && drawn.state.mockup) { return describeElement(hit.e, comp, drawn.state.mockup); }
+    return describeElement(hit.e, hit.root, hit.host.dataset.mockup);
   }
   // The item a note dropped at a point of target t goes on: the innermost component placed in the picture there (its
   // state key), else the target's own item.
