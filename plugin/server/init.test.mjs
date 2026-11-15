@@ -42,6 +42,15 @@ test('the starter book has screens, no frames, and valid screens', () => {
   const M = createRequire(import.meta.url)('../app/model.js');
   assert.equal(M.screenProblem(book, exists, mockups), null);
   const bar = book.screens.find(s => s.name === 'FiltersBar');
+  for (const s of book.screens) {
+    assert.ok(Array.isArray(s.variables), s.id);
+    for (const st of s.states) {
+      assert.equal(st.name, undefined, st.id);
+      const cap = M.stateCaption(book, s.id + '.' + st.id);
+      assert.ok(cap.roles.length > 0 || cap.text !== '', st.id);
+    }
+  }
+  assert.equal(book.screens.find(s => s.name === 'TodosScreen').undrawn.length, 1);
   const todos = book.screens.find(s => s.name === 'TodosScreen');
   const list = todos.states.find(s => s.id === 'list');
   assert.equal(list.change, 'change');

@@ -684,8 +684,7 @@
   }
 
   // What is wrong with one `when` on a screen, in words after `who` ("State X.y"), or null. Roles are always checked; the
-  // rest only on a screen that lists its variables (one that does not may still hold free words in `when`). `vars` is
-  // the screen's resolved variables, or null when it lists none.
+  // rest against `vars`, the screen's resolved variables (a screen that lists none is held to its default list).
   function whenProblem(book, screen, vars, who, when, mayList) {
     var w = when || {};
     var roles = rolesOf(book).map(function (r) { return r.id; });
@@ -699,7 +698,6 @@
         return who + ' names the role ' + rs[r] + ', which the book does not define';
       }
     }
-    if (!vars) { return null; }
     var keys = Object.keys(w);
     for (var k = 0; k < keys.length; k++) {
       var v = null;
@@ -715,18 +713,22 @@
 
   // The first way a screen's variables, its states' `when`s and its `undrawn` entries are invalid, or null.
   function variableProblem(book, screen, reqIds) {
-    var vars = null;
-    if (Array.isArray(screen.variables)) {
-      vars = [];
-      for (var i = 0; i < screen.variables.length; i++) {
-        var e = screen.variables[i];
-        var v = resolveVariable(book, e);
-        if (!v) {
-          var id = e && typeof e === 'object' ? e.id : e;
-          return 'Screen ' + screen.id + ' uses the variable ' + id + ', which is not declared';
-        }
-        vars.push(v);
+    if (screen.variables !== undefined && !Array.isArray(screen.variables)) {
+      return 'Screen ' + screen.id + '\'s variables is not a list';
+    }
+    var vars = [];
+    var list = variableIds(screen);
+    for (var i = 0; i < list.length; i++) {
+      var e = list[i];
+      var v = resolveVariable(book, e);
+      if (!v) {
+        var id = e && typeof e === 'object' ? e.id : e;
+        return 'Screen ' + screen.id + ' uses the variable ' + id + ', which is not declared';
       }
+      for (var o = 0; o < vars.length; o++) {
+        if (vars[o].id === v.id) { return 'Screen ' + screen.id + ' lists the variable ' + v.id + ' twice'; }
+      }
+      vars.push(v);
     }
     var states = screen.states || [];
     var drawn = [];
@@ -735,7 +737,7 @@
       var key = stateKey(screen.id, st.id);
       var p = whenProblem(book, screen, vars, 'State ' + key, st.when, !!(st.absent || st.sameAs));
       if (p) { return p; }
-      if (vars && st.mockup) {
+      if (st.mockup) {
         for (var d = 0; d < drawn.length; d++) {
           if (sameValue(drawn[d].when || {}, st.when || {})) {
             return 'States ' + stateKey(screen.id, drawn[d].id) + ' and ' + key + ' have the same when';

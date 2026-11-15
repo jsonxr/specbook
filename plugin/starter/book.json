@@ -15,6 +15,62 @@
       "color": "#9cc3ff"
     }
   ],
+  "variables": [
+    {
+      "id": "data",
+      "label": "List",
+      "values": [
+        {
+          "id": "some",
+          "label": "Some to do"
+        },
+        {
+          "id": "alldone",
+          "label": "All done"
+        },
+        {
+          "id": "empty",
+          "label": "Empty"
+        }
+      ]
+    },
+    {
+      "id": "filter",
+      "label": "Filter",
+      "values": [
+        {
+          "id": "all",
+          "label": "All"
+        },
+        {
+          "id": "active",
+          "label": "Active"
+        },
+        {
+          "id": "completed",
+          "label": "Completed"
+        }
+      ]
+    },
+    {
+      "id": "edit",
+      "label": "Todo",
+      "values": [
+        {
+          "id": "none",
+          "label": "Resting"
+        },
+        {
+          "id": "editing",
+          "label": "Editing"
+        },
+        {
+          "id": "swiped",
+          "label": "Swiped"
+        }
+      ]
+    }
+  ],
   "mockupCss": "mockups/phone.css",
   "chapters": [
     {
@@ -293,10 +349,29 @@
       "id": "SCR-3WRX",
       "name": "TodosScreen",
       "kind": "screen",
+      "variables": [
+        "role",
+        "data",
+        "filter",
+        {
+          "id": "field",
+          "label": "Field",
+          "values": [
+            {
+              "id": "idle",
+              "label": "Empty field"
+            },
+            {
+              "id": "typing",
+              "label": "Typing"
+            }
+          ]
+        },
+        "edit"
+      ],
       "states": [
         {
           "id": "list",
-          "name": "List",
           "when": {
             "role": "user"
           },
@@ -306,52 +381,64 @@
         },
         {
           "id": "empty",
-          "name": "Empty",
           "when": {
-            "role": "user"
+            "role": "user",
+            "data": "empty"
           },
           "mockup": "mockups/screens/SCR-3WRX/empty.html"
         },
         {
           "id": "typing",
-          "name": "Typing",
           "when": {
-            "role": "user"
+            "role": "user",
+            "field": "typing"
           },
           "mockup": "mockups/screens/SCR-3WRX/typing.html"
         },
         {
           "id": "alldone",
-          "name": "All done",
           "when": {
-            "role": "user"
+            "role": "user",
+            "data": "alldone"
           },
           "mockup": "mockups/screens/SCR-3WRX/alldone.html"
         },
         {
           "id": "editing",
-          "name": "Editing",
           "when": {
-            "role": "user"
+            "role": "user",
+            "edit": "editing"
           },
           "mockup": "mockups/screens/SCR-3WRX/editing.html"
         },
         {
           "id": "swiped",
-          "name": "Swiped",
           "when": {
-            "role": "user"
+            "role": "user",
+            "edit": "swiped"
           },
           "mockup": "mockups/screens/SCR-3WRX/swiped.html"
         },
         {
           "id": "activeonly",
-          "name": "Active only",
           "when": {
-            "role": "user"
+            "role": "user",
+            "filter": "active"
           },
           "mockup": "mockups/screens/SCR-3WRX/activeonly.html",
           "change": "add"
+        }
+      ],
+      "undrawn": [
+        {
+          "when": {
+            "role": "user",
+            "filter": "completed"
+          },
+          "about": [
+            "FLT-36VG"
+          ],
+          "note": "The Completed filter is not drawn yet"
         }
       ]
     },
@@ -359,21 +446,22 @@
       "id": "SCR-Y6S2",
       "name": "FiltersBar",
       "kind": "component",
+      "variables": [
+        "filter"
+      ],
       "states": [
         {
           "id": "all",
-          "name": "All",
           "when": {
-            "also": "All chosen"
+            "filter": "all"
           },
           "mockup": "mockups/screens/SCR-Y6S2/all.html",
           "change": "add"
         },
         {
           "id": "active",
-          "name": "Active",
           "when": {
-            "also": "Active chosen"
+            "filter": "active"
           },
           "mockup": "mockups/screens/SCR-Y6S2/active.html",
           "change": "add"

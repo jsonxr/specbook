@@ -17,9 +17,10 @@ const fixture = () => ({
     },
     {
       id: 'SCR-CARD', name: 'VisitorsCard', kind: 'component',
+      variables: [{ id: 'queue', label: 'Queue', values: [{ id: 'waiting', label: '3 waiting' }, { id: 'none', label: 'None waiting' }] }],
       states: [
-        { id: 'waiting', name: '3 waiting', also: 'visitors waiting', mockup: 'mockups/card-waiting.html' },
-        { id: 'none', name: 'None waiting', also: 'nobody waiting', mockup: 'mockups/card-none.html' }
+        { id: 'waiting', name: '3 waiting', when: { queue: 'waiting' }, also: 'visitors waiting', mockup: 'mockups/card-waiting.html' },
+        { id: 'none', name: 'None waiting', when: { queue: 'none' }, also: 'nobody waiting', mockup: 'mockups/card-none.html' }
       ]
     }
   ],
@@ -160,7 +161,9 @@ test('variablesOf resolves a screen\'s variables in its order: role from the boo
   assert.deepEqual(M.variablesOf(book, 'SCR-HOME')[0].values[0], { id: 'member', label: 'member' });
   // A screen that lists no variables uses only role; a component that lists none has none.
   assert.deepEqual(M.variablesOf(fixture(), 'SCR-HOME').map(v => v.id), ['role']);
-  assert.deepEqual(M.variablesOf(fixture(), 'SCR-CARD'), []);
+  const bare = fixture();
+  delete bare.screens[1].variables;
+  assert.deepEqual(M.variablesOf(bare, 'SCR-CARD'), []);
   assert.deepEqual(M.variablesOf(book, 'SCR-NOPE'), []);
 });
 
@@ -209,7 +212,9 @@ test('coverage: one entry per state, then per undrawn entry, in order', () => {
   assert.deepEqual(rows[9], { when: { role: 'admin', sharing: 'notshared' }, kind: 'undrawn', about: ['R1'], note: 'No groups yet' });
   assert.deepEqual(rows[10], { when: { role: 'visitor' }, kind: 'undrawn', about: [] });
   // A state with no `when` is any combination.
-  assert.deepEqual(M.coverage(fixture(), 'SCR-CARD')[0], { when: {}, kind: 'drawn', key: 'SCR-CARD.waiting' });
+  const plain = fixture();
+  delete plain.screens[1].states[0].when;
+  assert.deepEqual(M.coverage(plain, 'SCR-CARD')[0], { when: {}, kind: 'drawn', key: 'SCR-CARD.waiting' });
   assert.deepEqual(M.coverage(book, 'SCR-NOPE'), []);
 });
 
@@ -252,15 +257,34 @@ test('screenProblem allows the same when on a drawn state and a sameAs or absent
   assert.equal(M.screenProblem(b, all, {}), null);
 });
 
-test('screenProblem: a screen that lists no variables uses only role and keeps its free words', () => {
-  // The starter's screens list no variables yet: several drawn states share a role, and a component's `when` holds
-  // free words. Its roles are still checked.
+test('screenProblem: a screen that lists no variables is held to role alone, a component to none', () => {
+  // The same checks apply as if the screen listed ["role"] (a component, []).
   const b = fixture();
   b.screens[0].states[1].when.role = 'member';
-  b.screens[1].states[0].when = { also: 'visitors waiting' };
-  assert.equal(M.screenProblem(b, all, mockups()), null);
-  b.screens[0].states[0].when.role = ['member', 'admin'];
-  assert.match(M.screenProblem(b, all, mockups()), /SCR-HOME\.member lists several roles/);
+  assert.match(M.screenProblem(b, all, mockups()), /SCR-HOME\.member and SCR-HOME\.\w+ have the same when/);
+  const c = fixture();
+  c.screens[1].states[0].when = { also: 'visitors waiting' };
+  assert.match(M.screenProblem(c, all, mockups()), /sets also, which SCR-CARD does not list in its variables/);
+  const d = fixture();
+  d.screens[0].states[0].when.sharing = 'shared';
+  assert.match(M.screenProblem(d, all, mockups()), /sets sharing, which SCR-HOME does not list/);
+  const e = fixture();
+  e.screens[0].states[0].when.role = ['member', 'admin'];
+  assert.match(M.screenProblem(e, all, mockups()), /SCR-HOME\.member lists several roles/);
+});
+
+test('screenProblem reports a variables that is not a list, and a variable listed twice', () => {
+  const bad = (mutate, re) => {
+    const b = varBook();
+    mutate(b);
+    const p = M.screenProblem(b, all, {});
+    assert.ok(p && re.test(p), String(p));
+  };
+  bad(b => { b.screens[0].variables = 'role'; }, /Screen SCR-HOME's variables is not a list/);
+  bad(b => { b.screens[0].variables = { id: 'role' }; }, /Screen SCR-HOME's variables is not a list/);
+  bad(b => { b.screens[0].variables.push('role'); }, /Screen SCR-HOME lists the variable role twice/);
+  // An inline declaration that shadows a book variable.
+  bad(b => { b.screens[0].variables.push({ id: 'connection', label: 'Link', values: [{ id: 'up', label: 'Up' }] }); }, /Screen SCR-HOME lists the variable connection twice/);
 });
 
 test('screenProblem is null for a valid book and names the culprit otherwise', () => {

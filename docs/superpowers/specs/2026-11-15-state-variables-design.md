@@ -66,6 +66,7 @@ caption says only what makes it different.
 - **`name`**: optional override of the computed caption.
 - **Screen `undrawn`**: `[{ "when": {...}, "about": ["HOM-G74T"], "note": "No groups yet" }]`, the combinations a
   requirement implies that have no picture.
+- **Defaults and checks**: a screen with no `variables` list is validated as if it listed `["role"]` (a component, `[]`); a `variables` that is not a list, or a variable listed twice (an inline one shadowing a book variable included), is invalid.
 - **Caption**: role pill (from `when.role`; "Anyone" for `anyone`; several pills for a list), then the labels of the
   non-default values of the screen's other variables, in the screen's variable order. A component's caption is its
   values' labels (all values, defaults included, since a component has no pill).
