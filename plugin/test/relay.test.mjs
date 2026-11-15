@@ -41,11 +41,22 @@ test('a peer id is a short stable hash of the guest key', async () => {
   assert.match(a, /^[A-Za-z0-9_-]{12}$/);
 });
 
-test('two tabs with the same guest key are two people, each with a stable id', async () => {
-  const a = await R.peerIdOf('guest-key-0001', 'conn-a');
-  const b = await R.peerIdOf('guest-key-0001', 'conn-b');
-  assert.notEqual(a, b);
-  assert.equal(await R.peerIdOf('guest-key-0001', 'conn-a'), a);
+test('one guest on one device is one person, whatever the tab; another device is another', async () => {
+  const a = await R.peerIdOf('guest-key-0001', 'device-a');
+  assert.equal(await R.peerIdOf('guest-key-0001', 'device-a'), a);
+  assert.notEqual(await R.peerIdOf('guest-key-0001', 'device-b'), a);
+  assert.notEqual(await R.peerIdOf('guest-key-0002', 'device-a'), a);
+});
+
+test('a guest\'s live frames are capped in size and rate', () => {
+  assert.equal(R.liveFrameOk('x'.repeat(R.LIVE_MAX)), true);
+  assert.equal(R.liveFrameOk('x'.repeat(R.LIVE_MAX + 1)), false);
+  const bucket = {};
+  let sent = 0;
+  for (let i = 0; i < 200; i++) { if (R.liveRateOk(bucket, 1000)) { sent++; } }
+  assert.equal(sent, R.LIVE_BURST, 'a burst gets through up to the cap, all at once');
+  assert.equal(R.liveRateOk(bucket, 1000), false);
+  assert.equal(R.liveRateOk(bucket, 2000), true, 'a second later there is room again');
 });
 
 test('a new note id belongs to whoever drafted it first; others cannot draft it', () => {

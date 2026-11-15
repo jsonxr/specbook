@@ -84,7 +84,18 @@ test('the owner may edit a guest\'s note; it stays theirs and says who changed i
   assert.equal(out.bobs.author, 'Bob');
   assert.equal(out.bobs.authorKey, 'bob-key-0001');
   assert.equal(out.bobs.lastBy, 'Jason');
+  assert.equal(out.bobs.lastByKey, 'owner');
   assert.equal(out.hers.lastBy, undefined);
+});
+
+test('who changed a note last is known by key, so two people of one name are not mixed up', () => {
+  const byAnn = applyNoteChanges(stored(), { hers: { text: 'ann 2', item: 'R1', lastByKey: 'owner' } }, ann);
+  assert.equal(byAnn.hers.lastByKey, 'ann-key-0001');
+  const forAnn = reviewForGuest({ rev: 1, notes: byAnn }, ann).notes;
+  assert.equal(forAnn.hers.lastMine, true);
+  assert.equal('lastByKey' in forAnn.hers, false);
+  const otherAnn = reviewForGuest({ rev: 1, notes: byAnn }, { name: 'Ann', key: 'ann-key-0002' }).notes;
+  assert.equal(otherAnn.hers.lastMine, undefined);
 });
 
 test('null deletes only what the writer may delete, and notes past draft are never touched', () => {

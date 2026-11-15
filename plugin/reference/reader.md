@@ -177,7 +177,11 @@ The handshake is signed with the key after `#` in the link, so a share server ru
 book nor join; the guest page comes from the share server, so use one you run or trust.
 The reader itself reaches the guest from your tab, so a new reader needs no new share server.
 
-- A guest names themself once. Their notes show their name, and yours show your first name (git's `user.name`).
+- A guest names themself once; the guest page remembers the name, and an id for the device, in that browser. Their
+  notes show their name, and yours show your first name (git's `user.name`).
+- **One tab per person and device.** A guest who opens the link again in another tab of the same browser is the same
+  person: the newer tab takes over, and the older one shows **Disconnected**, with **Use this tab instead** (which
+  takes it back). It never reconnects by itself. Another device is another face.
 - **Live.** Everyone in the book appears as a colored face in the share pill, with a pen while they type. A note's text
   shows for everyone as it is typed ("Ana is typing…"), and a saved change reaches every screen at once.
 - **Following.** Click a face to follow that person: your window goes where theirs does (the same item, on any screen
@@ -193,10 +197,14 @@ The reader itself reaches the guest from your tab, so a new reader needs no new 
 - You may still edit or delete any note. A Revise carries a collaborator's notes with `by: <name>`.
 - **The link lasts as long as the book's server runs**, across reloads: the server remembers the room (in memory,
   never on disk). Closing your tab pauses the share: guests see "The book isn't open right now" and reconnect by
-  themselves when it is open again. Stopping the server, **New link**, **Stop sharing** or the room's expiry (24 hours)
+  themselves when it is open again within an hour (after that, a reload). Stopping the server, **New link**, **Stop sharing** or the room's expiry (24 hours)
   ends the link.
 - Live messages (presence, typing, following) go only between your tab and the guests; your tab passes each guest's on
-  to the others and drops a draft of a note that is not the sender's. The share server never sees them.
+  to the others and drops a draft (or a typing signal) for a note that is not the sender's, and any frame over 16 KB or past 40 a
+  second. The share server never sees them.
+- A save that does not get through (the connection dropped, or the server did not answer) is sent again a few seconds
+  later; the note stays on the page meanwhile. A note the server will not take (another's, or one already sent to
+  Claude) keeps its text as a new note.
 
 ## The API
 
@@ -209,7 +217,7 @@ may only read and `PUT /api/notes`; anything else is 403 `guest`.
 | Endpoint | Does |
 | --- | --- |
 | `GET /api/book` | `{ book, media, evidence, review, changelog, historyCounts, claude, viewer }`; reading stamps `opened`/`where` for new reviews (not while Claude is busy, and never over a write made since it read) |
-| `PUT /api/notes { changes }` | Saves only the notes a page changed: `{ id: note }` or `{ id: null }` to delete, applied on the notes stored now, so concurrent saves of different notes all land; the owner may change any draft, a guest only their own (others' ids are ignored); a changed note gets `lastBy` (who made the change); 400 `bad-note`, 409 `locked` |
+| `PUT /api/notes { changes }` | Saves only the notes a page changed: `{ id: note }` or `{ id: null }` to delete, applied on the notes stored now, so concurrent saves of different notes all land; the owner may change any draft, a guest only their own (others' ids are ignored); a changed note gets `lastBy` (who made the change) and `lastByKey` (never sent to guests, who get `lastMine`); the reply lists `skipped` ids; 400 `bad-note`, 409 `locked` |
 | `PUT /api/notes { rev, notes }` | The whole-map save older pages use: the page's **draft** notes replace the stored drafts; stored non-draft notes win; from a guest, only that guest's own drafts change; 400 `bad-note`, 409 `stale` or `locked` |
 | `POST /api/accept { key }` | Writes the history entry, sets the accepted copy to the server's current value, clears the key's tries and notes; 404 `not-under-review`, 400 `bad-accept` |
 | `POST /api/change { key, note }` | Freezes a try and adds the draft note; 400 `note-required` or `bad-change`, 404 `not-under-review` |

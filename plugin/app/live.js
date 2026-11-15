@@ -51,6 +51,7 @@
   var follow = { leader: null };
   var savedView = null;
   var draftTimers = {};
+  var draftBy = {}; // note id -> who the ghost of it is from: only they can fade it
 
   function send(msg) {
     if (guest) { window.SpecShare.send(msg); } else { Host.send(msg); }
@@ -95,7 +96,7 @@
   // Someone's draft fades once they stop (their save has landed by then), or after 10 s regardless.
   function fadeDraft(id, ms) {
     clearTimeout(draftTimers[id]);
-    draftTimers[id] = setTimeout(function () { delete draftTimers[id]; Book.clearDraft(id); }, ms);
+    draftTimers[id] = setTimeout(function () { delete draftTimers[id]; delete draftBy[id]; Book.clearDraft(id); }, ms);
   }
 
   function receive(msg) {
@@ -121,13 +122,14 @@
         break;
       case 'draft':
         if (!p || typeof msg.note !== 'string') { return; }
+        draftBy[msg.note] = msg.from;
         Book.showDraft(msg.note, msg, p.name);
         fadeDraft(msg.note, 10000);
         break;
       case 'typing':
         if (!p) { return; }
         p.typing = !!msg.on;
-        if (!msg.on && typeof msg.note === 'string') { fadeDraft(msg.note, 1200); }
+        if (!msg.on && typeof msg.note === 'string' && draftBy[msg.note] === msg.from) { fadeDraft(msg.note, 1200); }
         break;
       case 'follow':
         if (!p) { return; }

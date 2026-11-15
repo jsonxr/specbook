@@ -130,7 +130,12 @@ and only the broker can carry it to a host behind a home router. So:
 - each guest keeps one quiet WebSocket open to the broker. It hibernates, costing nothing while it waits, and does
   not poll;
 - when the host's tab connects again, the broker sends `host-online` to the waiting guests, and each makes a new
-  signed offer.
+  signed offer;
+- a guest waits an hour at most (decided 2026-11-14, was six), then the page asks for a reload.
+
+**One person per device.** The guest page keeps a device id in its browser; a guest's id in the book is a hash of
+their key and that device. When the same person on the same device joins from a newer tab, the host tells the older
+tab it was disconnected and lets it go; that tab shows a Disconnected page and reconnects only when clicked.
 
 While the host's tab is open, everything goes over the direct connection. The broker carries only handshakes.
 

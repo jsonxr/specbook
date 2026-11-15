@@ -17,7 +17,7 @@ export function guestMay(method, path) {
 }
 
 // Fields only the server writes on a draft; a page's copy of the note never carries them.
-export const SERVER_FIELDS = ['causes', 'closedFor', 'reply', 'from', 'author', 'authorKey', 'lastBy'];
+export const SERVER_FIELDS = ['causes', 'closedFor', 'reply', 'from', 'author', 'authorKey', 'lastBy', 'lastByKey'];
 
 const KEY = /^[A-Za-z0-9_-]{8,64}$/;
 
@@ -64,8 +64,13 @@ export const GUEST_TEXT = 4000;
 export function reviewForGuest(review, guest) {
   const notes = {};
   for (const [id, note] of Object.entries(review.notes ?? {})) {
-    const { authorKey, ...rest } = note ?? {};
-    notes[id] = authorKey !== undefined && authorKey === guest.key ? { ...rest, mine: true } : rest;
+    // Keys stay on the owner's machine: a guest learns only whether a note, or its last change, is theirs.
+    const { authorKey, lastByKey, ...rest } = note ?? {};
+    const out = authorKey !== undefined && authorKey === guest.key ? { ...rest, mine: true } : rest;
+    if (lastByKey !== undefined && lastByKey === guest.key) {
+      out.lastMine = true;
+    }
+    notes[id] = out;
   }
   return { ...review, notes };
 }
@@ -152,6 +157,7 @@ export function applyNoteChanges(stored, changes, writer, skipped = []) {
       note.authorKey = writer.key;
     }
     note.lastBy = writer.name;
+    note.lastByKey = writer.guest ? writer.key : 'owner';
     out[id] = note;
   }
   return out;

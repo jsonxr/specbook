@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { request } from 'node:http';
+import { createServer, request } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -841,6 +841,33 @@ test('New link ends the room and starts a new one', async () => {
   await idle();
 });
 
+test('New link ends the old room at the share server, trying again when it fails', async () => {
+  const ends = [];
+  const fake = createServer((req, res) => {
+    ends.push(req.url);
+    res.writeHead(ends.length === 1 ? 503 : 204);
+    res.end();
+  });
+  await new Promise(r => fake.listen(0, '127.0.0.1', r));
+  try {
+    sharedBook({ shareBroker: `http://127.0.0.1:${fake.address().port}` });
+    const tab = await listenAs('tab-end-0001');
+    await tab.hear('event: start');
+    await api('POST', '/api/share/live', { ...liveBody('tab-end-0001'), url: `http://127.0.0.1:${fake.address().port}/s/${ROOM.room}#${ROOM.secret}` });
+    assert.equal((await api('POST', '/api/share/new-link', {})).status, 202);
+    const deadline = Date.now() + 5000;
+    while (ends.length < 2 && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 50));
+    }
+    assert.deepEqual(ends.slice(0, 2), [`/api/rooms/${ROOM.room}/end`, `/api/rooms/${ROOM.room}/end`]);
+    await api('POST', '/api/share/stop', {});
+    tab.close();
+    await idle();
+  } finally {
+    fake.close();
+  }
+});
+
 test('Stop sharing lasts until the book is reopened', async () => {
   sharedBook();
   const tab = await listenAs('tab-stop-0001');
@@ -851,6 +878,14 @@ test('Stop sharing lasts until the book is reopened', async () => {
   const view = (await api('GET', '/api/share')).body;
   assert.deepEqual([view.state, view.stopped, view.room], ['idle', true, false]);
   tab.close();
+  await idle();
+  // The same tab's EventSource reconnecting (the server blinked) is not the book reopened.
+  const same = await listenAs('tab-stop-0001');
+  await same.hear(': listening');
+  await new Promise(r => setTimeout(r, 150));
+  assert.doesNotMatch(same.heard, /event: start/);
+  assert.equal((await api('GET', '/api/share')).body.stopped, true);
+  same.close();
   await idle();
   const again = await listenAs('tab-stop-0002');
   await again.hear('event: start');

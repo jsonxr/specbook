@@ -80,19 +80,29 @@
   function whoAmI() {
     // The name is remembered for every share; the key that makes notes yours is one per share, so one book cannot
     // pose as you in another.
+    // The device is this browser, for every share: the same person on the same device is one person in the book, so
+    // opening the link in a newer tab disconnects the older one.
     var name = '';
     var key = '';
+    var device = '';
+    var idOk = /^[A-Za-z0-9_-]{8,64}$/;
     try {
+      device = localStorage.getItem('specbook-device') || '';
+      if (!idOk.test(device)) {
+        device = b64url(crypto.getRandomValues(new Uint8Array(18)));
+        localStorage.setItem('specbook-device', device);
+      }
       name = localStorage.getItem('specbook-guest-name') || '';
       key = localStorage.getItem('specbook-guest-key:' + ROOM) || '';
-      if (!/^[A-Za-z0-9_-]{8,64}$/.test(key)) {
+      if (!idOk.test(key)) {
         key = b64url(crypto.getRandomValues(new Uint8Array(18)));
         localStorage.setItem('specbook-guest-key:' + ROOM, key);
       }
     } catch (e) {
       key = key || b64url(crypto.getRandomValues(new Uint8Array(18)));
+      device = device || b64url(crypto.getRandomValues(new Uint8Array(18)));
     }
-    if (name) { return Promise.resolve({ name: name, key: key }); }
+    if (name) { return Promise.resolve({ name: name, key: key, device: device }); }
     return new Promise(function (done) {
       var box = document.createElement('div');
       box.className = 'share-join';
@@ -107,7 +117,7 @@
         e.preventDefault();
         var typed = input.value.replace(/\s+/g, ' ').trim();
         if (!typed) { return; }
-        var who = { name: typed.slice(0, 40), key: key };
+        var who = { name: typed.slice(0, 40), key: key, device: device };
         try { localStorage.setItem('specbook-guest-name', who.name); } catch (err) { /* asked again next time */ }
         box.remove();
         done(who);
@@ -161,8 +171,9 @@
             .then(function () { return gathered(pc); })
             .then(function () {
               var sdp = pc.localDescription.sdp;
-              return sign(['offer', ROOM, me.key, me.name, sdp].join('\n')).then(function (sig) {
-                ws.send(JSON.stringify({ type: 'offer', key: me.key, name: me.name, sdp: sdp, sig: sig, protocol: roomProtocol }));
+              var signed = roomProtocol >= 2 ? ['offer', ROOM, me.key, me.name, me.device, sdp] : ['offer', ROOM, me.key, me.name, sdp];
+              return sign(signed.join('\n')).then(function (sig) {
+                ws.send(JSON.stringify({ type: 'offer', key: me.key, name: me.name, device: me.device, sdp: sdp, sig: sig, protocol: roomProtocol }));
               });
             });
         }
@@ -173,7 +184,12 @@
           ping = setInterval(function () { if (ws.readyState === 1) { ws.send('ping'); } }, 30000);
         };
         ws.onerror = function () { finish(fail('The book\u2019s host is not sharing right now.')); };
-        ws.onclose = function () { if (!settled && !(ch && ch.readyState === 'open')) { finish(fail('The book\u2019s host is not sharing right now.')); } };
+        ws.onclose = function (e) {
+          if (settled || (ch && ch.readyState === 'open')) { return; }
+          // The share server stops a guest waiting after an hour: trying again is the reader's call, not this page's.
+          if (e.code === 4408) { finish(fail('The book was not opened within an hour. Reload this page to try again.', true)); return; }
+          finish(fail('The book\u2019s host is not sharing right now.'));
+        };
         ws.onmessage = function (e) {
           if (e.data === 'pong') { return; }
           var msg;
@@ -188,7 +204,12 @@
             showError(WAITING);
             return;
           }
-          if (msg.type === 'host-online') { arm(); status('Connecting\u2026'); ws.send(JSON.stringify({ type: 'ice' })); return; }
+          // The host is back (or reconnected again): any offer in flight went to its old socket, so start afresh.
+          if (msg.type === 'host-online') {
+            if (pc) { try { pc.close(); } catch (err) { /* closed */ } pc = null; ch = null; }
+            arm(); status('Connecting\u2026'); ws.send(JSON.stringify({ type: 'ice' }));
+            return;
+          }
           if (msg.type === 'gone') { finish(fail('This share has ended. Ask for a new link.', true)); return; }
           if (msg.type === 'reject') { finish(msg.error === 'full' ? fail('This book has as many guests as it can take.') : fail('This link is not valid for this share.', true)); return; }
           if (msg.type !== 'answer' || !pc) { return; }
@@ -228,6 +249,7 @@
   function onFrame(e) {
     var f;
     try { f = JSON.parse(e.data); } catch (err) { return; }
+    if (f.t === 'kicked') { kicked(); return; }
     if (f.t === 'changed') { changedHandlers.forEach(function (fn) { try { fn(); } catch (err) { /* the page's problem */ } }); return; }
     if (f.t === 'live') { liveHandlers.forEach(function (fn) { try { fn(f); } catch (err) { /* the page's problem */ } }); return; }
     if (f.t !== 'res' || !waiting[f.id]) { return; }
@@ -251,6 +273,29 @@
     });
   }
 
+  // The same person opened the book in a newer tab on this device: this one lets go and says so, and only a click
+  // brings it back (which disconnects the other in turn).
+  var wasKicked = false;
+  function kicked() {
+    if (wasKicked) { return; }
+    wasKicked = true;
+    terminal = fail('Disconnected: this book is open in another tab.', true);
+    var ch = channel;
+    channel = null;
+    if (ch) { try { ch.pc.close(); } catch (e) { /* closed */ } }
+    failAll('Disconnected: this book is open in another tab.');
+    settleWaiters(null, terminal);
+    peerState('ended');
+    status('Disconnected', true);
+    var box = document.createElement('div');
+    box.className = 'share-join share-kicked';
+    box.setAttribute('role', 'alertdialog');
+    box.innerHTML = '<form><h2>Disconnected</h2><p>You opened this book in another tab or window, so this one was ' +
+      'disconnected. Your notes are safe.</p><button type="submit">Use this tab instead</button></form>';
+    box.querySelector('form').addEventListener('submit', function (e) { e.preventDefault(); location.reload(); });
+    document.body.appendChild(box);
+  }
+
   var tries = 0;
   var loaded = false;
   function open() {
@@ -260,7 +305,7 @@
       ch.onmessage = onFrame;
       var lost = false;
       var onLost = function () {
-        if (lost) { return; }
+        if (lost || wasKicked) { return; }
         lost = true;
         if (channel === ch) { channel = null; }
         try { ch.pc.close(); } catch (e) { /* closed */ }

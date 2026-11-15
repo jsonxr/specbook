@@ -1311,9 +1311,10 @@
   // On the reader's own note, who else changed it last (the owner may edit a guest's note): their name, or ''.
   function changedByOther(n) {
     if (!n || !n.lastBy) { return ''; }
+    // By key, not name: two people may share a name. A guest is told only whether the last change was theirs.
     var mine = viewer().guest ? !!n.mine : !n.authorKey;
-    var myName = viewer().guest ? viewer().name : (state.owner && state.owner.name);
-    return mine && n.lastBy !== myName ? n.lastBy : '';
+    var byMe = viewer().guest ? !!n.lastMine : n.lastByKey === 'owner';
+    return mine && !byMe ? n.lastBy : '';
   }
   function saveNotes() {
     if (notesLocked()) { return; }
@@ -1371,6 +1372,8 @@
     if (n.authorKey) { o.authorKey = n.authorKey; }
     if (n.mine) { o.mine = true; }
     if (n.lastBy) { o.lastBy = n.lastBy; }
+    if (n.lastByKey) { o.lastByKey = n.lastByKey; }
+    if (n.lastMine) { o.lastMine = true; }
     return o;
   }
   function draftsOf(review) {
@@ -1438,6 +1441,7 @@
           // A note the server would not take (another's, or no longer a draft) keeps its text under a new id; the
           // server's copy of the old one comes back with the reload.
           var sk = window.SpecModel.rekeySkipped(state.notes, changes, res.j.skipped, newId);
+          if (importing) { importing = false; store(state.noteKey, null); }
           if (!sk.unsynced.length) { return true; }
           sk.unsynced.forEach(function (id) { delete synced[id]; });
           state.notes = sk.notes;
@@ -1449,9 +1453,16 @@
           return reloadNotes(own ? '' : 'Notes changed elsewhere; reloaded.').then(function () { return false; });
         }
         if (res.status === 409 && res.j.error === 'locked') { pollClaude(); }
+        if (res.status >= 500) { saveAgain(); }
         return false;
       })
-      .catch(function () { return false; /* the server is unreachable: the notes stay on the page */ });
+      .catch(function () { saveAgain(); return false; /* unreachable, or a guest's connection dropped mid-save */ });
+  }
+  // A save that did not get through is sent again in a few seconds (the notes stay on the page meanwhile). A guest's
+  // save waits for the connection to the host to be back.
+  function saveAgain() {
+    notesDirty = true;
+    if (!saveTimer) { saveTimer = setTimeout(flushNotes, 3000); }
   }
   function markSynced(notes) {
     synced = {};
@@ -2831,10 +2842,19 @@
   document.addEventListener('focusout', resumeRefetch, true);
   // Notes drafted before they were kept on the server are moved there once, then dropped from this browser. The
   // browser's copy is dropped only once the server has saved them; otherwise the import is tried again next load.
+  var importing = false; // notes from localStorage not yet saved: the key goes once a save of them lands
   function importLocalNotes() {
     var local = store(state.noteKey);
-    if (!local || Object.keys(state.notes).length || notesLocked()) { return; }
-    try { state.notes = JSON.parse(local) || {}; } catch (e) { state.notes = {}; }
+    if (!local || notesLocked()) { return; }
+    var parsed;
+    try { parsed = JSON.parse(local) || {}; } catch (e) { parsed = {}; }
+    if (Object.keys(state.notes).length) {
+      // Saved already (a retry, or the save as the last page closed, got them there): the key has done its job.
+      if (Object.keys(parsed).every(function (id) { return hasOwn(state.notes, id); })) { store(state.noteKey, null); }
+      return;
+    }
+    state.notes = parsed;
+    importing = true;
     renderNotes();
     Object.keys(state.notes).forEach(function (id) {
       var n = state.notes[id];
@@ -2843,7 +2863,7 @@
       if (!n.created) { n.created = new Date().toISOString(); }
     });
     saveNotes();
-    flushNotes().then(function (saved) { if (saved) { store(state.noteKey, null); } });
+    flushNotes();
   }
 
   // Changes: the open reviews, each with its stack, hiding the sections and chapters that have none.

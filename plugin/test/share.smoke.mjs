@@ -315,6 +315,54 @@ try {
     await owner.waitForFunction(() => document.querySelectorAll('.share-pill .face').length === 2, null, { timeout: 8000 });
   });
 
+  await check('the same guest on the same device in a new tab is not asked their name, and the older tab is disconnected', async () => {
+    const second = await guestCtx.newPage();
+    second.on('pageerror', e => errors.push(`guest2: ${e.message}`));
+    try {
+      await second.goto(link);
+      await second.waitForFunction(() => /Live · Ann/.test(document.querySelector('.share-chip')?.textContent ?? ''), null, { timeout: 20000 });
+      if (await second.locator('.share-join input').count()) {
+        throw new Error('the second tab asked for a name again');
+      }
+      await guest.waitForSelector('.share-kicked', { timeout: 5000 });
+      await owner.waitForFunction(() => window.SpecHost.people().length === 2, null, { timeout: 5000 });
+      await sleep(2000);
+      if (await guest.evaluate(() => /Live/.test(document.querySelector('.share-chip')?.textContent ?? ''))) {
+        throw new Error('the disconnected tab connected again by itself');
+      }
+      // Use this tab instead: it takes over, and the other is the one disconnected now.
+      await guest.click('.share-kicked button');
+      await guest.waitForFunction(() => /Live · Ann/.test(document.querySelector('.share-chip')?.textContent ?? ''), null, { timeout: 20000 });
+      await second.waitForSelector('.share-kicked', { timeout: 5000 });
+      await owner.waitForFunction(() => window.SpecHost.people().length === 2, null, { timeout: 5000 });
+    } finally {
+      await second.close();
+    }
+  });
+
+  await check('another guest cannot clear a ghost of someone else\'s note', async () => {
+    const bob = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
+    bob.on('pageerror', e => errors.push(`bob: ${e.message}`));
+    try {
+      await bob.addInitScript(() => localStorage.setItem('specbook-guest-name', 'Bob'));
+      await bob.goto(link);
+      await bob.waitForFunction(() => /Live · Bob/.test(document.querySelector('.share-chip')?.textContent ?? ''), null, { timeout: 20000 });
+      await owner.waitForFunction(() => window.SpecHost.people().length === 3, null, { timeout: 5000 });
+      await guest.evaluate(() => window.SpecShare.send({ kind: 'draft', note: 'ann-ghost-1', item: 'TOD-001', target: 'TOD-001', rx: 0, ry: 0, text: 'Ann is writing' }));
+      await owner.waitForFunction(() => [...document.querySelectorAll('.sticky.ghost .gh-text')].some(e => e.textContent === 'Ann is writing'), null, { timeout: 3000 });
+      await bob.evaluate(() => window.SpecShare.send({ kind: 'typing', note: 'ann-ghost-1', on: false }));
+      await sleep(2000);
+      if (!(await owner.evaluate(() => [...document.querySelectorAll('.sticky.ghost .gh-text')].some(e => e.textContent === 'Ann is writing')))) {
+        throw new Error('Bob cleared the ghost of Ann\'s note');
+      }
+    } finally {
+      // Closed as a person closes a tab, so it says goodbye.
+      await bob.close({ runBeforeUnload: true });
+      await bob.context().close();
+    }
+    await owner.waitForFunction(() => window.SpecHost.people().length === 2, null, { timeout: 8000 });
+  });
+
   await check('a link with the wrong key does not connect', async () => {
     const bad = await (await browser.newContext()).newPage();
     await bad.addInitScript(() => localStorage.setItem('specbook-guest-name', 'Eve'));
@@ -338,8 +386,11 @@ try {
   });
 
   let owner2;
-  await check('closing the owner\'s tab pauses the share; reopening reconnects the guest without a reload', async () => {
+  await check('closing the owner\'s tab pauses the share (a follower hears the owner left); reopening reconnects the guest without a reload', async () => {
+    await guest.locator('.share-pill .face:not(.me)').first().click();
+    await guest.waitForFunction(() => !document.querySelector('.follow-chip').hidden, null, { timeout: 3000 });
     await owner.close();
+    await guest.waitForFunction(name => (document.querySelector('.follow-chip')?.textContent ?? '') === `${name} left`, ownerName, { timeout: 3000 });
     await guest.waitForFunction(() => /isn.t open right now/.test(document.querySelector('.share-chip')?.textContent ?? ''), null, { timeout: 10000 });
     await waitFor(async () => (await (await fetch(`${OWNER}api/share`)).json()).state === 'idle', 5000, 'the server to hear the tab go');
     owner2 = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();

@@ -92,6 +92,9 @@
   // other guests and to this page.
   function onLive(peer, f) {
     if (!peer.id || !LIVE_KINDS[f.kind]) { return; }
+    // A guest closing their tab says so: they are let go at once (and everyone hears bye), not when the connection
+    // times out.
+    if (f.kind === 'bye') { drop(peer.from, peer); return; }
     var msg = {};
     Object.keys(f).forEach(function (k) { msg[k] = f[k]; });
     msg.t = 'live';
@@ -101,13 +104,13 @@
       // The guest's reader has loaded: it hears who is here.
       try { peer.channel.send(JSON.stringify({ t: 'live', kind: 'roster', you: peer.id, people: people() })); } catch (e) { /* closing */ }
     }
-    if (msg.kind === 'draft') {
+    if (msg.kind === 'draft' || (msg.kind === 'typing' && msg.note != null)) {
       var id = msg.note;
       var notes = {};
       var n = window.SpecBook && window.SpecBook.noteOf ? window.SpecBook.noteOf(id) : null;
       if (n) { notes[id] = n; }
       if (!window.SpecRelay.mayDraft({ key: peer.key, id: peer.id }, id, notes, share ? share.claims : {})) { return; }
-      msg.author = peer.name;
+      if (msg.kind === 'draft') { msg.author = peer.name; }
     }
     if (msg.kind === 'follow' && msg.leader !== null && typeof msg.leader !== 'string') { return; }
     sendLive(msg, peer.id);
@@ -192,9 +195,14 @@
     peer.channel = ch;
     var open = {};
     ch.onmessage = function (e) {
+      if (peer.kicked) { return; }
       var f;
       try { f = JSON.parse(e.data); } catch (err) { return; }
-      if (f && f.t === 'live') { onLive(peer, f); return; }
+      if (f && f.t === 'live') {
+        var R = window.SpecRelay;
+        if (R.liveFrameOk(e.data) && R.liveRateOk(peer.bucket || (peer.bucket = {}), Date.now())) { onLive(peer, f); }
+        return;
+      }
       if (!f || f.t !== 'req' || typeof f.data !== 'string') { return; }
       var was = open[f.id];
       if (!was) {
@@ -213,6 +221,16 @@
     // A channel the guest opened is often open already by the time it arrives here.
     var joined = function () {
       if (peer.joined) { return; }
+      // The same person on the same device in a newer tab: the older tab is told so and let go (it shows that it was
+      // disconnected, and does not reconnect by itself).
+      Object.keys(share.peers).forEach(function (k) {
+        var other = share.peers[k];
+        if (other === peer || other.id !== peer.id || other.kicked) { return; }
+        other.kicked = true;
+        other.joined = false;
+        try { other.channel.send(JSON.stringify({ t: 'kicked' })); } catch (e) { /* closing */ }
+        setTimeout(function () { drop(k, other); }, 300);
+      });
       peer.joined = true;
       welcome(peer);
       reportGuests();
@@ -254,8 +272,9 @@
     var s = share;
     var name = cleanName(msg.name);
     function reject(error) { s.ws.send(JSON.stringify({ type: 'reject', to: msg.from, error: error })); }
-    if (typeof msg.from !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(msg.key || '') || typeof msg.sdp !== 'string') { reject('bad-signature'); return; }
-    sign(['offer', s.room, msg.key, msg.name, msg.sdp].join('\n')).then(function (want) {
+    var idOk = /^[A-Za-z0-9_-]{8,64}$/;
+    if (typeof msg.from !== 'string' || !idOk.test(msg.key || '') || !idOk.test(msg.device || '') || typeof msg.sdp !== 'string') { reject('bad-signature'); return; }
+    sign(['offer', s.room, msg.key, msg.name, msg.device, msg.sdp].join('\n')).then(function (want) {
       if (share !== s) { return null; }
       if (want !== msg.sig) { reject('bad-signature'); return null; }
       // One connection per guest socket, and the slot is taken before anything waits.
@@ -263,7 +282,7 @@
       var peer = { from: msg.from, name: name, key: msg.key, id: null, inFlight: 0, joined: false, channel: null, pc: null };
       s.peers[msg.from] = peer;
       peer.timer = setTimeout(function () { if (!peer.joined) { drop(msg.from, peer); } }, 30000);
-      return window.SpecRelay.peerIdOf(msg.key, msg.from).then(function (id) { peer.id = id; return iceServers(); }).then(function (ice) {
+      return window.SpecRelay.peerIdOf(msg.key, msg.device).then(function (id) { peer.id = id; return iceServers(); }).then(function (ice) {
         var pc = peer.pc = new RTCPeerConnection({ iceServers: ice });
         pc.ondatachannel = function (e) { onChannel(peer, e.channel); };
         pc.addEventListener('connectionstatechange', function () {
@@ -382,8 +401,11 @@
       fetch(s.broker + '/api/rooms/' + s.room + '/end', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: s.token }) }).catch(function () {});
     }
     try { s.ws.close(); } catch (e) { /* closed */ }
+    // Guests hear that the owner left before the connections close (pagehide runs this before live.js could say so).
+    var bye = JSON.stringify({ t: 'live', kind: 'bye', from: 'host' });
     Object.keys(s.peers).forEach(function (k) {
       var p = s.peers[k];
+      try { if (p.joined && p.channel && p.channel.readyState === 'open') { p.channel.send(bye); } } catch (e) { /* closing */ }
       try { if (p.channel) { p.channel.close(); } p.pc.close(); } catch (e) { /* closed */ }
     });
     changedState();

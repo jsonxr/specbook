@@ -24,7 +24,8 @@ test('an address may open ROOMS_PER_HOUR rooms an hour', () => {
 test('only offers pass from a guest, and only answers or rejections from the host', () => {
   assert.equal(fromGuest({ type: 'answer', sdp: 's', sig: 'x' }, 'g'), null);
   assert.equal(fromGuest({ type: 'offer', sdp: 's' }, 'g'), null);
-  assert.deepEqual(fromGuest({ type: 'offer', sdp: 's', sig: 'x', key: 'k', name: 'n', from: 'forged' }, 'g'), { type: 'offer', from: 'g', key: 'k', name: 'n', sdp: 's', sig: 'x', protocol: 1 });
+  assert.deepEqual(fromGuest({ type: 'offer', sdp: 's', sig: 'x', key: 'k', name: 'n', from: 'forged' }, 'g'), { type: 'offer', from: 'g', key: 'k', name: 'n', device: '', sdp: 's', sig: 'x', protocol: 1 });
+  assert.equal(fromGuest({ type: 'offer', sdp: 's', sig: 'x', key: 'k', name: 'n', device: 'device-0001' }, 'g').device, 'device-0001', 'the guest\'s device reaches the host');
   assert.equal(fromHost({ type: 'offer', to: 'g', sdp: 's', sig: 'x' }), null);
   assert.equal(fromHost({ type: 'answer', sdp: 's', sig: 'x' }), null);
   assert.deepEqual(fromHost({ type: 'answer', to: 'g', sdp: 's', sig: 'x' }), { to: 'g', out: { type: 'answer', sdp: 's', sig: 'x' } });
@@ -71,5 +72,5 @@ test('a guest may wait for a host only in a room that has had one, three at most
   assert.equal(mayWait({ hosted: false, waitingFromIp: 0 }), false);
   assert.equal(mayWait({ hosted: true, waitingFromIp: 2 }), true);
   assert.equal(mayWait({ hosted: true, waitingFromIp: 3 }), false);
-  assert.ok(WAIT_MS >= 3600_000 && WAIT_MS <= 24 * 3600_000);
+  assert.equal(WAIT_MS, 3600_000, 'a guest waits an hour for the host at most');
 });

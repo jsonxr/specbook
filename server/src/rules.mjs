@@ -7,7 +7,7 @@ export const DEFAULT_HOURS = 8;
 export const MAX_HOURS = 24;
 export const GUEST_IDLE_MS = 60_000; // a guest's handshake socket is closed after this while the host is there
 export const PROTOCOL = 2;
-export const WAIT_MS = 6 * 3600_000; // a guest waits this long for a host that is away before its socket closes
+export const WAIT_MS = 3600_000; // a guest waits this long for a host that is away before its socket closes
 export const WAIT_PER_IP = 3; // guests one address may have waiting in one room // the newest wire protocol between a host tab and a guest page
 export const TURN_PER_ROOM = 30; // relay credentials one room may hand out
 export const TURN_PER_IP = 30; // relay credentials one address may get in a day
@@ -52,7 +52,7 @@ export function fromGuest(msg, gid) {
   if (!msg || msg.type !== 'offer' || typeof msg.sdp !== 'string' || typeof msg.sig !== 'string') {
     return null;
   }
-  return { type: 'offer', from: gid, key: String(msg.key ?? ''), name: String(msg.name ?? ''), sdp: msg.sdp, sig: msg.sig, protocol: roomProtocol(msg.protocol) };
+  return { type: 'offer', from: gid, key: String(msg.key ?? ''), name: String(msg.name ?? ''), device: String(msg.device ?? '').slice(0, 64), sdp: msg.sdp, sig: msg.sig, protocol: roomProtocol(msg.protocol) };
 }
 
 // A host's message for one guest: an answer or a rejection, addressed by `to`.

@@ -523,18 +523,26 @@ function askToHost(tab) {
   sendEvent(tab, 'start', { hours: 24, broker, room: share.room ? { room: share.room.room, hostToken: share.room.hostToken, secret: share.room.secret, url: share.room.url, expiresAt: share.room.expiresAt } : null });
   return true;
 }
-// Ends the remembered room at the share server (best effort: it also ends by itself when it expires).
-function endRoomAtBroker(room) {
+// Ends the remembered room at the share server, so its link stops working: tried again a few times when the server
+// cannot be reached (it also ends by itself when it expires). Resolves once it ended or the tries ran out.
+const END_RETRY_MS = [1000, 3000, 9000];
+function endRoomAtBroker(room, tries = END_RETRY_MS.length + 1) {
   const broker = shareBroker();
   if (!room || !broker) {
     return Promise.resolve();
   }
-  return fetch(`${broker}/api/rooms/${encodeURIComponent(room.room)}/end`, {
+  const attempt = n => fetch(`${broker}/api/rooms/${encodeURIComponent(room.room)}/end`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ token: room.hostToken }),
     signal: AbortSignal.timeout(2000),
-  }).catch(() => {});
+  }).then(r => r.ok || r.status === 404 || r.status === 403, () => false).then(done => {
+    if (done || n + 1 >= tries) {
+      return undefined;
+    }
+    return new Promise(r => setTimeout(r, END_RETRY_MS[n])).then(() => attempt(n + 1));
+  });
+  return attempt(0);
 }
 const SHARE_TAB = /^[A-Za-z0-9_-]{8,64}$/;
 const ROOM_ID = /^[A-Za-z0-9_-]{16,64}$/;
@@ -578,7 +586,7 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
   process.on(signal, () => {
     const room = share.room;
     share = { state: 'idle', room: null, stopped: false };
-    endRoomAtBroker(room).finally(() => process.exit(0));
+    endRoomAtBroker(room, 1).finally(() => process.exit(0));
   });
 }
 
@@ -652,9 +660,14 @@ const server = createServer(async (req, res) => {
       res.write(': listening\n\n');
       shareTabs.delete(tab);
       shareTabs.set(tab, res);
-      // An opened (or reloaded) book shares again, even after Stop sharing.
-      share = { ...share, stopped: false };
-      if (shareOn()) {
+      // An opened (or reloaded) book shares again, even after Stop sharing; a tab that was open at the stop and is only
+      // reconnecting its events (the server blinked) does not.
+      if (share.stopped && share.stoppedTabs?.has(tab)) {
+        // still stopped
+      } else if (share.stopped) {
+        share = { ...share, stopped: false, stoppedTabs: null };
+      }
+      if (shareOn() && !share.stopped) {
         askToHost(tab);
       }
       const beat = setInterval(() => res.write(': beat\n\n'), 25000);
@@ -688,7 +701,7 @@ const server = createServer(async (req, res) => {
         json(res, 409, { error: 'no-tab' });
         return;
       }
-      share = { ...share, stopped: false };
+      share = { ...share, stopped: false, stoppedTabs: null };
       askToHost([...shareTabs.keys()].at(-1));
       json(res, 202, shareView());
       return;
@@ -699,12 +712,12 @@ const server = createServer(async (req, res) => {
       const kind = shareMsg[1];
       if (kind === 'stop') {
         // The tab ends the room at the share server; the next opened book makes a new one.
+        // This server ends the room too, so the link stops even if the tab cannot reach the share server.
         if (share.tab) {
           sendEvent(share.tab, 'stop', {});
-        } else {
-          endRoomAtBroker(share.room);
         }
-        share = { state: 'idle', room: null, stopped: true, tab: null };
+        endRoomAtBroker(share.room);
+        share = { state: 'idle', room: null, stopped: true, stoppedTabs: new Set(shareTabs.keys()), tab: null };
         json(res, 200, shareView());
         return;
       }
@@ -717,7 +730,8 @@ const server = createServer(async (req, res) => {
           return;
         }
         sendEvent(tab, 'end-room', {});
-        share = { ...share, room: null, stopped: false };
+        endRoomAtBroker(share.room);
+        share = { ...share, room: null, stopped: false, stoppedTabs: null };
         askToHost(tab);
         json(res, 202, shareView());
         return;

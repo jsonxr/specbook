@@ -620,6 +620,35 @@ try {
     await page.keyboard.press('Escape');
   });
 
+  await check('a save that fails (the connection dropped) is tried again', async () => {
+    let failed = 0;
+    await page.route('**/api/notes', route => {
+      if (route.request().method() === 'PUT' && failed === 0) {
+        failed++;
+        return route.abort('failed');
+      }
+      return route.continue();
+    });
+    try {
+      await page.keyboard.press('c');
+      await page.waitForSelector('body.commenting');
+      const at = await headingSpot();
+      await page.mouse.click(at.x + 20, at.y);
+      await page.waitForSelector('.note-pop.composer textarea');
+      await page.keyboard.type('Saved after a failure');
+      await page.keyboard.press('Enter');
+      await page.keyboard.press('Escape');
+      await waitFor(() => failed === 1, 3000, 'the first save to fail');
+      await waitFor(() => Object.values(readNotesFile().notes).some(n => n.text === 'Saved after a failure'), 8000, 'the note to be saved on a later try');
+    } finally {
+      await page.unroute('**/api/notes');
+      // The aborted request is logged by the browser; it is the point of this check.
+      for (let i = errors.length - 1; i >= 0; i--) {
+        if (/ERR_FAILED/.test(errors[i])) { errors.splice(i, 1); }
+      }
+    }
+  });
+
   await check('no console errors', async () => {
     if (errors.length) {
       throw new Error(errors.join('\n     '));

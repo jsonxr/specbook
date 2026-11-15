@@ -11,11 +11,11 @@
     return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
 
-  // A guest's id among the people in the book: a short hash of their key and this connection, so two tabs of one guest
-  // are two people (rather than taking turns knocking each other off). The key itself makes notes theirs, so it is
-  // never shown to anyone else.
-  function peerIdOf(key, conn) {
-    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(key) + '\n' + String(conn || '')))
+  // A guest's id among the people in the book: a short hash of their key and their device, so the same person on the
+  // same device is one person (a newer tab replaces the older), and on another device another. The key itself makes
+  // notes theirs, so it is never shown to anyone else.
+  function peerIdOf(key, device) {
+    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(key) + '\n' + String(device || '')))
       .then(function (h) { return b64url(new Uint8Array(h)).slice(0, 12); });
   }
 
@@ -45,5 +45,17 @@
     return true;
   }
 
-  window.SpecRelay = { PALETTE: PALETTE, peerIdOf: peerIdOf, colorOf: colorOf, relayTargets: relayTargets, mayDraft: mayDraft };
+  // A guest's live frames: none larger than LIVE_MAX characters, and LIVE_BURST a second at most (a reader sends a
+  // few a second while typing or scrolling). `bucket` is the guest's own { at, n }, kept by the host.
+  var LIVE_MAX = 16384;
+  var LIVE_BURST = 40;
+  function liveFrameOk(text) { return typeof text === 'string' && text.length <= LIVE_MAX; }
+  function liveRateOk(bucket, now) {
+    if (!bucket.at || now - bucket.at >= 1000) { bucket.at = now; bucket.n = 0; }
+    if (bucket.n >= LIVE_BURST) { return false; }
+    bucket.n++;
+    return true;
+  }
+
+  window.SpecRelay = { LIVE_MAX: LIVE_MAX, LIVE_BURST: LIVE_BURST, liveFrameOk: liveFrameOk, liveRateOk: liveRateOk, PALETTE: PALETTE, peerIdOf: peerIdOf, colorOf: colorOf, relayTargets: relayTargets, mayDraft: mayDraft };
 })();
