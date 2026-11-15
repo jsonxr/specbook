@@ -10,9 +10,10 @@ never a request to change the app; Revise only refines the requirements and mock
 the notes and the book, so you are the only writer.
 
 **The user can Stop.** The reader's Claude menu has **Stop**, which withdraws the request: its notes go back to drafts
-and the book unlocks. Check once step 3's questions are settled and again before each section in step 4:
-`node ${CLAUDE_PLUGIN_ROOT}/server/next-request.mjs --data <dir> --check <file>` prints `pending` or `stopped`. On
-`stopped`, stop at once: no more edits, no `link` or `reply`, no step 7. Tell the user in the terminal which sections
+and the book unlocks. Check once step 3's questions are settled, again before each section in step 4, and before the overall review:
+`node ${CLAUDE_PLUGIN_ROOT}/server/next-request.mjs --data <dir> --check <file>` prints `pending`, `stopped`,
+`handled` or `missing` (exit 1). `handled` or `missing` means something else filed or moved the request: stop and
+tell the user rather than guess. On `stopped`, stop at once: no more edits, no `link` or `reply`, no step 7. Tell the user in the terminal which sections
 you had already changed (those changes stay in the book, for them to accept or reject like any other), then re-arm
 the watch (step 8).
 

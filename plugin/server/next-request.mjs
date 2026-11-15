@@ -3,8 +3,10 @@
 //   node next-request.mjs --data <project>/docs/specbook          print and exit (nothing printed if none)
 //   node next-request.mjs --data <project>/docs/specbook --wait   block until one arrives, then print it
 //   node next-request.mjs --data <project>/docs/specbook --done <file>   mark a request handled (moves it to requests/done/)
-//   node next-request.mjs --data <project>/docs/specbook --check <file>  prints pending, or stopped once the reader's Stop withdrew it
+//   node next-request.mjs --data <project>/docs/specbook --check <file>  prints pending, stopped (the reader's Stop withdrew it),
+//                                                                       handled, or missing (exit 1)
 import { basename, join, resolve } from 'node:path';
+import { readJson } from './lib/json-file.mjs';
 import { fileRequest, listPending } from './lib/requests.mjs';
 
 function arg(name) {
@@ -25,9 +27,19 @@ const dir = join(resolve(data), 'requests');
 
 const check = arg('check');
 if (check && check !== true) {
+  // pending; stopped (the reader's Stop withdrew it); handled (already filed); missing (no such request: exit 1).
   const name = basename(check);
-  console.log(listPending(resolve(data)).some(p => p.file === name) ? 'pending' : 'stopped');
-  process.exit(0);
+  if (listPending(resolve(data)).some(p => p.file === name)) {
+    console.log('pending');
+    process.exit(0);
+  }
+  const filed = readJson(join(dir, 'done', name), null);
+  if (filed) {
+    console.log(filed.status === 'stopped' ? 'stopped' : 'handled');
+    process.exit(0);
+  }
+  console.log('missing');
+  process.exit(1);
 }
 
 const done = arg('done');

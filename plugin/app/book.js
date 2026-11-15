@@ -2497,8 +2497,16 @@
     }).catch(function () { msgEl.textContent = 'Server unreachable: Claude was not stopped.'; });
   });
   // Esc closes the question first, then (on the next press) the menu.
+  // A question left behind when the menu closed (a click elsewhere) is dropped, and the Esc goes on as usual.
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && askKind) { e.preventDefault(); e.stopPropagation(); setAsk(null); }
+    if (e.key !== 'Escape' || !askKind) { return; }
+    var row = (askKind === 'build' ? buildBtn : reviseBtn).parentNode;
+    var shown = !document.getElementById('claude-pop').hidden;
+    setAsk(null);
+    if (!shown) { return; }
+    e.preventDefault();
+    e.stopPropagation();
+    row.querySelector('.claude-stop').focus({ preventScroll: true });
   }, true);
   document.getElementById('claude-btn').addEventListener('click', function () { setAsk(null); });
   function setClaude(c) {

@@ -1144,6 +1144,17 @@ try {
       if (requestFiles().length !== 1) {
         throw new Error('Keep going withdrew the request');
       }
+      // A question left open when the menu closes (a click on the book) does not take the next Esc.
+      await page.locator('#revise-row .claude-stop').click();
+      await page.waitForSelector('#claude-ask:not([hidden])', { timeout: 3000 });
+      await page.mouse.click(700, 600);
+      await page.waitForSelector('#claude-pop', { state: 'hidden', timeout: 3000 });
+      await page.locator('#view-btn').click();
+      await page.waitForSelector('#view-menu:not([hidden])', { timeout: 3000 });
+      await page.keyboard.press('Escape');
+      await page.waitForSelector('#view-menu', { state: 'hidden', timeout: 2000 }).catch(() => {
+        throw new Error('a Stop question closed with the menu still took the next Esc');
+      });
       // On a phone Stop and its answers are thumb-sized.
       await page.setViewportSize({ width: 390, height: 844 });
       try {
@@ -1157,6 +1168,9 @@ try {
         }
         await page.keyboard.press('Escape');
         await page.waitForSelector('#claude-ask', { state: 'hidden', timeout: 3000 });
+        if (!(await page.evaluate(() => document.activeElement?.classList.contains('claude-stop')))) {
+          throw new Error(`Esc on the question left focus on ${await page.evaluate(() => document.activeElement?.tagName)}`);
+        }
       } finally {
         await page.setViewportSize({ width: 1400, height: 900 });
       }

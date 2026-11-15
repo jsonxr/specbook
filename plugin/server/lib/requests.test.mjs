@@ -88,3 +88,24 @@ test('stopRequest returns null when nothing is pending', () => {
   assert.equal(stopRequest(data), null);
   assert.equal(existsSync(join(data, 'requests', 'done')), false);
 });
+
+test('stopRequest stops a running build that has no pending request', () => {
+  const id = startBuild(data).id;
+  assert.deepEqual(stopRequest(data), { stopped: 'build', count: 1 });
+  assert.equal(latestBuild(data).progress.state, 'failed');
+  assert.equal(latestBuild(data).id, id);
+});
+
+test('--check says missing for a path that is not a request, and handled for one filed', () => {
+  const run = path => {
+    try {
+      return { out: execFileSync(process.execPath, [NEXT, '--data', data, '--check', path], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(), code: 0 };
+    } catch (e) {
+      return { out: String(e.stdout).trim(), code: e.status };
+    }
+  };
+  assert.deepEqual(run(join(data, 'requests', 'nope.json')), { out: 'missing', code: 1 });
+  const file = revise(['a']);
+  fileRequest(data, file);
+  assert.deepEqual(run(join(data, file)), { out: 'handled', code: 0 });
+});

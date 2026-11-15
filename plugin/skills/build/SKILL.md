@@ -16,7 +16,17 @@ below (`evidence.json`, the e2e result file, stable ids) are in `${CLAUDE_PLUGIN
 Pressing **Build** writes a request, `kind: "build"`, naming the Ready sections (`sections`). It is the user's
 approval: there is no plan approval, and **pressing Build counts as asking to commit to a `build/<id>` branch**.
 The reader locks the book (draft notes stay writable, in `review.json` only), so `build.mjs` and you are the only writers
-of `book.json`. Every `build.mjs` command is `node ${CLAUDE_PLUGIN_ROOT}/server/build.mjs --data <dir> <command>`
+of `book.json`.
+
+**The user can Stop.** The reader's Claude menu has **Stop**, which stops a running build (its sections go back to
+Drafting) and withdraws the request. Check before step 1, before each task, and before step 6:
+`node ${CLAUDE_PLUGIN_ROOT}/server/next-request.mjs --data <dir> --check <file>` prints `pending`, `stopped`,
+`handled` or `missing` (exit 1). On `stopped`: if you have not run `start`, do nothing more; if you have, the reader
+has already stopped the build (a `build.mjs` command now fails with `not-running`, which is expected): run neither
+`stop` nor `finish`, commit what you have to the branch, tell the user what was done, and re-arm the watch. On
+`handled` or `missing`, stop and tell the user rather than guess.
+
+Every `build.mjs` command is `node ${CLAUDE_PLUGIN_ROOT}/server/build.mjs --data <dir> <command>`
 and prints one JSON line; an error goes to stderr with exit code 1.
 
 1. **Start.** `build.mjs start` moves every Ready section to Building and prints the build's `id`, its `progress`
@@ -26,10 +36,7 @@ and prints one JSON line; an error goes to stderr with exit code 1.
    approved.
 3. **Plan and build, scoped to the scope.** **REQUIRED SUB-SKILL:** superpowers:writing-plans, then
    superpowers:subagent-driven-development (steps below). No stop for plan approval.
-   - Before each task, check the request was not stopped: `next-request.mjs --data <dir> --check <file>` prints
-     `pending` or `stopped`. On `stopped` (the user pressed **Stop** in the reader's Claude menu), the reader has
-     already stopped the build and filed the request: stop at once, without `build.mjs stop` or `finish`, commit what
-     you have to the branch, tell the user what was done, and re-arm the watch.
+   - Before each task, `--check` the request (see **The user can Stop**, above).
    - Before each task: `build.mjs task --build <id> --index <n> --of <m> --title "<title>" [--section <chapter-id>-<section-id>] [--req <ID>]`.
    - As a requirement's state moves: `build.mjs req --build <id> --id <ID> --status queued|in_progress|proven|failed`.
    - At least every 5 minutes during a long step: `build.mjs beat --build <id>`. The reader calls a build stale

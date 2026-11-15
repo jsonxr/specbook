@@ -89,6 +89,13 @@ export function stopRequest(data, now = Date.now()) {
   const pending = listPending(data);
   const oldest = pending[0];
   if (!oldest) {
+    // A build can run with no request left (started from the terminal, or after its request was withdrawn): the
+    // reader shows it as building, so Stop stops it too.
+    const running = latestBuild(data);
+    if (running?.progress?.state === 'running') {
+      stopBuild(data, running.id, 'Stopped in the reader', now);
+      return { stopped: 'build', count: (running.progress.sections ?? []).length };
+    }
     return null;
   }
   if ((oldest.request.kind ?? 'revise') === 'revise') {
