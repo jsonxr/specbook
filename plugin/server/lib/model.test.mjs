@@ -26,17 +26,18 @@ test('stagePill names built sections with drafted changes, and labels', () => {
 });
 
 const book = () => ({ chapters: [{ id: 'c', title: 'C', intro: 'ci', sections: [{ id: 's', title: 'S', requirements: [
-  { id: 'R1', text: 'one', change: 'change', today: 'was' }, 'plain string', { id: 'R2', text: 'two' }], frames: [{ id: 'c-s-1', caption: 'cap', role: 'admin', mockup: 'm/1.html' }, { id: 'c-s-2', mockup: 'm/none.html' }] }] }] });
+  { id: 'R1', text: 'one', change: 'change', today: 'was' }, 'plain string', { id: 'R2', text: 'two' }], shows: [{ state: 'SCR-X.a' }] }] }],
+  screens: [{ id: 'SCR-X', name: 'X', kind: 'screen', intro: 'xi', states: [{ id: 'a', name: 'A', when: { role: 'admin' }, mockup: 'm/1.html' }, { id: 'b', name: 'B', mockup: 'm/none.html' }] }] });
 
-test('itemsOf lists chapters, sections, requirements and frames by key', () => {
+test('itemsOf lists chapters, sections, requirements, screens and states by key', () => {
   const items = M.itemsOf(book(), { 'm/1.html': '<a>' });
-  assert.deepEqual(Object.keys(items).sort(), ['R1', 'R2', 'c', 'c-s', 'c-s-1', 'c-s-2']);
+  assert.deepEqual(Object.keys(items).sort(), ['R1', 'R2', 'SCR-X', 'SCR-X.a', 'SCR-X.b', 'c', 'c-s']);
   assert.deepEqual(items.c, { kind: 'chapter', value: { title: 'C', intro: 'ci' }, section: null, chapter: 'c' });
-  assert.deepEqual(items['c-s'], { kind: 'section', value: { title: 'S', intro: '' }, section: 'c-s', chapter: 'c' });
+  assert.deepEqual(items['c-s'], { kind: 'section', value: { title: 'S', intro: '', shows: [{ state: 'SCR-X.a' }] }, section: 'c-s', chapter: 'c' });
   assert.deepEqual(items.R1, { kind: 'req', value: { text: 'one', change: 'change', today: 'was' }, section: 'c-s', chapter: 'c' });
-  assert.deepEqual(items['c-s-1'].value, { caption: 'cap', role: 'admin', mockup: '<a>' });
-  assert.equal(items['c-s-2'].value.mockup, null);
-  assert.equal(items['c-s-1'].kind, 'frame');
+  assert.deepEqual(items['SCR-X'], { kind: 'screen', value: { name: 'X', kind: 'screen', intro: 'xi' }, section: null, chapter: null, screen: 'SCR-X' });
+  assert.deepEqual(items['SCR-X.a'], { kind: 'state', value: { name: 'A', when: { role: 'admin' }, mockup: '<a>', today: null }, section: null, chapter: null, screen: 'SCR-X' });
+  assert.equal(items['SCR-X.b'].value.mockup, null);
 });
 test('sameValue ignores undefined fields and compares the rest', () => {
   assert.equal(M.sameValue({ text: 'a' }, { text: 'a', today: undefined }), true);
@@ -51,12 +52,12 @@ const MOCK = { 'm/1.html': '<a>' };
 
 test('reviews: an item equal to its accepted copy with no notes or tries is not under review', () => {
   const r = M.reviews(book(), MOCK, { accepted: accepted(), notes: {}, tries: {} }, { items: {} });
-  assert.deepEqual(r, { byKey: {}, bySection: {}, byChapter: {}, count: 0 });
+  assert.deepEqual(r, { byKey: {}, bySection: {}, byChapter: {}, byScreen: {}, count: 0 });
 });
 test('reviews: null review and history are treated as empty', () => {
   const r = M.reviews(book(), MOCK, null, null);
   assert.equal(r.byKey.R1.status, 'new');
-  assert.equal(M.reviews(book(), MOCK, undefined, undefined).count, 6);
+  assert.equal(M.reviews(book(), MOCK, undefined, undefined).count, 7);
 });
 test('reviews: no accepted copy → status new; differs → changed; accepted but absent from the book → removed (current null)', () => {
   const acc = accepted();
@@ -134,23 +135,24 @@ test('reviews: no reversal on a notes-only review whose value equals the accepte
 test('reviews: bySection/byChapter/count', () => {
   const acc = accepted();
   acc.R2 = { text: 'old' }; // requirement changed -> section c-s
-  acc['c-s-1'] = { caption: 'x', role: 'admin', mockup: '<z>' }; // frame changed -> section c-s
+  acc['SCR-X.a'] = { name: 'A', mockup: '<z>', today: null }; // state changed -> section c-s, which shows it
   acc['c-s'] = { title: 'old', intro: '' }; // section heading -> itself
   acc.c = { title: 'old', intro: 'ci' }; // chapter heading -> chapter
   const r = M.reviews(book(), MOCK, { accepted: acc }, {});
   assert.equal(r.count, 4);
   assert.deepEqual(r.bySection, { 'c-s': 3 });
   assert.deepEqual(r.byChapter, { c: 4 });
+  assert.deepEqual(r.byScreen, { 'SCR-X': 1 });
 });
 
 test('reviews: a removed item takes kind, section and chapter from review.where; without it, only count', () => {
   const acc = accepted();
   acc.GONE = { text: 'gone' };
   acc.GONEF = { caption: 'x', mockup: '<q>' };
-  const where = { GONE: { kind: 'req', section: 'c-s', chapter: 'c' }, GONEF: { kind: 'frame', section: 'c-s', chapter: 'c' } };
+  const where = { GONE: { kind: 'req', section: 'c-s', chapter: 'c' }, GONEF: { kind: 'state', section: 'c-s', chapter: 'c' } };
   const r = M.reviews(book(), MOCK, { accepted: acc, where }, {});
   assert.equal(r.byKey.GONE.kind, 'req');
-  assert.equal(r.byKey.GONEF.kind, 'frame');
+  assert.equal(r.byKey.GONEF.kind, 'state');
   assert.deepEqual(r.bySection, { 'c-s': 2 });
   assert.deepEqual(r.byChapter, { c: 2 });
   assert.equal(r.count, 2);
@@ -161,7 +163,7 @@ test('reviews: a removed item takes kind, section and chapter from review.where;
   const none = M.reviews(book(), MOCK, { accepted: acc }, {});
   assert.deepEqual(none.bySection, {});
   assert.equal(none.count, 2);
-  assert.equal(none.byKey.GONEF.kind, 'frame');
+  assert.equal(none.byKey.GONEF.kind, 'state');
 });
 
 test('reviews: a note whose item and causes are gone shows on its section, then its chapter, then the first chapter', () => {
@@ -189,4 +191,98 @@ test('a note the server would not save moves to a new id, so what was typed is k
   assert.deepEqual(out.notes, { mine: { text: 'kept' }, fresh: { text: 'typed over' }, other: { text: 'x' } });
   assert.deepEqual(out.unsynced, ['theirs', 'gone']);
   assert.deepEqual(M.rekeySkipped(notes, changes, [], () => 'fresh'), { notes, unsynced: [] });
+});
+
+// ---- Screens and states as items ----------------------------------------------------------------------------------
+const screensBook = () => ({
+  screens: [
+    { id: 'SCR-HOME', name: 'HomeScreen', kind: 'screen', states: [
+      { id: 'member', name: 'Member', when: { role: 'member' }, mockup: 'mockups/home-member.html' },
+      { id: 'admin', name: 'Admin', when: { role: 'admin' }, mockup: 'mockups/home-admin.html', today: 'mockups/home-admin-old.html' },
+      { id: 'visitor', name: 'Visitor', when: { role: 'visitor' }, sameAs: 'member' }
+    ] },
+    { id: 'SCR-CARD', name: 'VisitorsCard', kind: 'component', states: [
+      { id: 'waiting', name: '3 waiting', mockup: 'mockups/card-waiting.html' }
+    ] }
+  ],
+  chapters: [{ id: 'c', sections: [
+    { id: 'a', shows: [{ state: 'SCR-HOME.admin' }], requirements: [{ id: 'R1', text: 'one', screens: [{ screen: 'SCR-CARD' }] }] },
+    { id: 'b', shows: [{ state: 'SCR-HOME.admin' }, { state: 'SCR-HOME.visitor' }], requirements: [] }
+  ] }]
+});
+const screenTexts = () => ({
+  'mockups/home-member.html': '<p>member</p>',
+  'mockups/home-admin.html': '<p>admin</p>',
+  'mockups/home-admin-old.html': '<p>admin old</p>',
+  'mockups/card-waiting.html': '<b>3</b>'
+});
+const acceptedOf = (b, m) => { const it = M.itemsOf(b, m); const a = {}; Object.keys(it).forEach(k => { a[k] = it[k].value; }); return a; };
+
+test('itemsOf: one screen item per screen, one state item per state, no frames', () => {
+  const items = M.itemsOf(screensBook(), screenTexts());
+  const kinds = k => Object.keys(items).filter(x => items[x].kind === k).sort();
+  assert.deepEqual(kinds('screen'), ['SCR-CARD', 'SCR-HOME']);
+  assert.deepEqual(kinds('state'), ['SCR-CARD.waiting', 'SCR-HOME.admin', 'SCR-HOME.member', 'SCR-HOME.visitor']);
+  assert.deepEqual(kinds('frame'), []);
+  assert.deepEqual(items['SCR-HOME'].value, { name: 'HomeScreen', kind: 'screen' });
+  assert.equal(items['SCR-HOME'].screen, 'SCR-HOME');
+  assert.equal(items['SCR-HOME.admin'].value.mockup, '<p>admin</p>');
+  assert.equal(items['SCR-HOME.admin'].value.today, '<p>admin old</p>');
+  assert.deepEqual(items['SCR-HOME.visitor'].value, { name: 'Visitor', when: { role: 'visitor' }, sameAs: 'member', mockup: null, today: null });
+  assert.equal(items['SCR-HOME.admin'].section, null);
+  assert.equal(items['SCR-HOME.admin'].chapter, null);
+  assert.deepEqual(items.R1.value.screens, [{ screen: 'SCR-CARD' }]);
+});
+
+test('reviews: a changed state is one review, counted by screen and once in every section that shows it', () => {
+  const b = screensBook();
+  const acc = acceptedOf(b, screenTexts());
+  const changed = { ...screenTexts(), 'mockups/home-admin.html': '<p>admin v2</p>' };
+  const r = M.reviews(b, changed, { accepted: acc }, {});
+  assert.equal(r.count, 1);
+  assert.equal(r.byKey['SCR-HOME.admin'].status, 'changed');
+  assert.equal(r.byKey['SCR-HOME.admin'].kind, 'state');
+  assert.equal(r.byScreen['SCR-HOME'], 1);
+  assert.deepEqual(r.bySection, { 'c-a': 1, 'c-b': 1 });
+  assert.deepEqual(r.byChapter, { c: 2 });
+});
+
+test('reviews: a changed screen counts toward every section that shows one of its states', () => {
+  const b = screensBook();
+  const acc = acceptedOf(b, screenTexts());
+  acc['SCR-HOME'] = { name: 'Old', kind: 'screen' };
+  const r = M.reviews(b, screenTexts(), { accepted: acc }, {});
+  assert.equal(r.byKey['SCR-HOME'].kind, 'screen');
+  assert.deepEqual(r.bySection, { 'c-a': 1, 'c-b': 1 });
+  assert.deepEqual(r.byScreen, { 'SCR-HOME': 1 });
+});
+
+test('reviews: a state shown nowhere is under review without touching any section', () => {
+  const b = screensBook();
+  const acc = acceptedOf(b, screenTexts());
+  acc['SCR-CARD.waiting'] = { name: 'old', mockup: '<b>3</b>', today: null };
+  const r = M.reviews(b, screenTexts(), { accepted: acc }, {});
+  assert.equal(r.count, 1);
+  assert.deepEqual(r.bySection, {});
+  assert.deepEqual(r.byScreen, { 'SCR-CARD': 1 });
+});
+
+test('reviews: a requirement whose screens changed, and a section whose shows changed, are changed', () => {
+  const b = screensBook();
+  const acc = acceptedOf(b, screenTexts());
+  acc.R1 = { text: 'one', screens: [{ screen: 'SCR-HOME' }] };
+  acc['c-b'] = { title: '', intro: '', shows: [{ state: 'SCR-HOME.admin' }] };
+  const r = M.reviews(b, screenTexts(), { accepted: acc }, {});
+  assert.equal(r.byKey.R1.status, 'changed');
+  assert.equal(r.byKey['c-b'].status, 'changed');
+  assert.equal(r.count, 2);
+});
+
+test('reviews: a removed item whose accepted value has a mockup is guessed to be a state', () => {
+  const acc = acceptedOf(screensBook(), screenTexts());
+  acc['SCR-GONE.x'] = { name: 'x', mockup: '<i>' };
+  const r = M.reviews(screensBook(), screenTexts(), { accepted: acc }, {});
+  assert.equal(r.byKey['SCR-GONE.x'].kind, 'state');
+  assert.equal(r.byKey['SCR-GONE.x'].status, 'removed');
+  assert.equal(r.byScreen['SCR-GONE'], 1);
 });

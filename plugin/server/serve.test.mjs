@@ -89,12 +89,13 @@ function acceptAll() {
 function freshBook() {
   return {
     title: 'T',
+    screens: [{ id: 'SCR-D', name: 'D', kind: 'screen', states: [{ id: 'a', name: 'A', mockup: 'mockups/d.html' }] }],
     chapters: [
       {
         id: 'c',
         title: 'C',
         sections: [
-          { id: 'd', title: 'D', stage: 'drafting', frames: [{ id: 'c-d-1', mockup: 'mockups/d.html' }], requirements: [{ id: 'R1', text: 'x', change: 'add' }] },
+          { id: 'd', title: 'D', stage: 'drafting', shows: [{ state: 'SCR-D.a' }], requirements: [{ id: 'R1', text: 'x', change: 'add' }] },
         ],
       },
     ],
@@ -495,7 +496,7 @@ test('the server migrates an old notes.json and baseline on start', async () => 
   mkdirSync(join(dir, 'revise'));
   writeFileSync(join(dir, 'book.json'), JSON.stringify(freshBook()));
   writeFileSync(join(dir, 'revise', 'before.json'), JSON.stringify({ book: freshBook(), mockups: {}, dismissed: [], accepted: {} }));
-  writeFileSync(join(dir, 'notes.json'), JSON.stringify({ rev: 2, notes: { a: { target: 'c-d-1', section: 'c-d', rx: 0, ry: 0.5, text: 'hi', created: '2026-01-01T00:00:00.000Z' } } }));
+  writeFileSync(join(dir, 'notes.json'), JSON.stringify({ rev: 2, notes: { a: { target: 'SCR-D.a', section: 'c-d', rx: 0, ry: 0.5, text: 'hi', created: '2026-01-01T00:00:00.000Z' } } }));
   const proc = spawn(process.execPath, [SERVE, '--data', dir, '--port', String(p)], { stdio: 'ignore' });
   try {
     let body = null;
@@ -507,7 +508,7 @@ test('the server migrates an old notes.json and baseline on start', async () => 
       }
     }
     assert.equal(body.review.notes.a.status, 'draft');
-    assert.equal(body.review.notes.a.item, 'c-d-1');
+    assert.equal(body.review.notes.a.item, 'SCR-D.a');
     assert.ok(body.review.accepted.R1);
     assert.equal(existsSync(join(dir, 'notes.json')), false);
     assert.equal(existsSync(join(dir, 'revise', 'before.json')), false);
@@ -651,7 +652,7 @@ test('Revise only sends draft notes to sent; finishing the request answers them'
   assert.equal(readReview(data).notes.a.status, 'sent');
 });
 
-test('Mark ready is refused with 409 unreviewed while the section, a requirement or a frame is under review', async () => {
+test('Mark ready is refused with 409 unreviewed while the section, a requirement or a state it shows is under review', async () => {
   acceptAll();
   assert.equal((await api('POST', '/api/stage', { section: 'c-d', stage: 'ready' })).status, 200);
   await api('POST', '/api/stage', { section: 'c-d', stage: 'drafting' });
@@ -661,10 +662,10 @@ test('Mark ready is refused with 409 unreviewed while the section, a requirement
   await api('POST', '/api/accept', { key: 'R1' });
   assert.equal((await api('POST', '/api/stage', { section: 'c-d', stage: 'ready' })).status, 200);
   await api('POST', '/api/stage', { section: 'c-d', stage: 'drafting' });
-  // A frame under review.
+  // A state under review.
   writeFileSync(join(data, 'mockups', 'd.html'), '<p>new</p>');
   assert.equal((await api('POST', '/api/stage', { section: 'c-d', stage: 'ready' })).status, 409);
-  await api('POST', '/api/accept', { key: 'c-d-1' });
+  await api('POST', '/api/accept', { key: 'SCR-D.a' });
   // The section heading under review.
   const b = book();
   b.chapters[0].sections[0].title = 'Renamed';

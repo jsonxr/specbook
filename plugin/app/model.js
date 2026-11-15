@@ -52,10 +52,14 @@
   }
 
   // ---- Items and reviews ----------------------------------------------------------------------------------------
-  // A reviewable item has a key and a value: a requirement (its id; text, change, today, reason), a frame (its id;
-  // caption, role, mockup text), a section heading ("<chapter>-<section>"; title, intro) and a chapter heading (the
-  // chapter id; title, intro). Stage, label, frame state and decisions are not reviewed.
-  var REQ_FIELDS = ['text', 'change', 'today', 'reason'];
+  // A reviewable item has a key and a value: a requirement (its id; text, change, today, reason, screens), a screen
+  // (its id; name, kind, file, intro), a state (its key "<screen id>.<state id>"; name, when, sameAs, absent, change,
+  // reason, and the text of its mockup and today files), a section heading ("<chapter>-<section>"; title, intro, shows)
+  // and a chapter heading (the chapter id; title, intro). Screens and states belong to no section or chapter; the
+  // sections that show them count their reviews. Stage, label and decisions are not reviewed.
+  var REQ_FIELDS = ['text', 'change', 'today', 'reason', 'screens'];
+  var SCREEN_FIELDS = ['name', 'kind', 'file', 'intro'];
+  var STATE_FIELDS = ['name', 'when', 'sameAs', 'absent', 'change', 'reason'];
 
   function has(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
 
@@ -66,7 +70,9 @@
       items[c.id] = { kind: 'chapter', value: { title: c.title || '', intro: c.intro || '' }, section: null, chapter: c.id };
       (c.sections || []).forEach(function (s) {
         var fullId = c.id + '-' + s.id;
-        items[fullId] = { kind: 'section', value: { title: s.title || '', intro: s.intro || '' }, section: fullId, chapter: c.id };
+        var sv = { title: s.title || '', intro: s.intro || '' };
+        if (s.shows !== undefined) { sv.shows = s.shows; }
+        items[fullId] = { kind: 'section', value: sv, section: fullId, chapter: c.id };
         (s.requirements || []).forEach(function (r) {
           if (!r || typeof r !== 'object' || !r.id) {
             return;
@@ -75,13 +81,23 @@
           REQ_FIELDS.forEach(function (k) { if (r[k] !== undefined) { v[k] = r[k]; } });
           items[r.id] = { kind: 'req', value: v, section: fullId, chapter: c.id };
         });
-        (s.frames || []).forEach(function (fr) {
-          if (!fr || !fr.id) {
-            return;
-          }
-          var m = fr.mockup !== undefined && has(texts, fr.mockup) && texts[fr.mockup] !== undefined ? texts[fr.mockup] : null;
-          items[fr.id] = { kind: 'frame', value: { caption: fr.caption, role: fr.role, mockup: m }, section: fullId, chapter: c.id };
-        });
+      });
+    });
+    screensOf(book).forEach(function (sc) {
+      if (!sc || typeof sc !== 'object' || !sc.id) { return; }
+      var sv = {};
+      SCREEN_FIELDS.forEach(function (k) { if (sc[k] !== undefined) { sv[k] = sc[k]; } });
+      items[sc.id] = { kind: 'screen', value: sv, section: null, chapter: null, screen: sc.id };
+      (sc.states || []).forEach(function (st) {
+        if (!st || typeof st !== 'object' || !st.id) { return; }
+        var v = {};
+        STATE_FIELDS.forEach(function (k) { if (st[k] !== undefined) { v[k] = st[k]; } });
+        var text = function (path) {
+          return typeof path === 'string' && has(texts, path) && texts[path] !== undefined ? texts[path] : null;
+        };
+        v.mockup = text(st.mockup);
+        v.today = text(st.today);
+        items[stateKey(sc.id, st.id)] = { kind: 'state', value: v, section: null, chapter: null, screen: sc.id };
       });
     });
     return items;
@@ -111,7 +127,7 @@
   // `byKey` holds the reviews; `bySection` and `byChapter` count them (a removed item takes its place from `review.where`
   // (key -> { kind, section, chapter }) when present, else it counts only toward `count`); `count` is every review.
   function reviews(book, mockups, review, history) {
-    var out = { byKey: {}, bySection: {}, byChapter: {}, count: 0 };
+    var out = { byKey: {}, bySection: {}, byChapter: {}, byScreen: {}, count: 0 };
     var rv = review || {};
     var accepted = rv.accepted || {};
     var notes = rv.notes || {};
@@ -169,6 +185,22 @@
       return null;
     };
 
+    // The sections that show a state, or any state of a screen, once each, in book order.
+    var shown = shownIn(book);
+    var chapterOf = {};
+    ((book && book.chapters) || []).forEach(function (c) {
+      (c.sections || []).forEach(function (s) { chapterOf[c.id + '-' + s.id] = c.id; });
+    });
+    var showingSections = function (key, kind) {
+      var found = {};
+      Object.keys(shown).forEach(function (sk) {
+        if (kind === 'screen' ? sk.split('.')[0] === key : sk === key) {
+          shown[sk].forEach(function (fullId) { found[fullId] = true; });
+        }
+      });
+      return Object.keys(chapterOf).filter(function (fullId) { return found[fullId]; });
+    };
+
     var keys = Object.keys(items);
     Object.keys(accepted).forEach(function (k) { if (!has(items, k)) { keys.push(k); } });
     keys.forEach(function (key) {
@@ -202,7 +234,7 @@
       var place = item || (has(where, key) && where[key] ? where[key] : null);
       out.byKey[key] = {
         key: key,
-        kind: place && place.kind ? place.kind : (was && was.title !== undefined ? 'section' : was && was.mockup !== undefined ? 'frame' : 'req'),
+        kind: place && place.kind ? place.kind : (was && was.title !== undefined ? 'section' : was && was.mockup !== undefined ? 'state' : 'req'),
         status: status,
         accepted: was,
         current: current,
@@ -212,7 +244,19 @@
         reversal: status === 'new' || status === 'changed' ? reversalOf(key, current) : null
       };
       out.count++;
-      if (place) {
+      var kind = out.byKey[key].kind;
+      if (kind === 'screen' || kind === 'state') {
+        var sid = place && place.screen ? place.screen : (kind === 'screen' ? key : key.split('.')[0]);
+        out.byScreen[sid] = (out.byScreen[sid] || 0) + 1;
+        var holders = showingSections(key, kind);
+        // A removed one is shown nowhere any more; it counts where review.where put it.
+        if (holders.length === 0 && place && place.section) { holders = [place.section]; }
+        holders.forEach(function (fullId) {
+          out.bySection[fullId] = (out.bySection[fullId] || 0) + 1;
+          var ch = chapterOf[fullId] || (place && place.chapter);
+          if (ch) { out.byChapter[ch] = (out.byChapter[ch] || 0) + 1; }
+        });
+      } else if (place) {
         if (place.section) {
           out.bySection[place.section] = (out.bySection[place.section] || 0) + 1;
         }

@@ -101,9 +101,9 @@ function acceptedFromBaseline(baseline, items) {
     if (value === null || value === undefined) {
       delete accepted[key];
     } else if (typeof value === 'string') {
-      const frame = items[key] ?? was[key];
-      if (frame?.kind === 'frame') {
-        accepted[key] = { caption: frame.value.caption, role: frame.value.role, mockup: value };
+      const state = items[key] ?? was[key];
+      if (state?.kind === 'state') {
+        accepted[key] = { ...clone(state.value), mockup: value };
       }
     } else if (isObject(value)) {
       const { id, ...rest } = value;

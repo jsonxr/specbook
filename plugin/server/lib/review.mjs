@@ -73,22 +73,14 @@ function readBook(data) {
   return readJson(join(data, 'book.json'), { chapters: [] });
 }
 
-// Frame mockup texts, keyed by the frame's `mockup` path (relative to the data folder, never outside it).
+// State mockup and today texts, keyed by their path (relative to the data folder, never outside it).
 function readMockups(data, book) {
   const root = resolve(data);
   const mockups = {};
-  for (const chapter of book.chapters ?? []) {
-    for (const section of chapter?.sections ?? []) {
-      for (const frame of section?.frames ?? []) {
-        const rel = frame?.mockup;
-        if (typeof rel !== 'string') {
-          continue;
-        }
-        const file = resolve(root, rel);
-        if (file.startsWith(root + sep) && existsSync(file) && statSync(file).isFile()) {
-          mockups[rel] = readFileSync(file, 'utf8');
-        }
-      }
+  for (const rel of SpecModel.mockupPaths(book)) {
+    const file = resolve(root, rel);
+    if (file.startsWith(root + sep) && existsSync(file) && statSync(file).isFile()) {
+      mockups[rel] = readFileSync(file, 'utf8');
     }
   }
   return mockups;
@@ -468,13 +460,11 @@ export function knownItem(data, key) {
 }
 
 // The sections, of those named by `<chapter-id>-<section-id>`, that still have something under review: their heading,
-// a requirement or a frame in them, or a removed item that lived there. Only accepted work is built, so Ready and
+// a requirement or a state they show, or a removed item that lived there. Only accepted work is built, so Ready and
 // Build both refuse these.
 export function sectionsUnderReview(data, sectionIds) {
   const snap = snapshot(data);
   const review = readReview(data);
-  const under = reviewsOf(snap, review, readHistory(data)).byKey;
-  const keys = Object.keys(under);
-  const sectionOf = (key) => snap.items[key]?.section ?? under[key]?.place?.section ?? review.where[key]?.section;
-  return sectionIds.filter((id) => keys.some((key) => key === id || sectionOf(key) === id));
+  const { bySection } = reviewsOf(snap, review, readHistory(data));
+  return sectionIds.filter((id) => (bySection[id] ?? 0) > 0);
 }

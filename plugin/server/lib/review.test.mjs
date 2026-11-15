@@ -14,7 +14,8 @@ const NOW = '2026-11-14T10:00:00.000Z';
 
 function bookWith(reqs, extra = {}) {
   return {
-    chapters: [{ id: 'c', title: 'C', intro: '', sections: [{ id: 's', title: 'S', requirements: reqs, frames: [{ id: 'c-s-1', caption: 'cap', role: 'admin', mockup: 'mockups/a.html' }] }] }],
+    chapters: [{ id: 'c', title: 'C', intro: '', sections: [{ id: 's', title: 'S', requirements: reqs, shows: [{ state: 'SCR-S.a' }] }] }],
+    screens: [{ id: 'SCR-S', name: 'S', kind: 'screen', states: [{ id: 'a', name: 'cap', mockup: 'mockups/a.html' }] }],
     ...extra
   };
 }
@@ -31,8 +32,8 @@ function setup(book, review) {
 }
 
 const writeBook = (data, book) => writeFileSync(join(data, 'book.json'), JSON.stringify(book));
-const frameValue = { caption: 'cap', role: 'admin', mockup: '<a>' };
-const base = (extra = {}) => ({ rev: 3, accepted: { c: { title: 'C', intro: '' }, 'c-s': { title: 'S', intro: '' }, 'c-s-1': frameValue }, notes: {}, tries: {}, opened: {}, where: {}, ...extra });
+const stateValue = { name: 'cap', mockup: '<a>', today: null };
+const base = (extra = {}) => ({ rev: 3, accepted: { c: { title: 'C', intro: '' }, 'c-s': { title: 'S', intro: '', shows: [{ state: 'SCR-S.a' }] }, 'SCR-S': { name: 'S', kind: 'screen' }, 'SCR-S.a': stateValue }, notes: {}, tries: {}, opened: {}, where: {}, ...extra });
 
 test('readReview defaults when missing or corrupt', () => {
   const data = setup(bookWith([]));
@@ -44,7 +45,7 @@ test('readReview defaults when missing or corrupt', () => {
 
 test('currentItems reads mockups from disk', () => {
   const data = setup(bookWith([{ id: 'R1', text: 'one' }]));
-  assert.equal(currentItems(data)['c-s-1'].value.mockup, '<a>');
+  assert.equal(currentItems(data)['SCR-S.a'].value.mockup, '<a>');
   assert.equal(currentItems(data).R1.value.text, 'one');
 });
 
