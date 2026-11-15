@@ -141,11 +141,11 @@ export function isLocalOrigin(origin) {
 
 // Headers for a file under /r/: a published version never changes, so a good answer is cached for good; anything else
 // (a version not published yet) and the list of versions are not.
-export function assetHeaders(path, status) {
+export function assetHeaders(path, status, { noCache = false } = {}) {
   const ok = status >= 200 && status < 300;
   return {
     'content-security-policy': CSP,
-    'cache-control': path === '/r/versions.json' || !ok ? 'no-store' : 'public, max-age=31536000, immutable',
+    'cache-control': noCache || path === '/r/versions.json' || !ok ? 'no-store' : 'public, max-age=31536000, immutable',
   };
 }
 

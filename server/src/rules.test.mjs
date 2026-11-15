@@ -126,6 +126,8 @@ test('the page a room gets follows its protocol and reader version', () => {
 test('only a good answer under /r/ is cached for good', () => {
   assert.match(assetHeaders('/r/1.4.0/share.js', 200)['cache-control'], /immutable/);
   assert.equal(assetHeaders('/r/1.5.0/share.html', 404)['cache-control'], 'no-store');
+  // A share server under development (server/dev.mjs, DEBUG_NO_CACHE) never lets a browser keep the reader.
+  assert.equal(assetHeaders('/r/1.0.0/share.js', 200, { noCache: true })['cache-control'], 'no-store');
   assert.equal(assetHeaders('/r/1.4.0/share.js', 307)['cache-control'], 'no-store');
   assert.equal(assetHeaders('/r/versions.json', 200)['cache-control'], 'no-store');
   assert.equal(assetHeaders('/r/versions.json', 200)['content-security-policy'], CSP);

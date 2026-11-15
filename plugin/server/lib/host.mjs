@@ -252,6 +252,11 @@ export function createHost({ broker, port, version, ownerName, saved = null, rtc
     if (!current(peer)) {
       return undefined;
     }
+    // New pin from the link: the host answers it, so the caller hears the new pin and stays connected.
+    if (method === 'POST' && path.replace(/\/+/g, '/') === '/api/share/new-pin') {
+      newPin(peer);
+      return reply(200, 'application/json', jsonBytes({ pin }));
+    }
     if (peer.inFlight >= IN_FLIGHT || inFlight >= SHARE_IN_FLIGHT) {
       return reply(429, 'application/json', jsonBytes({ error: 'busy' }));
     }
@@ -736,11 +741,11 @@ export function createHost({ broker, port, version, ownerName, saved = null, rtc
   }
 
   // A new pin: the room stays, every saved pin stops working, and readers connected with the old one are let go
-  // (they connect again, and hear pin-bad).
-  function newPin() {
+  // (they connect again, and hear pin-bad). `keep`, the reader who asked for it over the link, stays: it hears the pin.
+  function newPin(keep = null) {
     pin = newId();
     for (const p of share ? Object.values(share.peers) : []) {
-      if (p.rights === 'owner') {
+      if (p.rights === 'owner' && p !== keep) {
         try {
           p.channel?.close();
         } catch {

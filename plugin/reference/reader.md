@@ -185,8 +185,8 @@ bar then shows **Share**, which starts a share on click. A share server, `https:
 book names its own in `settings.shareBroker`, passes the handshake and serves the reader's interface.
 
 - **One link.** Everyone, you included, opens the same `https://specbook.jasonrowland.com/s/<room>`. The address bar
-  is always a link that can be sent as it is (a `#section` after it still works). `/specbook:open` prints it, and
-  **Copy link** in the bar copies it.
+  is always a link that can be sent as it is (a `#section` after it still works). `/specbook:open` prints it and opens
+  it for you, with your pin, and **Copy link** in the bar copies it. `localhost` keeps working too.
 - **The interface comes from the website, the book from your machine.** The page loads the reader published for your
   plugin's version under `/r/<version>/` on the share server; your book server sends only data: the book's JSON, its
   notes, and the bytes of its images and recordings. Nothing it sends runs as code there: the book's HTML (text and
@@ -196,14 +196,13 @@ book names its own in `settings.shareBroker`, passes the handshake and serves th
   script). A reader left open while you update the plugin says "This book was updated. Reload this page."; a share
   server that does not have your version yet says "This book needs a newer share server. Ask its owner to deploy it."
 - **The pin gives your powers on the link.** Without it a reader is a guest. Your pin link is the link with
-  `#pin=<pin>` after it: `/specbook:open` prints it on its own line, and **Copy pin link** in the bar's ▾ (on
-  `localhost` only) copies it. **Never send it to anyone.** Opened, the page saves the pin in that browser
+  `#pin=<pin>` after it: `/specbook:open` prints it on its own line, and **Copy pin link** in the bar's ▾ copies it. **Never send it to anyone.** Opened, the page saves the pin in that browser
   (`localStorage`, which never leaves it) and takes it out of the address at once, so the address bar is again the
   plain link; from then on that browser opens the plain link with your powers, and no name is asked. A reader with the
   pin is you: their notes are yours and their face carries your name. On the website the ▾ then has **Forget pin on
-  this device**, which removes it from that browser and reloads the page as a guest. **New pin** (in the ▾ on
-  `localhost`) makes a new pin and keeps the link: guests keep reading, and every saved pin stops working; a browser
-  that had the old one says "This pin no longer works." and goes on as a guest. `localhost` needs no pin.
+  this device**, which removes it from that browser and reloads the page as a guest. **New pin** (in the ▾) makes a new pin and keeps the link: guests keep reading, and every saved pin stops working; a browser
+  that had the old one says "This pin no longer works." and goes on as a guest (the page you pressed it on keeps the new
+  one). `localhost` needs no pin.
 - A guest names themself once; the page remembers the name, and an id for the device, in that browser. The name shows
   on their face in the share pill; notes carry no names.
 - **Everyone edits every note.** A guest can write, edit, move and delete any draft note, yours included, as you can
@@ -221,8 +220,9 @@ book names its own in `settings.shareBroker`, passes the handshake and serves th
   window while anyone does.
 - The pill's ▾ on `localhost` holds the link and **Copy**, who is here and what each is doing, **Copy pin link**,
   **New pin**, **New link** (the old link and pin link stop working; the new link has a new pin) and **Stop sharing**
-  (until the book is next opened). On the website a guest gets only the link; a reader with the pin also gets
-  **Forget pin on this device**.
+  (until the book is next opened). On the website a reader with the pin gets the same, except **New link** (it would
+  end that page's own connection; make it on `localhost`), plus **Forget pin on this device**. A guest gets only the
+  link.
 - A guest may add, edit, move and delete **their own** notes, and nothing else: no Revise, Build, Accept, stages or
   requirement edits. To ask for new wording, they drop a note saying what it should say; you act on it. The host and
   the book server both refuse everything else (403 `guest`).

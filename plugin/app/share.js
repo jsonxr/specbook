@@ -547,6 +547,18 @@
     status: status,
     showError: showError,
     forgetPin: forgetPin,
+    // For a reader who opened the book with the pin: the pin link, a new pin, and Stop sharing.
+    pinLink: function () { return role === 'owner' && pin ? location.origin + '/s/' + ROOM + '#pin=' + pin : null; },
+    newPin: function () {
+      return request('POST', '/api/share/new-pin', new TextEncoder().encode('{}')).then(function (r) {
+        var got = r.status === 200 ? JSON.parse(new TextDecoder().decode(r.bytes)) : null;
+        if (!got || !PIN_OK.test(got.pin)) { throw new Error('The book did not make a new pin.'); }
+        pin = got.pin;
+        try { localStorage.setItem(PIN_KEY, pin); } catch (e) { /* only this tab has it */ }
+        return pin;
+      });
+    },
+    stopSharing: function () { return request('POST', '/api/share/stop', new TextEncoder().encode('{}')).catch(function () {}); },
   };
 
   function start() {

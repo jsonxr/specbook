@@ -395,7 +395,7 @@ test('--detach replaces a server for the folder that runs older code, and says t
       s.stdout.on('data', d => { text += d; });
       s.on('exit', () => done(text));
     });
-    assert.match(out, /older copy of the plugin/);
+    assert.match(out, /another copy of the plugin/);
     assert.match(out, /reload any open book tab/);
     await oldExit;
     const health = await (await fetch(`http://127.0.0.1:${p}/api/health`)).json();
@@ -406,6 +406,34 @@ test('--detach replaces a server for the folder that runs older code, and says t
     const rec = JSON.parse(readFileSync(join(dir, '.server.json'), 'utf8'));
     try {
       process.kill(rec.pid);
+    } catch {
+      // already gone
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('SPECBOOK_SHARE_BROKER shares through that server, and a server started for another one is replaced', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'specbook-broker-'));
+  writeFileSync(join(dir, 'book.json'), JSON.stringify(freshBook()));
+  const p = 5000 + Math.floor(Math.random() * 900);
+  const detach = broker => new Promise(done => {
+    let text = '';
+    const s = spawn(process.execPath, [SERVE, '--data', dir, '--port', String(p), '--detach'], { stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, ...HOST_ENV, SPECBOOK_SHARE_BROKER: broker } });
+    s.stdout.on('data', d => { text += d; });
+    s.on('exit', () => done(text));
+  });
+  try {
+    const first = await detach('http://localhost:8787');
+    assert.match(first, /Share link: http:\/\/localhost:8787\/s\/[A-Za-z0-9]{22}\n/);
+    const again = await detach('http://localhost:8787');
+    assert.match(again, /already served/);
+    const other = await detach('');
+    assert.match(other, /for another share server; restarted it/);
+    assert.match(other, /Share link: https:\/\/specbook\.jasonrowland\.com\/s\//);
+  } finally {
+    try {
+      process.kill(JSON.parse(readFileSync(join(dir, '.server.json'), 'utf8')).pid);
     } catch {
       // already gone
     }

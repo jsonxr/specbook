@@ -604,8 +604,14 @@ try {
   await check('Forget pin on this device', async () => {
     await phone.click('.share-pill .share-more');
     await phone.waitForSelector('.share-menu .share-forget-pin', { timeout: 3000 });
-    if (await phone.locator('.share-menu .share-pin-copy, .share-menu .share-new-pin').count()) {
-      throw new Error('the website\'s menu offers Copy pin link or New pin');
+    // The pin holder's menu on the link: Copy pin link, New pin and Stop sharing; New link stays on localhost.
+    for (const sel of ['.share-pin-copy', '.share-new-pin', '.share-stop']) {
+      if (!(await phone.locator(`.share-menu ${sel}`).count())) {
+        throw new Error(`the pin holder's menu on the link has no ${sel}`);
+      }
+    }
+    if (await phone.locator('.share-menu button', { hasText: 'New link' }).count()) {
+      throw new Error('the menu on the link offers New link');
     }
     await Promise.all([phone.waitForNavigation(), phone.click('.share-menu .share-forget-pin')]);
     // Reloaded as a guest: asked for a name, then the book with a guest's rights.
@@ -675,6 +681,29 @@ try {
   const pinned = await pageIn(await newCtx(), 'pinned');
   await pinned.goto(pinUrl);
   await pinned.waitForFunction(() => window.SpecShare && window.SpecShare.role === 'owner', null, { timeout: 20000 });
+
+  await check('New pin from the link: this page keeps the owner\'s powers with the new pin', async () => {
+    const before = pinUrl;
+    await pinned.click('.share-pill .share-more');
+    await pinned.waitForSelector('.share-menu .share-new-pin', { timeout: 3000 });
+    await pinned.click('.share-menu .share-new-pin');
+    pinUrl = await waitFor(async () => {
+      const v = await shareOf();
+      return v.pinUrl && v.pinUrl !== before && v.pinUrl;
+    }, 5000, 'a new pin link');
+    const saved = await waitFor(async () => {
+      const k = await pinned.evaluate(key => localStorage.getItem(key), pinKeyOf(link));
+      return k === pinUrl.split('#pin=')[1] && k;
+    }, 5000, 'the new pin saved on the link page');
+    if (!saved || (await pinned.evaluate(() => window.SpecShare.role)) !== 'owner' || !(await isOwnerPage(pinned))) {
+      throw new Error('after New pin the link page lost the owner\'s powers');
+    }
+    if ((await pinned.evaluate(() => window.SpecShare.pinLink())) !== pinUrl) {
+      throw new Error('Copy pin link on the link page does not give the new pin link');
+    }
+    await pinned.keyboard.press('Escape');
+    await pinned.mouse.click(5, 300);
+  });
 
   await check('the owner tab can close and the guest stays connected', async () => {
     await guest.locator('.share-pill .face:not(.me)').first().click();

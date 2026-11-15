@@ -49,6 +49,8 @@ const CODE = (() => {
   for (const f of files) {
     hash.update(readFileSync(f));
   }
+  // The share server it was started for, too: a server started with another SPECBOOK_SHARE_BROKER is replaced.
+  hash.update(`broker:${process.env.SPECBOOK_SHARE_BROKER ?? ''}`);
   return hash.digest('hex').slice(0, 12);
 })();
 
@@ -154,27 +156,28 @@ async function alreadyServing() {
   }
 }
 
-// Opens the page, in Chrome when it is installed (otherwise the default browser), and resolves once the opener has
-// finished, so a caller can exit straight after.
-function openBrowser() {
+// Opens `target` (the book on localhost by default), in Chrome when it is installed (otherwise the default browser),
+// and resolves once the opener has finished, so a caller can exit straight after.
+function openBrowser(target = url) {
   const run = (cmd, args) => new Promise(done => {
     const p = spawn(cmd, args, { stdio: 'ignore' });
     p.on('error', () => done(1));
     p.on('exit', code => done(code));
   });
   if (process.platform === 'darwin') {
-    return run('open', ['-a', 'Google Chrome', url]).then(code => (code === 0 ? 0 : run('open', [url])));
+    return run('open', ['-a', 'Google Chrome', target]).then(code => (code === 0 ? 0 : run('open', [target])));
   }
-  return run('xdg-open', [url]);
+  return run('xdg-open', [target]);
 }
 
 // After a --detach start: the share link and the owner's pin link, once the share is live (up to 10 s). These two
 // lines are the only place the pin is ever printed. Nothing is said for a book that does not share. With
-// `installFailed`, the install failure was already said, so a failed share adds nothing.
+// `installFailed`, the install failure was already said, so a failed share adds nothing. Answers the pin link when the
+// share is live, else null.
 async function printShareLinks({ installFailed = false } = {}) {
   const settings = readJson(join(DATA, 'book.json'), null)?.settings;
   if (settings?.share === false || readJson(join(DATA, '.share.json'), null)?.stopped === true) {
-    return;
+    return null;
   }
   let view = null;
   for (let i = 0; i < 100; i++) {
@@ -187,14 +190,16 @@ async function printShareLinks({ installFailed = false } = {}) {
   if (view?.state === 'live' && view.url && view.pinUrl) {
     console.log(`Share link: ${view.url}`);
     console.log(`Your pin link (opens with your powers; never send it to anyone): ${view.pinUrl}`);
+    return view.pinUrl;
   } else if (view?.state === 'failed') {
     if (installFailed) {
-      return;
+      return null;
     }
     console.log(`Sharing could not start: ${view.error ?? 'unknown error'}`);
   } else {
     console.log('Sharing is starting; Copy link in the bar gives the link.');
   }
+  return null;
 }
 
 // A server an older copy of the plugin started for this folder: stop it and start this one on its port.
@@ -212,17 +217,17 @@ if (arg('detach') && (await alreadyServing()) === 'old') {
   for (let i = 0; i < 50 && !(await portFree(PORT)); i++) {
     await new Promise(r => setTimeout(r, 100));
   }
-  console.log('The server running this book was started by an older copy of the plugin; restarted it. Please reload any open book tab.');
+  console.log('The server running this book was started by another copy of the plugin, or for another share server; restarted it. Please reload any open book tab.');
 }
 
 if ((await alreadyServing()) === true) {
   console.log(`Spec book already served at ${url}`);
-  // Opening a book that is already served gives its links too (the running server's owner view).
-  if (arg('detach')) {
-    await printShareLinks();
-  }
+  // Opening a book that is already served gives its links too (the running server's owner view). --open opens the
+  // book on its link, with the pin (the page saves it and takes it out of the address), or on localhost when it is
+  // not shared.
+  const pinLink = arg('detach') ? await printShareLinks() : null;
   if (arg('open')) {
-    await openBrowser();
+    await openBrowser(pinLink ?? url);
   }
   process.exit(0);
 }
@@ -243,9 +248,9 @@ if (arg('detach')) {
     await new Promise(r => setTimeout(r, 100));
   }
   console.log(`Spec book served at ${url} (pid ${child.pid}). Stop with --stop.`);
-  await printShareLinks({ installFailed: !deps.ok });
+  const pinLink = await printShareLinks({ installFailed: !deps.ok });
   if (arg('open')) {
-    await openBrowser();
+    await openBrowser(pinLink ?? url);
   }
   process.exit(0);
 }
@@ -634,7 +639,7 @@ function sendEvent(event, data) {
 }
 function shareBroker() {
   try {
-    return shareBrokerOf(readBook().settings);
+    return shareBrokerOf(readBook().settings, process.env.SPECBOOK_SHARE_BROKER ?? '');
   } catch {
     return null;
   }
@@ -701,7 +706,7 @@ function startShare() {
   }
   const broker = shareBroker();
   if (!broker) {
-    setShare({ state: 'failed', error: 'book.json settings.shareBroker is not a valid share server address.' });
+    setShare({ state: 'failed', error: process.env.SPECBOOK_SHARE_BROKER ? 'SPECBOOK_SHARE_BROKER is not a valid share server address.' : 'book.json settings.shareBroker is not a valid share server address.' });
     return false;
   }
   hostFor(broker).start().catch(() => {});

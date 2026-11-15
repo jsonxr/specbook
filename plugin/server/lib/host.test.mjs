@@ -49,7 +49,7 @@ function fakeBroker() {
           send(404, { error: 'no-room' });
           return;
         }
-        send(200, { host: false, protocol: 3, keeps: true, reader: '1.4.0' });
+        send(200, { host: false, protocol: 3, keeps: true, reader: '1.0.0' });
         return;
       }
       send(404, { error: 'not-found' });
@@ -140,7 +140,7 @@ async function setup(t, { saved = null, onState } = {}) {
   const host = createHost({
     broker: `http://127.0.0.1:${brokerPort}`,
     port,
-    version: '1.4.0',
+    version: '1.0.0',
     ownerName: 'Jason',
     saved,
     rtc: { RTCPeerConnection: FakePeer },
@@ -181,7 +181,7 @@ test('start() with nothing saved opens a protocol 3 room and gives a plain link 
   assert.equal(host.state(), 'off');
   assert.equal(host.links(), null);
   await host.start();
-  assert.deepEqual(broker.posts[0], { protocol: 3, reader: '1.4.0', hours: 24 });
+  assert.deepEqual(broker.posts[0], { protocol: 3, reader: '1.0.0', hours: 24 });
   const { url, pinUrl } = host.links();
   assert.equal(url, `${brokerUrl}/s/Room000000000000000001`);
   assert.ok(!url.includes('#'));
@@ -200,7 +200,7 @@ test('start() with a saved room renews that room and keeps its link and pin', as
   assert.equal(broker.posts[0].room, saved.room);
   assert.equal(broker.posts[0].hostToken, saved.hostToken);
   assert.equal(broker.posts[0].protocol, 3);
-  assert.equal(broker.posts[0].reader, '1.4.0');
+  assert.equal(broker.posts[0].reader, '1.0.0');
   assert.equal(host.links().url, `${brokerUrl}/s/${saved.room}`);
   assert.equal(host.links().pinUrl, `${brokerUrl}/s/${saved.room}#pin=${saved.pin}`);
   assert.ok(FakeSocket.all.at(-1).url.endsWith(`/api/rooms/${saved.room}/host?token=${saved.hostToken}`));
@@ -265,11 +265,11 @@ test('rights follow the pin', async t => {
   // A guest: an owner route is refused before it reaches the book server; a read goes through, marked as theirs.
   const guest = await connect(host);
   guest.frame({ t: 'req', id: 0, method: 'GET', path: '/api/book', seq: 0, last: true, data: '' });
-  guest.frame({ t: 'hello', protocol: 3, version: '1.4.0' });
+  guest.frame({ t: 'hello', protocol: 3, version: '1.0.0' });
   const welcome = await until(() => guest.sent.find(f => f.t === 'welcome'), 'welcome');
   assert.equal(welcome.role, 'guest');
   assert.equal(welcome.protocol, 3);
-  assert.equal(welcome.version, '1.4.0');
+  assert.equal(welcome.version, '1.0.0');
   assert.equal(welcome.ownerName, 'Jason');
   assert.equal(typeof welcome.you, 'string');
   assert.ok(!guest.sent.some(f => f.t === 'res' && f.id === 0), 'a frame before hello is dropped');
@@ -282,7 +282,7 @@ test('rights follow the pin', async t => {
 
   // The pin: the same call reaches the book server as the owner's (no guest header).
   const owner = await connect(host);
-  owner.frame({ t: 'hello', protocol: 3, version: '1.4.0', pin });
+  owner.frame({ t: 'hello', protocol: 3, version: '1.0.0', pin });
   const ownerWelcome = await until(() => owner.sent.find(f => f.t === 'welcome'), 'owner welcome');
   assert.equal(ownerWelcome.role, 'owner');
   assert.equal(await call(owner, 1, 'POST', '/api/requests', '{"a":1}'), 200);
@@ -291,8 +291,9 @@ test('rights follow the pin', async t => {
   assert.equal(made.url, '/api/requests');
   assert.equal(made.body, '{"a":1}');
   assert.equal(made.headers['x-specbook-guest'], undefined);
-  // Even the owner cannot manage the share through the link.
-  assert.equal(await call(owner, 2, 'POST', '/api/share/stop', '{}'), 403);
+  // Over the link the owner may make a new pin or stop sharing, never make a new link or start the share.
+  assert.equal(await call(owner, 2, 'POST', '/api/share/new-link', '{}'), 403);
+  assert.equal(await call(owner, 3, 'POST', '/api/share', '{}'), 403);
 
   const people = host.people();
   assert.deepEqual(people.map(p => p.role).sort(), ['guest', 'owner', 'owner']);
@@ -305,7 +306,7 @@ test('a wrong pin gets pin-bad and guest rights', async t => {
   const { host, book } = await setup(t);
   await host.start();
   const ch = await connect(host);
-  ch.frame({ t: 'hello', protocol: 3, version: '1.4.0', pin: 'x'.repeat(22) });
+  ch.frame({ t: 'hello', protocol: 3, version: '1.0.0', pin: 'x'.repeat(22) });
   await until(() => ch.sent.find(f => f.t === 'welcome'), 'welcome');
   assert.equal(ch.sent[0].t, 'pin-bad');
   assert.equal(ch.sent.find(f => f.t === 'welcome').role, 'guest');
@@ -319,7 +320,7 @@ test('a reader of another protocol hears only the protocol and version', async t
   const ch = await connect(host);
   ch.frame({ t: 'hello', protocol: 2, version: '1.3.0' });
   await until(() => ch.sent.length, 'an answer');
-  assert.deepEqual(ch.sent, [{ t: 'welcome', protocol: 3, version: '1.4.0' }]);
+  assert.deepEqual(ch.sent, [{ t: 'welcome', protocol: 3, version: '1.0.0' }]);
   ch.frame({ t: 'req', id: 1, method: 'GET', path: '/api/book', seq: 0, last: true, data: '' });
   await new Promise(r => setTimeout(r, 30));
   assert.equal(ch.sent.length, 1);
@@ -331,7 +332,7 @@ test('a path that names another host is refused', async t => {
   await host.start();
   const ch = await connect(host);
   const pin = host.links().pinUrl.split('#pin=')[1];
-  ch.frame({ t: 'hello', protocol: 3, version: '1.4.0', pin });
+  ch.frame({ t: 'hello', protocol: 3, version: '1.0.0', pin });
   await until(() => ch.sent.find(f => f.t === 'welcome'), 'welcome');
   assert.equal(await call(ch, 1, 'GET', '//example.com/x'), 403);
   assert.equal(await call(ch, 2, 'GET', '/\\example.com/x'), 403);
@@ -345,7 +346,7 @@ test('live frames pass between readers and to the localhost tabs, stamped by the
   host.onLive(m => heard.push(m));
   await host.start();
   const a = await connect(host);
-  a.frame({ t: 'hello', protocol: 3, version: '1.4.0' });
+  a.frame({ t: 'hello', protocol: 3, version: '1.0.0' });
   const you = (await until(() => a.sent.find(f => f.t === 'welcome'), 'welcome')).you;
   const roster = await until(() => a.sent.find(f => f.t === 'live' && f.kind === 'roster'), 'roster');
   assert.equal(roster.you, you);
@@ -375,7 +376,7 @@ test('stop({ end: true }) ends a remembered room it is not hosting, and a later 
   await host.stop({ end: true });
   assert.deepEqual(broker.posts.at(-1), { end: `/api/rooms/${saved.room}/end`, token: saved.hostToken });
   await host.start();
-  assert.deepEqual(broker.posts.at(-1), { protocol: 3, reader: '1.4.0', hours: 24 });
+  assert.deepEqual(broker.posts.at(-1), { protocol: 3, reader: '1.0.0', hours: 24 });
 });
 
 test('a stop while starting cancels that start, and start() works again after it', async t => {
@@ -391,7 +392,7 @@ test('a stop while starting cancels that start, and start() works again after it
 
 async function ownerChannel(host) {
   const ch = await connect(host);
-  ch.frame({ t: 'hello', protocol: 3, version: '1.4.0', pin: host.links().pinUrl.split('#pin=')[1] });
+  ch.frame({ t: 'hello', protocol: 3, version: '1.0.0', pin: host.links().pinUrl.split('#pin=')[1] });
   await until(() => ch.sent.find(f => f.t === 'welcome' && f.role === 'owner'), 'owner welcome');
   return ch;
 }
@@ -399,6 +400,42 @@ async function ownerChannel(host) {
 function sendAnyway(ch, f) {
   ch.onmessage?.({ data: JSON.stringify(f) });
 }
+
+// The body of the answer to request `id`.
+function bodyOf(ch, id) {
+  return JSON.parse(Buffer.from(ch.sent.filter(f => f.t === 'res' && f.id === id).map(f => f.data).join(''), 'base64').toString('utf8'));
+}
+
+test('New pin over the link: the caller hears the new pin and stays connected; other pinned readers are let go', async t => {
+  const states = [];
+  const { host, book } = await setup(t, { onState: v => states.push(v) });
+  await host.start();
+  const old = host.links().pinUrl.split('#pin=')[1];
+  const other = await ownerChannel(host);
+  const me = await ownerChannel(host);
+  assert.equal(await call(me, 1, 'POST', '/api/share/new-pin', '{}'), 200);
+  const { pin } = bodyOf(me, 1);
+  assert.match(pin, /^[A-Za-z0-9]{22}$/);
+  assert.notEqual(pin, old);
+  assert.equal(host.links().pinUrl.split('#pin=')[1], pin);
+  assert.equal(states.at(-1).pin, pin);
+  assert.equal(other.readyState, 'closed');
+  assert.equal(me.readyState, 'open');
+  // The book server never sees the call: the host answers it itself.
+  assert.equal(book.calls.length, 0);
+  assert.equal(await call(me, 2, 'POST', '/api/requests', '{}'), 200);
+});
+
+test('a guest cannot make a new pin over the link', async t => {
+  const { host } = await setup(t);
+  await host.start();
+  const old = host.links().pinUrl;
+  const ch = await connect(host);
+  ch.frame({ t: 'hello', protocol: 3, version: '1.0.0' });
+  await until(() => ch.sent.find(f => f.t === 'welcome'), 'welcome');
+  assert.equal(await call(ch, 1, 'POST', '/api/share/new-pin', '{}'), 403);
+  assert.equal(host.links().pinUrl, old);
+});
 
 test('after newPin(), the old owner channel can make no call', async t => {
   const { host, book } = await setup(t);
@@ -428,7 +465,7 @@ test('a live draft arriving after stop() does nothing and does not throw', async
   host.onLive(m => heard.push(m));
   await host.start();
   const ch = await connect(host);
-  ch.frame({ t: 'hello', protocol: 3, version: '1.4.0' });
+  ch.frame({ t: 'hello', protocol: 3, version: '1.0.0' });
   await until(() => ch.sent.find(f => f.t === 'welcome'), 'welcome');
   await host.stop({ end: false });
   const before = heard.length;
@@ -443,7 +480,7 @@ test('a reader cannot stamp its own name, role, color or author', async t => {
   host.onLive(m => heard.push(m));
   await host.start();
   const ch = await connect(host);
-  ch.frame({ t: 'hello', protocol: 3, version: '1.4.0' });
+  ch.frame({ t: 'hello', protocol: 3, version: '1.0.0' });
   const you = (await until(() => ch.sent.find(f => f.t === 'welcome'), 'welcome')).you;
   const spoof = { role: 'owner', name: 'Owner', color: '#000000', author: 'Owner' };
   ch.frame({ t: 'live', kind: 'typing', note: 'n1', on: true, ...spoof });

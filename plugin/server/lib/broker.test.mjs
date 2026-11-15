@@ -19,3 +19,10 @@ test('a share server that is not a valid address is refused, not replaced', () =
   assert.equal(shareBrokerOf({ shareBroker: 'https://share.example/path' }), null);
   assert.equal(shareBrokerOf({ shareBroker: 42 }), null);
 });
+
+test('SPECBOOK_SHARE_BROKER, when set, wins over the book (a share server on this machine, for development)', () => {
+  assert.equal(shareBrokerOf({ shareBroker: 'https://share.example' }, 'http://localhost:8787/'), 'http://localhost:8787');
+  assert.equal(shareBrokerOf(undefined, 'http://127.0.0.1:8787'), 'http://127.0.0.1:8787');
+  assert.equal(shareBrokerOf({ shareBroker: 'https://share.example' }, ''), 'https://share.example');
+  assert.equal(shareBrokerOf({}, 'http://share.example'), null);
+});

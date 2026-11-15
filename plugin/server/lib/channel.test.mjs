@@ -87,11 +87,18 @@ test('the pin gives owner rights; anything else is a guest', () => {
   assert.equal(rightsOf(null, 'P'), 'guest');
 });
 
-test('mayCall: owners call anything but the share, guests what guestMay allows', () => {
+test('mayCall: owners call anything but the share (New pin and Stop sharing aside), guests what guestMay allows', () => {
   assert.equal(mayCall('guest', 'POST', '/api/requests'), false);
   assert.equal(mayCall('owner', 'POST', '/api/requests'), true);
-  assert.equal(mayCall('owner', 'POST', '/api/share/stop'), false);
+  assert.equal(mayCall('owner', 'POST', '/api/share/stop'), true);
+  assert.equal(mayCall('owner', 'POST', '/api/share/new-pin'), true);
+  assert.equal(mayCall('owner', 'GET', '/api/share/new-pin'), false);
+  assert.equal(mayCall('owner', 'POST', '//api/share/new-pin'), true);
+  assert.equal(mayCall('owner', 'POST', '/api/share/new-link'), false);
+  assert.equal(mayCall('owner', 'POST', '/api/share'), false);
   assert.equal(mayCall('owner', 'GET', '/api/share'), false);
+  assert.equal(mayCall('guest', 'POST', '/api/share/stop'), false);
+  assert.equal(mayCall('guest', 'POST', '/api/share/new-pin'), false);
   assert.equal(mayCall('owner', 'GET', '/api/share/events'), false);
   assert.equal(mayCall('owner', 'GET', '//api/share/events'), false);
   assert.equal(mayCall('guest', 'PUT', '/api/notes'), true);
