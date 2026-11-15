@@ -139,6 +139,7 @@ try {
 
   await check('revise locks notes', async () => {
     await page.waitForFunction(() => !document.getElementById('revise').disabled, null, { timeout: 3000 });
+    await page.locator('#claude-btn').click();
     const at = await buttonSpot('#revise');
     await page.mouse.click(at.x, at.y);
     await page.waitForFunction(() => document.getElementById('revise').disabled &&
@@ -456,6 +457,7 @@ try {
     await page.keyboard.press('Escape');
     await waitFor(() => Object.values(readNotesFile().notes).some(n => n.text === 'Reword the first requirement'), 3000, 'review.json to hold the note');
     await page.waitForFunction(() => !document.getElementById('revise').disabled, null, { timeout: 3000 });
+    await page.locator('#claude-btn').click();
     const press = await buttonSpot('#revise');
     await page.mouse.click(press.x, press.y);
     await page.waitForFunction(() => document.getElementById('claude-status').textContent === 'Revising…', null, { timeout: 3000 });
@@ -483,7 +485,7 @@ try {
       today: document.querySelector(`.rv-stack[data-key="${b}"]`)?.textContent || '',
       frame: document.querySelector('.rv-stack[data-key="todos-list-1"]')?.textContent || '',
       frames: document.querySelectorAll('figure.frame.has-rv').length,
-      count: document.getElementById('changes-btn').textContent,
+      count: document.getElementById('np-tab-changes').textContent,
       stacks: document.querySelectorAll('.rv-stack').length,
     }), { a: req.id, b: changed.id });
     if (seen.was !== before) {
@@ -492,14 +494,14 @@ try {
     if (!seen.bullet.includes('(reworded)') || !seen.frame.includes('Mockup changed') || seen.frames !== 1) {
       throw new Error(`expected a stack for the reworded today and only todos-list-1 changed: ${JSON.stringify(seen)}`);
     }
-    if (seen.count !== `Changes (${seen.stacks})`) {
+    if (seen.count !== `Changes ${seen.stacks}`) {
       throw new Error(`Changes (n) does not count the review stacks: ${JSON.stringify(seen)}`);
     }
     // Accept: the review closes, the count drops by one, and it stays closed after a reload.
     await page.locator(`.rv-acts[data-key="${req.id}"] .rv-accept`).click();
     await page.waitForFunction(id => !document.querySelector(`.rv-stack[data-key="${id}"]`), req.id, { timeout: 5000 });
-    const after = await page.evaluate(() => document.getElementById('changes-btn').textContent);
-    if (after !== `Changes (${seen.stacks - 1})`) {
+    const after = await page.evaluate(() => document.getElementById('np-tab-changes').textContent);
+    if (after !== `Changes ${seen.stacks - 1}`) {
       throw new Error(`Accept did not take exactly one review off: ${seen.count} -> ${after}`);
     }
     if (readReviewFile().accepted[req.id]?.text !== req.text) {
@@ -570,6 +572,52 @@ try {
     if (!entry.includes('Edited') || !entry.includes('details')) {
       throw new Error(`the history entry does not show its line and details: ${JSON.stringify(entry)}`);
     }
+  });
+
+  await check('the bar: View, the review keys, Requests and Claude', async () => {
+    await open();
+    // View: Screenshots on as well as Mockups is "both"; the last one checked cannot be unchecked.
+    await page.locator('#view-btn').click();
+    await page.locator('#view-shot').check();
+    if ((await page.evaluate(() => localStorage.getItem('spec-book-view'))) !== 'both') {
+      throw new Error('checking Screenshots did not show both');
+    }
+    await page.locator('#view-mock').uncheck();
+    await page.locator('#view-shot').click();
+    const view = await page.evaluate(() => [document.getElementById('view-mock').checked, document.getElementById('view-shot').checked, localStorage.getItem('spec-book-view')]);
+    if (JSON.stringify(view) !== JSON.stringify([false, true, 'shot'])) {
+      throw new Error(`View let both go, or did not keep Screenshots: ${JSON.stringify(view)}`);
+    }
+    await page.locator('#view-mock').check();
+    await page.keyboard.press('Escape');
+    // F shows only changes, J goes to the next, R opens Requests with its Changes tab.
+    const diff = await page.evaluate(() => document.body.classList.contains('diff-on'));
+    await page.keyboard.press('f');
+    if ((await page.evaluate(() => document.body.classList.contains('diff-on'))) === diff) {
+      throw new Error('F did not toggle Show only changes');
+    }
+    await page.keyboard.press('f');
+    const y0 = await page.evaluate(() => window.scrollY);
+    await page.keyboard.press('j');
+    await page.waitForFunction(y => window.scrollY !== y, y0, { timeout: 3000 });
+    if (!/^\d+ \/ \d+$/.test(await page.locator('#chg-pos').textContent())) {
+      throw new Error('the change position is not "n / N"');
+    }
+    await page.keyboard.press('r');
+    await page.waitForSelector('#notes-panel:not([hidden])');
+    await page.locator('#np-tab-changes').click();
+    const items = await page.locator('#np-changes .np-chg').count();
+    if (!items) {
+      throw new Error('the Requests pane lists no changes');
+    }
+    await page.keyboard.press('Escape');
+    // Claude ▾ holds Revise and Build, each saying what it does.
+    await page.locator('#claude-btn').click();
+    const acts = await page.evaluate(() => ['revise', 'build'].map(id => document.getElementById(id).offsetParent !== null && document.getElementById(id).querySelector('small').textContent.length > 10));
+    if (acts.join() !== 'true,true') {
+      throw new Error('Claude ▾ does not show Revise and Build with what they do');
+    }
+    await page.keyboard.press('Escape');
   });
 
   await check('no console errors', async () => {

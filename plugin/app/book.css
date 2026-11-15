@@ -179,8 +179,6 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .make-btn { font: 600 14px var(--sans); border-radius: 8px; padding: 7px 14px; cursor: pointer; border: 0; background: var(--built); color: #10291d; }
 .make-btn:disabled { opacity: .45; cursor: default; }
 /* the Claude group: Revise and Build, with what Claude is doing */
-.claude button { font: 600 14px var(--sans); border-radius: 8px; padding: 7px 14px; cursor: pointer; border: 0; background: var(--built); color: #10291d; }
-.claude button:disabled { opacity: .45; cursor: default; }
 .claude .bar-hint:empty { display: none; }
 .note-btn:disabled { opacity: .45; cursor: default; }
 /* while Claude revises, the notes stay up but cannot be moved or edited */
@@ -453,9 +451,6 @@ body.guest .add-req, body.guest .req-form, body.guest .build-banner button, body
 .sticky .st-by { display: block; margin-top: 4px; font: 600 11px/1.2 var(--sans, 'IBM Plex Sans', sans-serif); color: #6b5a14; }
 .sticky.not-mine .st-del { display: none; }
 .sticky.not-mine { cursor: default; }
-.share-host { gap: 8px; align-items: center; }
-.share-host .share-dot { width: 8px; height: 8px; border-radius: 50%; background: #2fa36b; box-shadow: 0 0 0 3px rgba(47,163,107,.25); }
-.share-host .share-count { font: 600 12px/1 var(--sans, 'IBM Plex Sans', sans-serif); }
 @media (hover: none) { .st-del { opacity: 1; } }
 
 /* Live sharing: someone else's note as they write it (read-only, over or instead of the saved sticky). */
@@ -494,3 +489,61 @@ body.guest .add-req, body.guest .req-form, body.guest .build-banner button, body
 .follow-chip[hidden] { display: none; }
 body.followed::after { content: ""; position: fixed; inset: 0; border: 3px solid var(--follower); pointer-events: none; z-index: 90; }
 @media print { .share-pill, .follow-chip { display: none; } body.followed::after { display: none; } }
+
+/* The bar (option B): View ▾, the review icon strip, the share pill, ✦ Claude ▾. */
+.bar { flex-wrap: nowrap; }
+.bar-btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+.bar-btn.ghost:hover, .bar-btn.ghost[aria-expanded="true"] { color: var(--ink); background: var(--surface); border-color: var(--line); }
+.menu-wrap { position: relative; }
+.bar-menu { position: absolute; top: calc(100% + 8px); left: 0; z-index: 80; min-width: 240px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; box-shadow: 0 12px 30px rgba(0, 0, 0, .5); display: flex; flex-direction: column; gap: 8px; }
+.bar-menu[hidden] { display: none; }
+.bar-menu-head { margin: 0; font: 600 12px var(--sans); color: var(--muted); }
+.bar-menu .bar-hint { margin: 4px 0 0; font-size: 12px; }
+.tools { display: flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 3px; }
+.tool { position: relative; width: 34px; height: 32px; display: grid; place-items: center; border: 0; background: transparent; color: var(--ink); border-radius: 7px; cursor: pointer; padding: 0; }
+.tool:hover { background: #2c2f34; }
+.tool:disabled { opacity: .4; cursor: default; background: transparent; }
+.tool svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tool-cmt { color: var(--note); }
+.tool-cmt[aria-pressed="true"] { background: var(--note); color: #222; }
+.tool[aria-pressed="true"]:not(.tool-cmt), .tool[aria-expanded="true"] { background: var(--accent); color: #0b1a33; }
+.tool-sep { width: 1px; height: 20px; background: var(--line); margin: 0 3px; }
+.tool-pos { font: 600 12px var(--sans); color: var(--muted); padding: 0 4px; white-space: nowrap; min-width: 4.5em; text-align: center; }
+.tool-badge { position: absolute; top: -5px; right: -6px; font: 700 10px var(--sans); background: var(--note); color: #222; border-radius: 8px; padding: 0 5px; border: 2px solid var(--surface); }
+.tool-badge[hidden] { display: none; }
+#share-slot { display: flex; align-items: center; }
+.claude-btn { font: 700 14px var(--sans); color: var(--claude, #d97757); background: #2a1c16; border: 1px solid #5c3a2c; border-radius: 9px; padding: 6px 12px; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 7px; }
+.claude-btn svg { fill: currentColor; }
+.claude-btn.busy svg { animation: claude-pulse 1.2s infinite; }
+.claude-busy { color: #f3c1ac; font-weight: 600; }
+@keyframes claude-pulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .claude-btn.busy svg { animation: none; } }
+.claude-pop { left: auto; right: 0; min-width: 300px; padding: 6px; gap: 2px; }
+.claude-act { display: block; width: 100%; text-align: left; background: transparent; border: 0; color: var(--ink); padding: 8px; border-radius: 8px; cursor: pointer; font: 600 14px var(--sans); }
+.claude-act:hover:not(:disabled) { background: #2a2c31; }
+.claude-act small { display: block; font: 400 12px var(--sans); color: var(--muted); margin-top: 2px; }
+.claude-act:disabled { opacity: .5; cursor: default; }
+.claude-pop #claude-status { margin: 0; padding: 0 8px 4px; }
+.claude-pop #claude-status:empty { display: none; }
+.make-btn.claude-send { background: #3a2318; color: #fff; border: 1px solid #6b3f2c; }
+.np-tabs { display: flex; gap: 4px; margin: -4px 0 12px; }
+.np-tabs button { font: 600 13px var(--sans); color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 3px 9px; cursor: pointer; }
+.np-tabs button[aria-selected="true"] { color: var(--ink); background: var(--surface); border-color: var(--line); }
+.notes-panel.tab-changes #np-list, .notes-panel.tab-changes #np-empty, .notes-panel.tab-changes #np-send { display: none; }
+.np-changes { list-style: none; padding: 0; }
+.np-chg-sec { color: var(--muted); font: 600 12px var(--sans); margin: 10px 0 4px; }
+.np-chg button { display: block; width: 100%; text-align: left; font: 13px/1.4 var(--sans); color: var(--ink); background: var(--surface); border: 0; border-left: 3px solid var(--proposed); border-radius: 0 6px 6px 0; padding: 6px 8px; margin-bottom: 6px; cursor: pointer; }
+.np-chg button:hover { background: #2a2c31; }
+body.guest #claude-menu { display: none; }
+
+/* Phone: the review strip sits at the bottom; the Requests pane fills the screen above it. */
+@media (max-width: 700px) {
+  .bar { gap: 8px; padding: 8px 10px; backdrop-filter: none; background: var(--side); } /* a filter would pin .tools to the bar */
+  .bar .view-wrap #view-btn { padding: 6px 8px; }
+  .tools { position: fixed; left: 50%; bottom: max(10px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 70; box-shadow: 0 10px 28px rgba(0, 0, 0, .55); }
+  .notes-panel { width: 100vw; bottom: 60px; }
+  .share-copy { padding: 5px 6px; }
+  .claude-btn span:not(.claude-busy) { display: none; }
+  main { padding-bottom: 70px; }
+}
+@media print { .tools, #claude-menu, .view-wrap { display: none; } }

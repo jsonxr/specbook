@@ -2048,7 +2048,12 @@
   // The toolbar, the panel, the print list
   function refresh() {
     var c = live().length;
-    notesBtn.textContent = 'Notes (' + c + ')';
+    var badge = document.getElementById('notes-count');
+    badge.textContent = String(c);
+    badge.hidden = c === 0;
+    notesBtn.title = 'Requests · R (' + c + ' note' + (c === 1 ? '' : 's') + ')';
+    document.getElementById('np-tab-notes').textContent = 'Notes ' + c;
+    document.getElementById('np-revise').textContent = '\u2726 Send ' + c + ' note' + (c === 1 ? '' : 's') + ' to Claude';
     drawAll();
     showClaude();
     renderPanel();
@@ -2276,6 +2281,10 @@
     var typing = t && t.closest && t.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
     if (typing || e.ctrlKey || e.metaKey || e.altKey || e.repeat) { return; }
     if (e.key === 'c' || e.key === 'C') { e.preventDefault(); setCommenting(!commenting); }
+    if (e.key === 'j' || e.key === 'J') { e.preventDefault(); nextChange(false); }
+    if (e.key === 'k' || e.key === 'K') { e.preventDefault(); prevChange(); }
+    if (e.key === 'f' || e.key === 'F') { e.preventDefault(); setDiff(!state.diff); }
+    if (e.key === 'r' || e.key === 'R') { e.preventDefault(); setPanel(panel.hidden); }
   });
 
   // The send message clears itself after a while, or when clicked.
@@ -2315,6 +2324,10 @@
     buildBtn.disabled = busy || !anyReady();
     document.getElementById('np-revise').disabled = reviseBtn.disabled;
     claudeStatus.textContent = busyText(c);
+    document.getElementById('claude-busy').textContent = busy ? ' \u00b7 ' + busyText(c) : '';
+    document.getElementById('claude-btn').classList.toggle('busy', busy);
+    reviseBtn.querySelector('small').textContent = reviseBtn.disabled && !busy ? 'No notes to send yet.' : 'Send your ' + live().length + ' note' + (live().length === 1 ? '' : 's') + '. Claude revises the book and you review each change.';
+    buildBtn.querySelector('small').textContent = buildBtn.disabled && !busy ? 'No section is marked Ready.' : 'Build the sections marked Ready, with tests as evidence.';
     document.querySelectorAll('.stage-btn').forEach(function (b) { b.hidden = busy; });
     // The page's edits write the book, which is locked while Claude works.
     document.querySelectorAll('.edit-ctl').forEach(function (b) {
@@ -2699,18 +2712,27 @@
   document.getElementById('toc').addEventListener('click', function () { setTimeout(barHeight, 0); });
 
   // Screens view --------------------------------------------------------------------------------------
-  document.querySelectorAll('.seg3 button').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      state.view = btn.dataset.view;
+  // View: Mockups and Screenshots (both is "both"; one always stays checked), Recordings, Coverage.
+  var viewMock = document.getElementById('view-mock');
+  var viewShot = document.getElementById('view-shot');
+  function viewFromChecks() {
+    if (!viewMock.checked && !viewShot.checked) { return null; }
+    return viewMock.checked && viewShot.checked ? 'both' : viewShot.checked ? 'shot' : 'mockup';
+  }
+  [viewMock, viewShot].forEach(function (box) {
+    box.addEventListener('change', function () {
+      var v = viewFromChecks();
+      if (!v) { box.checked = true; return; }
+      state.view = v;
       store('spec-book-view', state.view);
-      document.querySelectorAll('.seg3 button').forEach(function (b) { b.setAttribute('aria-pressed', String(b === btn)); });
       var y = window.scrollY;
       render();
       window.scrollTo(0, y);
     });
   });
   function syncViewControls() {
-    document.querySelectorAll('.seg3 button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.view === state.view)); });
+    viewMock.checked = state.view !== 'shot';
+    viewShot.checked = state.view !== 'mockup';
   }
   var cover = document.getElementById('show-coverage');
   cover.addEventListener('change', function () { document.body.classList.toggle('coverage', cover.checked); store('spec-book-coverage', cover.checked ? '1' : '0'); });
@@ -2813,15 +2835,19 @@
   // Changes: the open reviews, each with its stack, hiding the sections and chapters that have none.
   var changesBtn = document.getElementById('changes-btn');
   var nextBtn = document.getElementById('next-chg');
+  var prevBtn = document.getElementById('prev-chg');
   var sentToggle = document.getElementById('sent-toggle');
   var showSent = document.getElementById('show-sent');
   function updateChangesBar() {
     var n = state.reviews ? state.reviews.count : 0;
-    changesBtn.textContent = 'Changes (' + n + ')';
     changesBtn.setAttribute('aria-pressed', String(state.diff));
     changesBtn.classList.toggle('has-chg', n > 0);
-    changesBtn.title = n ? 'Show the changes not yet accepted, each with its review' : 'Nothing to review';
-    nextBtn.hidden = !state.diff || n === 0;
+    changesBtn.title = n ? 'Show only changes · F' : 'Show only changes · F (nothing to review)';
+    nextBtn.disabled = n === 0;
+    prevBtn.disabled = n === 0;
+    document.getElementById('np-tab-changes').textContent = 'Changes ' + n;
+    changePosSoon();
+    if (!panel.hidden && panelTab === 'changes') { renderChangeList(); }
     sentToggle.hidden = !state.diff;
     document.getElementById('since').textContent = '';
     document.body.classList.toggle('diff-on', state.diff);
@@ -3014,15 +3040,100 @@
   });
   document.addEventListener('pointerdown', function (e) { if (inBook(e) || (e.target && e.target.closest && e.target.closest('.side'))) { userMoved(); } }, true);
 
+  // The previous item under review above the top of the screen (the last one from the top).
+  function prevChange() {
+    var all = changeEls();
+    if (!all.length) { return; }
+    var top = barBottom() + 4;
+    var above = all.filter(function (e) { return e.getBoundingClientRect().top < top - 2; });
+    var at = above.length ? above[above.length - 1] : all[all.length - 1];
+    window.scrollTo({ top: at.getBoundingClientRect().top + window.scrollY - top - 12, behavior: 'smooth' });
+    at.classList.remove('chg-flash');
+    void at.offsetWidth;
+    at.classList.add('chg-flash');
+  }
+  function changeEls() { return [].slice.call(main.querySelectorAll('.has-rv')).filter(function (e) { return e.getClientRects().length; }); }
+  // "3 / 189": the first change at or below the top of the screen, of all of them.
+  var posQueued = false;
+  function changePosSoon() {
+    if (posQueued) { return; }
+    posQueued = true;
+    requestAnimationFrame(function () {
+      posQueued = false;
+      var all = changeEls();
+      var top = barBottom();
+      var i = 0;
+      while (i < all.length && all[i].getBoundingClientRect().bottom < top) { i++; }
+      document.getElementById('chg-pos').textContent = (all.length ? Math.min(i + 1, all.length) : 0) + ' / ' + all.length;
+    });
+  }
+  window.addEventListener('scroll', changePosSoon, { passive: true });
   changesBtn.addEventListener('click', function () { setDiff(!state.diff); });
   nextBtn.addEventListener('click', function () { nextChange(false); });
+  prevBtn.addEventListener('click', prevChange);
+  // The Requests pane's tabs: the notes (what is asked), and every change under review.
+  var panelTab = 'notes';
+  function setPanelTab(t) {
+    panelTab = t;
+    document.getElementById('np-tab-notes').setAttribute('aria-selected', String(t === 'notes'));
+    document.getElementById('np-tab-changes').setAttribute('aria-selected', String(t === 'changes'));
+    panel.classList.toggle('tab-changes', t === 'changes');
+    document.getElementById('np-changes').hidden = t !== 'changes';
+    if (t === 'changes') { renderChangeList(); }
+  }
+  document.getElementById('np-tab-notes').addEventListener('click', function () { setPanelTab('notes'); });
+  document.getElementById('np-tab-changes').addEventListener('click', function () { setPanelTab('changes'); });
+  function renderChangeList() {
+    var list = document.getElementById('np-changes');
+    list.innerHTML = '';
+    var lastSec = null;
+    [].slice.call(main.querySelectorAll('.has-rv')).forEach(function (e) {
+      var sec = e.closest('.bk-sec');
+      var secTitle = sec ? (sec.querySelector('h3') || {}).textContent || '' : '';
+      if (sec && sec !== lastSec) {
+        lastSec = sec;
+        var h = el('li', { class: 'np-chg-sec' });
+        h.textContent = secTitle.replace(/\s+/g, ' ').trim();
+        list.appendChild(h);
+      }
+      var li = el('li', { class: 'np-chg' });
+      var b = el('button', { type: 'button' });
+      var label = (e.dataset.label || '') + (e.dataset.quote ? ': ' + plain(e.dataset.quote) : '');
+      var txt = (label || e.textContent || '').replace(/\s+/g, ' ').trim();
+      b.textContent = txt.length > 140 ? txt.slice(0, 139) + '\u2026' : txt;
+      b.addEventListener('click', function () {
+        if (!e.getClientRects().length) { setDiff(true); }
+        window.scrollTo({ top: e.getBoundingClientRect().top + window.scrollY - barBottom() - 12, behavior: 'smooth' });
+        e.classList.remove('chg-flash');
+        void e.offsetWidth;
+        e.classList.add('chg-flash');
+      });
+      li.appendChild(b);
+      list.appendChild(li);
+    });
+    if (!list.children.length) { list.appendChild(el('li', { class: 'np-empty' })).textContent = 'Nothing to review.'; }
+  }
+
+  // The bar's menus: View and Claude. A click elsewhere or Escape closes them.
+  function menuToggle(btnId, popId) {
+    var btn = document.getElementById(btnId), pop = document.getElementById(popId);
+    function set(open) { pop.hidden = !open; btn.setAttribute('aria-expanded', String(open)); }
+    btn.addEventListener('click', function (e) { e.stopPropagation(); set(pop.hidden); });
+    pop.addEventListener('click', function (e) { if (!e.target.closest('button')) { e.stopPropagation(); } });
+    document.addEventListener('click', function (e) { if (!pop.hidden && !pop.contains(e.target)) { set(false); } });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !pop.hidden) { set(false); btn.focus(); } });
+    return set;
+  }
+  menuToggle('view-btn', 'view-menu');
+  var setClaudeMenu = menuToggle('claude-btn', 'claude-pop');
+  ['revise', 'build'].forEach(function (id) { document.getElementById(id).addEventListener('click', function () { setClaudeMenu(false); }); });
   if (store('spec-book-diff') === '1') { state.diff = true; }
 
   fetchBook().then(function (data) {
     var savedView = store('spec-book-view');
     if (savedView === 'shot' || savedView === 'both') {
       state.view = savedView;
-      document.querySelectorAll('.seg3 button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.view === savedView)); });
+      syncViewControls();
     }
     if (state.evidence.byId) {
       document.getElementById('coverage-group').hidden = false;
