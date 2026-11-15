@@ -169,8 +169,9 @@ function openBrowser() {
 }
 
 // After a --detach start: the share link and the owner's pin link, once the share is live (up to 10 s). These two
-// lines are the only place the pin is ever printed. Nothing is said for a book that does not share.
-async function printShareLinks() {
+// lines are the only place the pin is ever printed. Nothing is said for a book that does not share. With
+// `installFailed`, the install failure was already said, so a failed share adds nothing.
+async function printShareLinks({ installFailed = false } = {}) {
   const settings = readJson(join(DATA, 'book.json'), null)?.settings;
   if (settings?.share === false || readJson(join(DATA, '.share.json'), null)?.stopped === true) {
     return;
@@ -187,6 +188,9 @@ async function printShareLinks() {
     console.log(`Share link: ${view.url}`);
     console.log(`Your pin link (opens with your powers; never send it to anyone): ${view.pinUrl}`);
   } else if (view?.state === 'failed') {
+    if (installFailed) {
+      return;
+    }
     console.log(`Sharing could not start: ${view.error ?? 'unknown error'}`);
   } else {
     console.log('Sharing is starting; Copy link in the bar gives the link.');
@@ -213,6 +217,10 @@ if (arg('detach') && (await alreadyServing()) === 'old') {
 
 if ((await alreadyServing()) === true) {
   console.log(`Spec book already served at ${url}`);
+  // Opening a book that is already served gives its links too (the running server's owner view).
+  if (arg('detach')) {
+    await printShareLinks();
+  }
   if (arg('open')) {
     await openBrowser();
   }
@@ -235,7 +243,7 @@ if (arg('detach')) {
     await new Promise(r => setTimeout(r, 100));
   }
   console.log(`Spec book served at ${url} (pid ${child.pid}). Stop with --stop.`);
-  await printShareLinks();
+  await printShareLinks({ installFailed: !deps.ok });
   if (arg('open')) {
     await openBrowser();
   }

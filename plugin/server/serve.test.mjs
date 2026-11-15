@@ -1079,6 +1079,26 @@ test('without the share library the book is still served, and the share says it 
   }
 });
 
+test('--detach on a book that is already served prints its link and pin link', async () => {
+  const dir = ownBook();
+  const s = await ownServer(dir);
+  try {
+    const view = await shareUntil(isLive, s.at);
+    const out = await new Promise(done => {
+      let text = '';
+      const p = spawn(process.execPath, [SERVE, '--data', dir, '--port', new URL(s.at).port, '--detach'], { stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, ...HOST_ENV } });
+      p.stdout.on('data', d => { text += d; });
+      p.on('exit', () => done(text));
+    });
+    assert.match(out, /already served at/);
+    assert.ok(out.includes(`Share link: ${view.url}\n`), out);
+    assert.ok(out.includes(`Your pin link (opens with your powers; never send it to anyone): ${view.pinUrl}\n`), out);
+  } finally {
+    await s.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('--detach with the share library in place prints the link and the pin link', async () => {
   const dir = ownBook();
   const p = 5000 + Math.floor(Math.random() * 900);
