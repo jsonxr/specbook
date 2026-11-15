@@ -31,10 +31,9 @@ cpSync(join(PLUGIN, 'starter'), data, { recursive: true });
   const b = JSON.parse(readFileSync(bookFile, 'utf8'));
   // A long path among the sources, as real books have: it must wrap on a phone.
   b.sources = [...(b.sources ?? []), { label: 'SMS program (planned)', path: 'docs/specs/notifications/design-sms-program-and-other-long-names.md' }];
-  // Requirements that point at a screen state and at a component, for the chips under them.
+  // A requirement that points at a screen state, for the chip under it (the starter's FLT-36VG points at a component).
   const reqOf = id => b.chapters.flatMap(c => c.sections).flatMap(s => s.requirements || []).find(r => r.id === id);
   reqOf('TOD-LGXT').screens = [{ screen: 'SCR-3WRX', state: 'empty' }];
-  reqOf('FLT-36VG').screens = [{ screen: 'SCR-Y6S2' }];
   // The filter bar outlined where the filters section shows it.
   b.chapters.find(c => c.id === 'filters').sections.find(s => s.id === 'bar').shows = [{ state: 'SCR-3WRX.activeonly', highlight: 'SCR-Y6S2' }];
   writeFileSync(bookFile, JSON.stringify(b, null, 2));

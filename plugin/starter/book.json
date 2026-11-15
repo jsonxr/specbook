@@ -185,6 +185,11 @@
             {
               "id": "FLT-36VG",
               "text": "Under the field, <b>All</b>, <b>Active</b> and <b>Completed</b> filter the list; <b>All</b> is chosen at first.",
+              "screens": [
+                {
+                  "screen": "SCR-Y6S2"
+                }
+              ],
               "change": "add"
             },
             {
@@ -361,7 +366,8 @@
           "when": {
             "also": "All chosen"
           },
-          "mockup": "mockups/screens/SCR-Y6S2/all.html"
+          "mockup": "mockups/screens/SCR-Y6S2/all.html",
+          "change": "add"
         },
         {
           "id": "active",
@@ -369,7 +375,8 @@
           "when": {
             "also": "Active chosen"
           },
-          "mockup": "mockups/screens/SCR-Y6S2/active.html"
+          "mockup": "mockups/screens/SCR-Y6S2/active.html",
+          "change": "add"
         }
       ]
     }
