@@ -62,17 +62,27 @@ cpSync(join(PLUGIN, 'starter'), data, { recursive: true });
 // An image inside a mockup (a shadow root), as a book's logo is: readers load it over the channel.
 mkdirSync(join(data, 'mockups', 'assets'), { recursive: true });
 writeFileSync(join(data, 'mockups', 'assets', 'dot.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64'));
-appendFileSync(join(data, 'mockups', 'todos-list-1.html'), '<img class="probe" src="/data/mockups/assets/dot.png" alt="">');
+appendFileSync(join(data, 'mockups', 'screens', 'SCR-3WRX', 'list.html'), '<img class="probe" src="/data/mockups/assets/dot.png" alt="">');
 // The book shares through the local share server.
 const bookFile = join(data, 'book.json');
 const bookJson = JSON.parse(readFileSync(bookFile, 'utf8'));
 bookJson.settings = { ...(bookJson.settings ?? {}), shareBroker: BROKER };
 // More mockups than the host answers for one reader at once, as a real book has; and one whose HTML tries to run.
-const due = bookJson.chapters.flatMap(c => c.sections).find(s => s.id === 'due');
-due.frames = Array.from({ length: 30 }, (_, i) => ({ id: `later-due-${i + 1}`, caption: `Extra ${i + 1}`, mockup: `mockups/extra-${i + 1}.html` }));
-due.frames.forEach((f, i) => writeFileSync(join(data, f.mockup), `<div class="phone"><p>Extra ${i + 1}</p></div>`));
-due.frames.push({ id: 'later-due-pwn', caption: 'Hostile', mockup: 'mockups/pwn.html' });
-writeFileSync(join(data, 'mockups', 'pwn.html'), '<div class="phone"><p>Hostile</p><script>window.__pwned=1</script><img src=x onerror="window.__pwned=2"></div>');
+// They are the states of one screen, all shown by the later-due section.
+const EXTRA = 'SCR-XTR4';
+const extraDir = join(data, 'mockups', 'screens', EXTRA);
+mkdirSync(extraDir, { recursive: true });
+const extra = { id: EXTRA, name: 'ExtrasScreen', kind: 'screen', states: [] };
+for (let i = 1; i <= 30; i++) {
+  extra.states.push({ id: `extra${i}`, name: `Extra ${i}`, when: { role: 'anyone' }, mockup: `mockups/screens/${EXTRA}/extra${i}.html` });
+  writeFileSync(join(extraDir, `extra${i}.html`), `<div class="phone"><p>Extra ${i}</p></div>`);
+}
+extra.states.push({ id: 'pwn', name: 'Hostile', when: { role: 'anyone' }, mockup: `mockups/screens/${EXTRA}/pwn.html` });
+writeFileSync(join(extraDir, 'pwn.html'), '<div class="phone"><p>Hostile</p><script>window.__pwned=1</script><img src=x onerror="window.__pwned=2"></div>');
+bookJson.screens.push(extra);
+bookJson.usedIds = [...(bookJson.usedIds ?? []), EXTRA];
+const due = bookJson.chapters.find(c => c.id === 'later').sections.find(s => s.id === 'due');
+due.shows = [...(due.shows ?? []), ...extra.states.map(st => ({ state: `${EXTRA}.${st.id}` }))];
 writeFileSync(bookFile, JSON.stringify(bookJson, null, 2));
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
