@@ -180,6 +180,48 @@ test('Revise twice writes one request, marks its notes sent; notes lock while re
   assert.equal(existsSync(join(data, 'revise')), false);
 });
 
+test('Stop withdraws a Revise: its notes are drafts again and the book unlocks; nothing running is a 409', async () => {
+  assert.deepEqual(await api('POST', '/api/claude/stop'), { status: 409, body: { error: 'idle' } });
+  assert.equal((await api('PUT', '/api/notes', { rev: 0, notes: { a: note } })).status, 200);
+  assert.equal((await api('POST', '/api/revise', { items: [item], noteIds: ['a'] })).status, 201);
+  const sent = (await api('GET', '/api/claude')).body.sent;
+  assert.equal(sent.kind, 'revise');
+  assert.equal(sent.count, 1);
+  assert.ok(Date.parse(sent.at));
+  assert.deepEqual(await api('POST', '/api/claude/stop'), { status: 200, body: { stopped: 'revise', count: 1 } });
+  const claude = (await api('GET', '/api/claude')).body;
+  assert.deepEqual([claude.state, claude.sent], ['idle', null]);
+  assert.equal(readReview(data).notes.a.status, 'draft');
+});
+
+test('a guest cannot stop Claude', async () => {
+  assert.equal((await api('PUT', '/api/notes', { rev: 0, notes: { a: note } })).status, 200);
+  assert.equal((await api('POST', '/api/revise', { items: [item], noteIds: ['a'] })).status, 201);
+  assert.equal((await asGuest('POST', '/api/claude/stop')).status, 403);
+  assert.equal((await api('GET', '/api/claude')).body.state, 'revising');
+});
+
+test('Stop withdraws a Revise: its notes are drafts again and the book unlocks; nothing running is a 409', async () => {
+  assert.deepEqual(await api('POST', '/api/claude/stop'), { status: 409, body: { error: 'idle' } });
+  assert.equal((await api('PUT', '/api/notes', { rev: 0, notes: { a: note } })).status, 200);
+  assert.equal((await api('POST', '/api/revise', { items: [item], noteIds: ['a'] })).status, 201);
+  const sent = (await api('GET', '/api/claude')).body.sent;
+  assert.equal(sent.kind, 'revise');
+  assert.equal(sent.count, 1);
+  assert.ok(Date.parse(sent.at));
+  assert.deepEqual(await api('POST', '/api/claude/stop'), { status: 200, body: { stopped: 'revise', count: 1 } });
+  const claude = (await api('GET', '/api/claude')).body;
+  assert.deepEqual([claude.state, claude.sent], ['idle', null]);
+  assert.equal(readReview(data).notes.a.status, 'draft');
+});
+
+test('a guest cannot stop Claude', async () => {
+  assert.equal((await api('PUT', '/api/notes', { rev: 0, notes: { a: note } })).status, 200);
+  assert.equal((await api('POST', '/api/revise', { items: [item], noteIds: ['a'] })).status, 201);
+  assert.equal((await asGuest('POST', '/api/claude/stop')).status, 403);
+  assert.equal((await api('GET', '/api/claude')).body.state, 'revising');
+});
+
 test('/api/claude says when the book or a mockup last changed on disk', async () => {
   const first = (await api('GET', '/api/claude')).body.bookAt;
   assert.ok(first > 0);

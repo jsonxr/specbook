@@ -370,6 +370,34 @@ export function sendNotes(data, ids, now) {
   saveReview(data, { ...review, notes, tries, opened, where });
 }
 
+// Undoes sendNotes for a withdrawn Revise: the listed notes still `sent` go back to `draft`, and each item's last try
+// made of only those notes is dropped. Returns how many notes went back. Anything Claude already changed stays.
+export function unsendNotes(data, ids) {
+  const review = readReview(data);
+  const notes = { ...review.notes };
+  const back = new Set();
+  for (const id of ids) {
+    if (Object.hasOwn(notes, id) && notes[id].status === 'sent') {
+      notes[id] = { ...notes[id], status: 'draft' };
+      back.add(id);
+    }
+  }
+  const tries = { ...review.tries };
+  for (const [key, list] of Object.entries(tries)) {
+    const last = list[list.length - 1];
+    if (last && Array.isArray(last.notes) && last.notes.length > 0 && last.notes.every(id => back.has(id))) {
+      tries[key] = list.slice(0, -1);
+      if (tries[key].length === 0) {
+        delete tries[key];
+      }
+    }
+  }
+  if (back.size > 0) {
+    saveReview(data, { ...review, notes, tries });
+  }
+  return back.size;
+}
+
 export function setNotesStatus(data, ids, status) {
   const review = readReview(data);
   const notes = { ...review.notes };

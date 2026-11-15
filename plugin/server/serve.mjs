@@ -23,7 +23,7 @@ import { acceptItem, addNote, changeItem, currentSnapshot, forgetItem, readHisto
 import { migrateReview } from './lib/migrate-review.mjs';
 import { createMinter } from './lib/ids.mjs';
 import { claudeState } from './lib/claude-state.mjs';
-import { fileBuildRequests, writeRequest } from './lib/requests.mjs';
+import { fileBuildRequests, stopRequest, writeRequest } from './lib/requests.mjs';
 import { listBuilds, reviewCall, stopBuild } from './lib/builds.mjs';
 import { findRequirement, findSection, listSections, setUserStage } from './lib/book-model.mjs';
 import { ensureIgnores, findProjectRoot } from './lib/gitignore.mjs';
@@ -1091,6 +1091,16 @@ const server = createServer(async (req, res) => {
       writeJsonAtomic(join(DATA, 'book.json'), book);
       forgetItem(DATA, requirement[1]);
       json(res, 200, { id: requirement[1], demoted });
+      return;
+    }
+    if (path === '/api/claude/stop' && req.method === 'POST') {
+      // Stop in the reader's Claude menu: withdraw what Claude is working on. The skills notice (next-request --check).
+      const stopped = stopRequest(DATA);
+      if (!stopped) {
+        json(res, 409, { error: 'idle' });
+        return;
+      }
+      json(res, 200, stopped);
       return;
     }
     if (path === '/api/builds/pending/cancel' && req.method === 'POST') {

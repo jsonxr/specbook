@@ -59,6 +59,8 @@ export function claudeState(data, now = Date.now()) {
   return {
     state,
     request: oldest ? oldest.file : null,
+    // What was sent, for the reader's running row: its kind, when, and how many notes or sections.
+    sent: oldest ? { kind: oldest.request.kind ?? 'revise', at: oldest.request.createdAt ?? null, count: (oldest.request.kind === 'build' ? oldest.request.sections : oldest.request.items)?.length ?? 0 } : null,
     build,
     stale,
     review: builds.length > 0 ? { builds, pending: builds.reduce((n, b) => n + b.pending, 0) } : null,
