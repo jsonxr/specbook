@@ -5,16 +5,16 @@
 //   GET  /                         the plugin's front page (public/index.html)
 //   GET  /s/<room>                 the guest page (public/guest.html): asks a name, connects, loads the reader
 //   GET  /guest.js                 its script
-//   POST /api/rooms                { hours, protocol } -> { room, hostToken, expiresAt }   (the host tab; CORS for localhost)
+//   POST /api/rooms                { hours, protocol, reader } -> { room, hostToken, expiresAt }   (the host tab; CORS for localhost)
 //                                  { ..., room, hostToken }: renews that room, or opens it again under its id
-//   GET  /api/rooms/<room>          { host, protocol, keeps }: whether the room exists, its host is there, its protocol,
+//   GET  /api/rooms/<room>          { host, protocol, reader, keeps }: whether the room exists, its host is there, its protocol,
 //                                  and that this server renews and reopens rooms (open() with { room, hostToken })
 //   POST /api/rooms/<room>/end      { token }: ends the room (the host's local server, or its tab)
 //   GET  /api/rooms/<room>/host    WebSocket, ?token=hostToken
 //   GET  /api/rooms/<room>/guest   WebSocket; while the host is away it waits, and hears host-online when it comes
 //   GET  /api/rooms/<room>/ice     { iceServers }: STUN, plus TURN when the TURN secrets are set
 import { DurableObject } from 'cloudflare:workers';
-import { GUEST_IDLE_MS, isLocalOrigin, MAX_GUESTS, MAX_MESSAGE, STUN, countRoom, fromGuest, fromHost, mayMintTurn, mayWait, roomHours, roomProtocol, turnServers, validId, WAIT_MS } from './rules.mjs';
+import { CSP, GUEST_IDLE_MS, isLocalOrigin, MAX_GUESTS, MAX_MESSAGE, STUN, countRoom, fromGuest, fromHost, mayMintTurn, mayWait, newId, pageFor, roomHours, roomProtocol, turnServers, validId, validReader, WAIT_MS } from './rules.mjs';
 
 
 export default {
@@ -25,12 +25,17 @@ export default {
     if (path === '/' || path === '/index.html') {
       return env.ASSETS.fetch(new Request(new URL('/index.html', url)));
     }
-    if (/^\/s\/[A-Za-z0-9_-]+\/?$/.test(path)) {
-      const page = await env.ASSETS.fetch(new Request(new URL('/guest.html', url)));
-      const headers = new Headers(page.headers);
-      headers.set('referrer-policy', 'no-referrer');
-      headers.set('cache-control', 'no-store');
-      return new Response(page.body, { status: page.status, headers });
+    const share = /^\/s\/([A-Za-z0-9_-]+)\/?$/.exec(path);
+    if (share) {
+      return sharePage(request, env, url, share[1]);
+    }
+    // The reader, by version: a published folder never changes, so it is cached for good; the list of versions is not.
+    if (path.startsWith('/r/')) {
+      const res = await env.ASSETS.fetch(request);
+      const headers = new Headers(res.headers);
+      headers.set('content-security-policy', CSP);
+      headers.set('cache-control', path === '/r/versions.json' ? 'no-store' : 'public, max-age=31536000, immutable');
+      return new Response(res.body, { status: res.status, headers });
     }
     if (path === '/guest.js') {
       return env.ASSETS.fetch(request);
@@ -53,6 +58,45 @@ export default {
     return new Response('Not found', { status: 404 });
   },
 };
+
+// The versions of the reader this site holds (public/r/versions.json): a list of versions, or { versions: [...] }.
+async function readerVersions(env, url) {
+  try {
+    const res = await env.ASSETS.fetch(new Request(new URL('/r/versions.json', url)));
+    const body = res.ok ? await res.json() : [];
+    const list = Array.isArray(body) ? body : body?.versions;
+    return Array.isArray(list) ? list.filter(validReader) : [];
+  } catch {
+    return [];
+  }
+}
+
+function newest(versions) {
+  const key = v => v.split('.').map(Number);
+  return [...versions].sort((a, b) => {
+    const [x, y] = [key(a), key(b)];
+    return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
+  }).at(-1);
+}
+
+// /s/<room>: the guest page that matches the room's protocol and reader version.
+async function sharePage(request, env, url, id) {
+  const info = await env.BROKER.get(env.BROKER.idFromName('broker')).fetch(new Request(new URL(`/api/rooms/${id}`, url)));
+  const room = info.ok ? await info.json() : null;
+  const versions = await readerVersions(env, url);
+  const page = pageFor(room, versions);
+  const version = page.kind === 'reader' ? page.version : newest(versions);
+  // With no reader published at all, the old guest page is all there is.
+  const legacy = page.kind === 'legacy' || !version;
+  const res = await env.ASSETS.fetch(new Request(new URL(legacy ? '/guest.html' : `/r/${version}/share.html`, url)));
+  const headers = new Headers(res.headers);
+  headers.set('referrer-policy', 'no-referrer');
+  headers.set('cache-control', 'no-store');
+  if (!legacy) {
+    headers.set('content-security-policy', CSP);
+  }
+  return new Response(res.body, { status: res.status, headers });
+}
 
 // The owner's book tab runs on the local server (http://localhost:<port>), so it calls this server across origins.
 function corsFor(request) {
@@ -128,7 +172,7 @@ export class Broker extends DurableObject {
     }
     // Whether the room still exists, and whether its host is there.
     if (!m[2]) {
-      return json(200, { host: this.ctx.getWebSockets(`host:${m[1]}`).length > 0, protocol: room.protocol ?? 1, keeps: true });
+      return json(200, { host: this.ctx.getWebSockets(`host:${m[1]}`).length > 0, protocol: room.protocol ?? 1, reader: room.reader, keeps: true });
     }
     // The host ends its room: its tab on New link or Stop, or its local server when it stops.
     if (m[2] === 'end') {
@@ -245,8 +289,11 @@ export class Broker extends DurableObject {
     if (!rate.ok) {
       return json(429, { error: 'too-many-rooms' });
     }
-    const id = keep ? body.room : randomId(16);
+    const id = keep ? body.room : newId();
     const room = { hostToken: keep ? body.hostToken : randomId(24), expiresAt: until, created: now, protocol: roomProtocol(body.protocol) };
+    if (validReader(body.reader)) {
+      room.reader = body.reader;
+    }
     await this.ctx.storage.put(`room:${id}`, room);
     await this.schedule();
     return json(201, { room: id, hostToken: room.hostToken, expiresAt: new Date(room.expiresAt).toISOString(), keeps: true });
@@ -315,7 +362,7 @@ export class Broker extends DurableObject {
         ws.send(JSON.stringify({ type: 'ice', iceServers }));
         return;
       }
-      const out = fromGuest(msg, me.gid);
+      const out = fromGuest(msg, me.gid, ((await this.room(me.room))?.protocol ?? 1));
       if (!out || me.offered) {
         return;
       }
@@ -329,7 +376,7 @@ export class Broker extends DurableObject {
       await this.close(me.room, true);
       return;
     }
-    const out = fromHost(msg);
+    const out = fromHost(msg, ((await this.room(me.room))?.protocol ?? 1));
     if (out) {
       for (const g of this.ctx.getWebSockets(`g:${me.room}:${out.to}`)) {
         g.send(JSON.stringify(out.out));

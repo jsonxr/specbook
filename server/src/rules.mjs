@@ -6,14 +6,53 @@ export const MAX_MESSAGE = 64 * 1024; // bytes in one handshake message
 export const DEFAULT_HOURS = 8;
 export const MAX_HOURS = 24;
 export const GUEST_IDLE_MS = 60_000; // a guest's handshake socket is closed after this while the host is there
-export const PROTOCOL = 2;
+export const PROTOCOL = 3;
 export const WAIT_MS = 3600_000; // a guest waits this long for a host that is away before its socket closes
-export const WAIT_PER_IP = 3; // guests one address may have waiting in one room // the newest wire protocol between a host tab and a guest page
+export const WAIT_PER_IP = 3; // guests one address may have waiting in one room
+// The newest wire protocol between a host and a guest page (3: the book server hosts, no signatures).
 export const TURN_PER_ROOM = 30; // relay credentials one room may hand out
 export const TURN_PER_IP = 30; // relay credentials one address may get in a day
 export const STUN = [{ urls: 'stun:stun.cloudflare.com:3478' }];
 
 const ID = /^[A-Za-z0-9_-]{16,64}$/;
+
+const BASE62 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+const VERSION = /^\d+\.\d+\.\d+$/;
+
+// The CSP of the reader pages (/s/<room> on protocol 3 and /r/*): only scripts from this site run.
+export const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https:; img-src 'self' blob: data: https:; font-src 'self' https: data:; media-src 'self' blob:; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+
+// A new room id: 22 base-62 characters, without bias (a byte of 248 or more is skipped, then byte % 62).
+export function newId(bytes = a => crypto.getRandomValues(a)) {
+  let id = '';
+  while (id.length < 22) {
+    const buf = new Uint8Array(32);
+    const got = bytes(buf) ?? buf;
+    for (const b of got) {
+      if (b < 248 && id.length < 22) {
+        id += BASE62[b % 62];
+      }
+    }
+  }
+  return id;
+}
+
+// Whether a reader version may go into a path.
+export function validReader(v) {
+  return typeof v === 'string' && VERSION.test(v);
+}
+
+// The page a room's guests get: the old guest page (protocol below 3), the reader of the room's version, or the newest
+// reader when the room's version is not published (or the room is not there), which tells the guest itself.
+export function pageFor(room, versions) {
+  if (!room) {
+    return { kind: 'none' };
+  }
+  if ((room.protocol ?? 1) < 3) {
+    return { kind: 'legacy' };
+  }
+  return versions.includes(room.reader) ? { kind: 'reader', version: room.reader } : { kind: 'missing', version: room.reader };
+}
 
 export function validId(id) {
   return typeof id === 'string' && ID.test(id);
@@ -48,20 +87,32 @@ export function countRoom(window, now) {
 }
 
 // A guest's message the host may hear: only an offer, passed on with the broker's id for the guest.
-export function fromGuest(msg, gid) {
-  if (!msg || msg.type !== 'offer' || typeof msg.sdp !== 'string' || typeof msg.sig !== 'string') {
+// From protocol 3 the offer is not signed.
+export function fromGuest(msg, gid, protocol = 1) {
+  const signed = protocol < 3;
+  if (!msg || msg.type !== 'offer' || typeof msg.sdp !== 'string' || (signed && typeof msg.sig !== 'string')) {
     return null;
   }
-  return { type: 'offer', from: gid, key: String(msg.key ?? ''), name: String(msg.name ?? ''), device: String(msg.device ?? '').slice(0, 64), sdp: msg.sdp, sig: msg.sig, protocol: roomProtocol(msg.protocol) };
+  const out = { type: 'offer', from: gid, key: String(msg.key ?? ''), name: String(msg.name ?? ''), device: String(msg.device ?? '').slice(0, 64), sdp: msg.sdp };
+  if (signed) {
+    out.sig = msg.sig;
+  }
+  out.protocol = protocol >= 3 ? protocol : roomProtocol(msg.protocol);
+  return out;
 }
 
 // A host's message for one guest: an answer or a rejection, addressed by `to`.
-export function fromHost(msg) {
+export function fromHost(msg, protocol = 1) {
   if (!msg || typeof msg.to !== 'string') {
     return null;
   }
-  if (msg.type === 'answer' && typeof msg.sdp === 'string' && typeof msg.sig === 'string') {
-    return { to: msg.to, out: { type: 'answer', sdp: msg.sdp, sig: msg.sig } };
+  if (msg.type === 'answer' && typeof msg.sdp === 'string') {
+    if (protocol >= 3) {
+      return { to: msg.to, out: { type: 'answer', sdp: msg.sdp } };
+    }
+    if (typeof msg.sig === 'string') {
+      return { to: msg.to, out: { type: 'answer', sdp: msg.sdp, sig: msg.sig } };
+    }
   }
   if (msg.type === 'reject') {
     return { to: msg.to, out: { type: 'reject', error: String(msg.error ?? 'rejected') } };

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isLocalOrigin, ROOMS_PER_HOUR, TURN_PER_IP, TURN_PER_ROOM, mayMintTurn, countRoom, fromGuest, fromHost, roomHours, turnServers, validId, roomProtocol, mayWait, WAIT_MS } from './rules.mjs';
+import { isLocalOrigin, ROOMS_PER_HOUR, TURN_PER_IP, TURN_PER_ROOM, mayMintTurn, countRoom, fromGuest, fromHost, roomHours, turnServers, validId, roomProtocol, mayWait, WAIT_MS, newId, validReader, pageFor, PROTOCOL, CSP } from './rules.mjs';
 
 test('room length is clamped to 1-24 hours, 8 by default', () => {
   assert.equal(roomHours(undefined), 8);
@@ -58,7 +58,8 @@ test('only a page on this machine is a local origin', () => {
 test('a room speaks the protocol its host asked for, 1 when it asked none', () => {
   assert.equal(roomProtocol(2), 2);
   assert.equal(roomProtocol(undefined), 1);
-  assert.equal(roomProtocol(9), 2);
+  assert.equal(roomProtocol(3), 3);
+  assert.equal(roomProtocol(9), 3);
   assert.equal(roomProtocol('x'), 1);
 });
 
@@ -73,4 +74,51 @@ test('a guest may wait for a host only in a room that has had one, three at most
   assert.equal(mayWait({ hosted: true, waitingFromIp: 2 }), true);
   assert.equal(mayWait({ hosted: true, waitingFromIp: 3 }), false);
   assert.equal(WAIT_MS, 3600_000, 'a guest waits an hour for the host at most');
+});
+
+test('newId gives 22 base-62 characters, skipping biased bytes', () => {
+  for (let i = 0; i < 1000; i++) {
+    assert.match(newId(), /^[A-Za-z0-9]{22}$/);
+  }
+  const cycle = [248, 255, 0];
+  let n = 0;
+  const source = a => {
+    for (let i = 0; i < a.length; i++) {
+      a[i] = cycle[n++ % 3];
+    }
+    return a;
+  };
+  const id = newId(source);
+  assert.equal(id[0], 'A');
+  assert.equal(id, 'A'.repeat(22));
+});
+
+test('a 22-character id, base-62 or with a dash, is a valid id', () => {
+  assert.equal(validId('aB3dE6gH9jK2mN5pQ8sT1v'), true);
+  assert.equal(validId('aB3dE6gH9jK2mN5pQ8-T1v'), true);
+});
+
+test('a reader version is three dot-separated numbers', () => {
+  assert.equal(validReader('1.4.0'), true);
+  assert.equal(validReader('1.4'), false);
+  assert.equal(validReader('../1.4.0'), false);
+  assert.equal(validReader('1.4.0/x'), false);
+  assert.equal(validReader(undefined), false);
+});
+
+test('protocol 3 needs no signature from the guest or the host', () => {
+  const offer = { type: 'offer', sdp: 's', key: 'k', name: 'n', device: 'd' };
+  assert.deepEqual(fromGuest(offer, 'g', 3), { type: 'offer', from: 'g', key: 'k', name: 'n', device: 'd', sdp: 's', protocol: 3 });
+  assert.equal(fromGuest(offer, 'g', 2), null);
+  assert.deepEqual(fromHost({ type: 'answer', to: 'g', sdp: 's' }, 3), { to: 'g', out: { type: 'answer', sdp: 's' } });
+  assert.equal(fromHost({ type: 'answer', to: 'g', sdp: 's' }, 2), null);
+  assert.equal(PROTOCOL, 3);
+});
+
+test('the page a room gets follows its protocol and reader version', () => {
+  assert.deepEqual(pageFor(null, ['1.4.0']), { kind: 'none' });
+  assert.deepEqual(pageFor({ protocol: 2 }, []), { kind: 'legacy' });
+  assert.deepEqual(pageFor({ protocol: 3, reader: '1.4.0' }, ['1.4.0']), { kind: 'reader', version: '1.4.0' });
+  assert.deepEqual(pageFor({ protocol: 3, reader: '1.5.0' }, ['1.4.0']), { kind: 'missing', version: '1.5.0' });
+  assert.match(CSP, /^default-src 'self'; script-src 'self';/);
 });
