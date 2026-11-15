@@ -174,10 +174,12 @@ drawn once per state, with every requirement about it. Pressing **Book** goes ba
     role), each captioned with its computed caption (role pill, then the non-default values' labels) and its `also`
     words; on a phone they stack. They follow the View menu's Mockups and Screenshots, and a state with a `change`
     draws **Today** and **Proposed** panes as in the chapter view.
-  - **Coverage**: one line per combination the screen accounts for, each written as its `when` in words ("Role: User,
-    Data: No todos"): drawn, same as another state, absent, or **not drawn** (an `undrawn` entry, with the
-    requirement ids it is about and its note). It is a list, not a review, and opens none. Components list their
-    variables and states the same way.
+  - **Coverage**: one row per combination the screen accounts for. Each row starts with the caption (role pill, then
+    the non-default values' labels; "Any" when it is empty), then says **Drawn** (a link to the state), **Same as
+    <caption>** (a link to the state it copies), **Never shown: <words>** (an `absent` state) or **Not drawn** (an
+    `undrawn` entry) followed by `: <note>` and links to the requirement ids it is about. It is a list, not a
+    review, and opens none. Components list their states the same way. Review panels write a `when` in words
+    ("Role: User, Data: No todos") instead.
   - **Requirements**, grouped under "<chapter> › <section>" in book order, each with its id, its text, the state it
     narrows to, and "via <component>" when it reached the screen through a component the screen places.
   - For a component, **Used on**: a small picture of every state that places it, the component outlined, each

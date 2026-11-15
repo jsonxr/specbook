@@ -106,8 +106,8 @@ banner, header) is listed once and drawn once per state. A section does not copy
 - **A state** is one picture and the conditions behind it. Its key is `<screen-id>.<state-id>` (`SCR-3WRX.empty`),
   unique in the book; state ids are unique within the screen and never change. **`when`** sets some of the screen's
   variables, `{ "role": "user", "data": "empty" }`; a variable left out means **any** value. `when.role` may be
-  a list (`["visitor", "guest"]`) on an `absent` or `sameAs` state only. State ids are not shown; do not make an id
-  read like a caption.
+  a list (`["visitor", "guest"]`) on an `absent` or `sameAs` state only. A state with no role and only default
+  values has an empty caption and is captioned by its id, so give it a non-default value or a `name`.
 - **The caption is computed**, never typed: the role pill (from `when.role`; "Anyone" for `anyone`; one pill each for
   a list), then the labels of the values that are not defaults, in the screen's variable order, joined by ", ". When
   only the role differs, the caption is the pill alone. A component has no pill: its caption is the labels of all its
