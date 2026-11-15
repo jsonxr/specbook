@@ -71,19 +71,18 @@ test('expandMockup places the component, outlines it, and flags problems', () =>
   const book = fixture();
   const m = mockups();
   const out = M.expandMockup(book, m, m['mockups/home-admin.html']);
-  assert.match(out, /data-key="SCR-CARD\.waiting"/);
+  assert.match(out, /<div class="sb-component" data-key="SCR-CARD\.waiting">/);
   assert.match(out, /<b>3 waiting<\/b>/);
   assert.doesNotMatch(out, /sb-hl/);
-  assert.match(M.expandMockup(book, m, m['mockups/home-admin.html'], { highlight: 'SCR-CARD' }), /class="[^"]*sb-hl/);
+  assert.match(M.expandMockup(book, m, m['mockups/home-admin.html'], { highlight: 'SCR-CARD' }), /<div class="sb-component sb-hl" data-key="SCR-CARD\.waiting">/);
 
   m['mockups/card-waiting.html'] = '<sb-component id="SCR-CARD" state="waiting"></sb-component>';
   const loop = M.expandMockup(book, m, m['mockups/card-waiting.html']);
-  assert.match(loop, /sb-missing/);
-  assert.match(loop, /SCR-CARD\.waiting/);
+  assert.match(loop, /<div class="sb-missing"[^>]*>Missing component SCR-CARD\.waiting<\/div>/);
 
   const gone = M.expandMockup(book, m, '<sb-component id="SCR-CARD" state="gone"></sb-component>');
-  assert.match(gone, /sb-missing/);
-  assert.match(gone, /SCR-CARD\.gone/);
+  assert.match(gone, /<div class="sb-missing"[^>]*>Missing component SCR-CARD\.gone<\/div>/);
+  assert.match(M.expandMockup(book, m, '<sb-component id="SCR-NOPE" state="x"></sb-component>'), />Missing component SCR-NOPE\.x<\/div>/);
 });
 
 test('usedOn, shownIn and gateKeys', () => {
@@ -129,19 +128,31 @@ test('screenProblem is null for a valid book and names the culprit otherwise', (
     const p = M.screenProblem(b, exists, mk);
     assert.ok(p && re.test(p), String(p));
   };
-  bad(b => { b.screens[1].id = 'SCR-HOME'; }, /SCR-HOME/);
-  bad(b => { b.screens[1].name = 'HomeScreen'; }, /HomeScreen/);
-  bad(b => { b.screens[0].states[1].id = 'member'; }, /SCR-HOME.*member/);
-  bad(b => { b.screens[0].states[0].sameAs = 'admin'; }, /SCR-HOME\.member/);
-  bad(b => { b.screens[0].states[2].sameAs = 'visitor'; }, /SCR-HOME\.visitor/);
-  bad(b => { b.screens[0].states[2].sameAs = 'ghost'; }, /ghost/);
-  bad(b => { b.screens[0].states.push({ id: 'x', name: 'X', sameAs: 'visitor' }); }, /SCR-HOME\.x.*sameAs/);
-  bad(b => { b.screens[0].states[0].sameAs = 'visitor'; delete b.screens[0].states[0].mockup; b.screens[0].states[2].sameAs = 'member'; }, /cycle/);
-  bad(b => { b.screens[0].states[0].when.role = 'wizard'; }, /wizard/);
-  bad(b => {}, /home-admin\.html/, p => p !== 'mockups/home-admin.html');
-  bad(b => {}, /SCR-NOPE/, all, { ...m, 'mockups/home-member.html': '<sb-component id="SCR-NOPE" state="a"></sb-component>' });
-  bad(b => {}, /SCR-CARD\.gone/, all, { ...m, 'mockups/home-member.html': '<sb-component id="SCR-CARD" state="gone"></sb-component>' });
-  bad(b => { b.chapters[0].sections[0].requirements[0].screens = [{ screen: 'SCR-HOME', state: 'ghost' }]; }, /R1.*ghost/);
-  bad(b => { b.chapters[0].sections[0].shows[0].state = 'SCR-HOME.ghost'; }, /SCR-HOME\.ghost/);
-  bad(b => { b.chapters[0].sections[1].shows[0].highlight = 'SCR-CARD'; b.chapters[0].sections[1].shows[0].state = 'SCR-HOME.member'; }, /SCR-CARD.*SCR-HOME\.member/);
+  bad(b => { b.screens[1].id = 'SCR-HOME'; }, /share the id SCR-HOME/);
+  bad(b => { b.screens[1].name = 'HomeScreen'; }, /named HomeScreen/);
+  bad(b => { b.screens[0].states[1].id = 'member'; }, /two states with the id member/);
+  bad(b => { b.screens[0].states[0].sameAs = 'admin'; }, /SCR-HOME\.member needs exactly one/);
+  bad(b => { b.screens[0].states[2].sameAs = 'visitor'; }, /SCR-HOME\.visitor is in a sameAs cycle/);
+  bad(b => { b.screens[0].states[2].sameAs = 'ghost'; }, /SCR-HOME\.visitor is sameAs ghost, which is not a state/);
+  bad(b => { b.screens[0].states.push({ id: 'x', name: 'X', sameAs: 'visitor' }); }, /SCR-HOME\.x is sameAs visitor, which is itself sameAs/);
+  bad(b => { b.screens[0].states[0].sameAs = 'visitor'; delete b.screens[0].states[0].mockup; b.screens[0].states[2].sameAs = 'member'; }, /SCR-HOME\.member is in a sameAs cycle/);
+  bad(b => { b.screens[0].states[0].when.role = 'wizard'; }, /SCR-HOME\.member names the role wizard/);
+  bad(b => {}, /SCR-HOME\.admin points at a missing picture, mockups\/home-admin\.html/, p => p !== 'mockups/home-admin.html');
+  bad(b => {}, /places SCR-NOPE, which is not a component/, all, { ...m, 'mockups/home-member.html': '<sb-component id="SCR-NOPE" state="a"></sb-component>' });
+  bad(b => {}, /places SCR-CARD\.gone, which is not a state/, all, { ...m, 'mockups/home-member.html': '<sb-component id="SCR-CARD" state="gone"></sb-component>' });
+  bad(b => { b.chapters[0].sections[0].requirements[0].screens = [{ screen: 'SCR-HOME', state: 'ghost' }]; }, /Requirement R1 names SCR-HOME\.ghost, which is not a state/);
+  bad(b => { b.chapters[0].sections[0].shows[0].state = 'SCR-HOME.ghost'; }, /Section c-a shows SCR-HOME\.ghost, which is not a state/);
+  bad(b => { b.chapters[0].sections[1].shows[0].highlight = 'SCR-CARD'; b.chapters[0].sections[1].shows[0].state = 'SCR-HOME.member'; }, /Section c-b highlights SCR-CARD, which SCR-HOME\.member does not place/);
+  bad(b => { b.screens.push(null); }, /Screen entry 3 is not an object/);
+  bad(b => { b.screens[0].states.push({ name: 'no id' }); }, /State 4 of screen SCR-HOME is not an object with an id/);
+  bad(b => { b.screens[0].states.push(7); }, /State 4 of screen SCR-HOME/);
+});
+
+test('a highlight may name a component nested inside a placed component', () => {
+  const book = fixture();
+  book.screens.push({ id: 'SCR-DOT', name: 'Dot', kind: 'component', states: [{ id: 'on', name: 'On', mockup: 'mockups/dot.html' }] });
+  const m = { ...mockups(), 'mockups/dot.html': '<i>dot</i>', 'mockups/card-waiting.html': '<sb-component id="SCR-DOT" state="on"></sb-component>' };
+  book.chapters[0].sections[0].shows[0].highlight = 'SCR-DOT';
+  assert.equal(M.screenProblem(book, all, m), null);
+  assert.match(M.expandMockup(book, m, m['mockups/home-admin.html'], { highlight: 'SCR-DOT' }), /sb-component sb-hl" data-key="SCR-DOT\.on"/);
 });

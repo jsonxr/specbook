@@ -287,6 +287,7 @@
       if (!has(out.screens, s.id)) { out.screens[s.id] = s; }
       if (!has(out.byName, s.name)) { out.byName[s.name] = s.id; }
       (s.states || []).forEach(function (st) {
+        if (!st || typeof st !== 'object') { return; }
         var key = stateKey(s.id, st.id);
         if (!has(out.states, key)) { out.states[key] = { screen: s, state: st }; }
       });
@@ -344,7 +345,7 @@
   }
 
   // Replaces each component tag in `html` with that state's picture (nested tags too), wrapped in
-  // <div class="sb-comp" data-key="...">. A cycle, a missing component or state, or a missing picture becomes a
+  // <div class="sb-component" data-key="...">. A cycle, a missing component or state, or a missing picture becomes a
   // visible <div class="sb-missing"> naming the key. opts.highlight is a component id to outline (class sb-hl).
   function expandMockup(book, mockups, html, opts) {
     return expandIn(screenIndex(book), mockups || {}, html, opts || {}, [], 0);
@@ -354,17 +355,17 @@
     return String(html || '').replace(/<sb-component\b[^>]*>(?:\s*<\/sb-component>)?/gi, function (tag) {
       var id = attr(tag, 'id');
       var key = stateKey(id, attr(tag, 'state'));
-      var missing = function (why) {
-        return '<div class="sb-missing" data-key="' + escapeHtml(key) + '">' + escapeHtml(why + ': ' + key) + '</div>';
+      var missing = function () {
+        return '<div class="sb-missing" data-key="' + escapeHtml(key) + '">' + escapeHtml('Missing component ' + key) + '</div>';
       };
       var d = drawnIn(ix, key);
-      if (!d || !d.state.mockup) { return missing('Missing component state'); }
+      if (!d || !d.state.mockup) { return missing(); }
       var drawn = stateKey(d.screen.id, d.state.id);
-      if (path.indexOf(drawn) >= 0 || depth >= MAX_DEPTH) { return missing('Component placed inside itself'); }
+      if (path.indexOf(drawn) >= 0 || depth >= MAX_DEPTH) { return missing(); }
       var text = mockups[d.state.mockup];
-      if (typeof text !== 'string') { return missing('Missing picture'); }
+      if (typeof text !== 'string') { return missing(); }
       var inner = expandIn(ix, mockups, text, opts, path.concat(drawn), depth + 1);
-      var cls = 'sb-comp' + (opts.highlight && opts.highlight === id ? ' sb-hl' : '');
+      var cls = 'sb-component' + (opts.highlight && opts.highlight === id ? ' sb-hl' : '');
       return '<div class="' + cls + '" data-key="' + escapeHtml(key) + '">' + inner + '</div>';
     });
   }
@@ -441,21 +442,30 @@
     return out;
   }
 
+  // Component ids placed by a state's pictures, at any depth.
+  function placedFromState(ix, mockups, state) {
+    var out = [];
+    var seen = {};
+    var walk = function (st) {
+      placedKeys(mockups, st).forEach(function (key) {
+        var c = has(ix.states, key) ? ix.states[key] : null;
+        var id = key.split('.')[0];
+        pushOnce(out, id);
+        if (c && !has(seen, key)) { seen[key] = true; walk(c.state); }
+      });
+    };
+    walk(state);
+    return out;
+  }
+
   // Component ids placed, at any depth, by any state of a screen.
   function placedComponents(ix, mockups, screenId) {
     var out = [];
-    var seen = {};
-    var walk = function (screen) {
-      (screen.states || []).forEach(function (st) {
-        placedKeys(mockups, st).forEach(function (key) {
-          var c = has(ix.states, key) ? ix.states[key] : null;
-          var id = key.split('.')[0];
-          pushOnce(out, id);
-          if (c && !has(seen, id)) { seen[id] = true; walk(c.screen); }
-        });
+    if (has(ix.screens, screenId)) {
+      (ix.screens[screenId].states || []).forEach(function (st) {
+        placedFromState(ix, mockups, st).forEach(function (id) { if (id !== screenId) { pushOnce(out, id); } });
       });
-    };
-    if (has(ix.screens, screenId)) { seen[screenId] = true; walk(ix.screens[screenId]); }
+    }
     return out;
   }
 
@@ -498,6 +508,16 @@
     var ids = {};
     var names = {};
     var roles = ((book && book.roles) || []).map(function (r) { return r.id; });
+    for (var g = 0; g < screens.length; g++) {
+      var sg = screens[g];
+      if (!sg || typeof sg !== 'object' || !sg.id) { return 'Screen entry ' + (g + 1) + ' is not an object with an id'; }
+      var sts = sg.states || [];
+      for (var h = 0; h < sts.length; h++) {
+        if (!sts[h] || typeof sts[h] !== 'object' || !sts[h].id) {
+          return 'State ' + (h + 1) + ' of screen ' + sg.id + ' is not an object with an id';
+        }
+      }
+    }
     for (var i = 0; i < screens.length; i++) {
       var s = screens[i];
       if (has(ids, s.id)) { return 'Two screens share the id ' + s.id; }
@@ -574,7 +594,7 @@
           problem = 'Section ' + fullId + ' shows ' + (sh && sh.state) + ', which is not a state';
         } else if (sh.highlight) {
           var d = drawnIn(ix, sh.state);
-          var here = d ? placedKeys(mockups, d.state).map(function (k) { return k.split('.')[0]; }) : [];
+          var here = d ? placedFromState(ix, mockups, d.state) : [];
           if (here.indexOf(sh.highlight) < 0) {
             problem = 'Section ' + fullId + ' highlights ' + sh.highlight + ', which ' + sh.state + ' does not place';
           }
