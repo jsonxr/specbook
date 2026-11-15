@@ -22,14 +22,23 @@
   var shared = !!window.SpecShare;
   var DROP = 'script, iframe, frame, frameset, object, embed, base, meta, link[rel~="import" i]';
   var URL_ATTRS = { href: 1, src: 1, 'xlink:href': 1, action: 1, formaction: 1 };
-  var ANIMATED = { to: 1, from: 1, values: 1 }; // an SVG <animate>/<set> can write a javascript: href
-  function jsUrl(v) { return /^javascript:/i.test(String(v).replace(/[\u0000- ]/g, '')); }
+  // An SVG <animate>/<set> can write any attribute: one that animates a link's target is dropped whole, and the values
+  // of the rest are checked item by item (values is a ;-separated list).
+  var ANIMATORS = { animate: 1, set: 1, animatemotion: 1, animatetransform: 1 };
+  var ANIMATED = { to: 1, from: 1, by: 1, values: 1 };
+  var LINK_ATTRS = { href: 1, 'xlink:href': 1 };
+  function jsUrl(v) { return /^javascript:/i.test(String(v).replace(/[\u0000-\u0020]/g, '')); }
+  function anyJsUrl(v) { return String(v).split(';').some(jsUrl); }
   function scrub(root) {
     Array.prototype.forEach.call(root.querySelectorAll(DROP), function (e) { e.remove(); });
     Array.prototype.forEach.call(root.querySelectorAll('*'), function (e) {
+      if (ANIMATORS[e.localName.toLowerCase()] && LINK_ATTRS[String(e.getAttribute('attributeName') || '').trim().toLowerCase()]) {
+        e.remove();
+        return;
+      }
       Array.prototype.slice.call(e.attributes).forEach(function (a) {
         var n = a.name.toLowerCase();
-        if (n.indexOf('on') === 0 || ((URL_ATTRS[n] || ANIMATED[n]) && jsUrl(a.value))) { e.removeAttribute(a.name); }
+        if (n.indexOf('on') === 0 || (URL_ATTRS[n] && jsUrl(a.value)) || (ANIMATED[n] && anyJsUrl(a.value))) { e.removeAttribute(a.name); }
       });
       if (e.content && e.tagName === 'TEMPLATE') { scrub(e.content); }
     });

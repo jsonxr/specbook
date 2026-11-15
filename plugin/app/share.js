@@ -17,31 +17,32 @@
 // While the host is away the room stays: this page waits on its socket for host-online, without polling.
 (function () {
   'use strict';
+  // The owner's pin link (#pin=<pin>): taken out of the address first of all, before any check that could stop this
+  // file, without a reload, so it is never left in the address bar, the history, or a copied link. It is saved for this
+  // room in this browser; localStorage never leaves the browser (a cookie would go to the website with every request).
+  var given = /^#pin=(.*)$/.exec(location.hash);
+  if (given) {
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { location.hash = ''; }
+  }
+  var m = /^\/s\/([A-Za-z0-9_-]+)\/?$/.exec(location.pathname);
+  var PIN_OK = /^[A-Za-z0-9]{22}$/;
+  var PIN_KEY = m ? 'specbook-pin:' + m[1] : '';
+  var pin = '';
+  if (given && m && PIN_OK.test(given[1])) {
+    try { localStorage.setItem(PIN_KEY, given[1]); } catch (e) { pin = given[1]; }
+  }
+  given = null;
+
   var PROTOCOL = 3;
   var CHUNK = 12000;
-  var m = /^\/s\/([A-Za-z0-9_-]+)\/?$/.exec(location.pathname);
   var meta = document.querySelector('meta[name="specbook-reader"]');
   var READER = meta ? meta.getAttribute('content') || '' : '';
   if (!m || !/^\d+\.\d+\.\d+$/.test(READER)) { return; }
   var ROOM = m[1];
-  var WAITING = 'The book isn’t open right now. This page will reconnect when it is.';
+  var WAITING = 'The book isn\u2019t open right now. This page will reconnect when it is.';
   var UPDATED = 'This book was updated. Reload this page.';
   var PIN_BAD = 'This pin no longer works.';
 
-  // The owner's pin link (#pin=<pin>): the pin is saved for this room in this browser, and taken out of the address at
-  // once, without a reload, so it is never left in the address bar, the history, or a copied link. localStorage never
-  // leaves the browser (a cookie would go to the website with every request).
-  var PIN_KEY = 'specbook-pin:' + ROOM;
-  var PIN_OK = /^[A-Za-z0-9]{22}$/;
-  var pin = '';
-  var given = /^#pin=(.*)$/.exec(location.hash);
-  if (given) {
-    history.replaceState(null, '', location.pathname + location.search);
-    if (PIN_OK.test(given[1])) {
-      try { localStorage.setItem(PIN_KEY, given[1]); } catch (e) { pin = given[1]; }
-    }
-  }
-  given = null;
   try {
     var saved = localStorage.getItem(PIN_KEY) || '';
     if (PIN_OK.test(saved)) { pin = saved; }
@@ -468,13 +469,16 @@
   // they are loaded over the connection and shown from a blob URL, typed as media only.
   var media = {};
   var MEDIA = { IMG: ['src'], VIDEO: ['src', 'poster'], SOURCE: ['src'] };
-  var MEDIA_TYPE = /^(image|video|audio)\/[A-Za-z0-9.+-]+$/;
+  // Only raster images and plain video and audio keep their type: anything else (an SVG above all, which is a document
+  // that can hold script, on this site's origin) is an opaque blob that no browser renders as a page.
+  var MEDIA_TYPES = { 'image/png': 1, 'image/jpeg': 1, 'image/gif': 1, 'image/webp': 1, 'image/avif': 1, 'image/bmp': 1,
+    'video/mp4': 1, 'video/webm': 1, 'video/quicktime': 1, 'video/ogg': 1, 'audio/mpeg': 1, 'audio/mp4': 1, 'audio/ogg': 1, 'audio/wav': 1, 'audio/webm': 1 };
   function mediaUrl(path) {
     if (!Object.prototype.hasOwnProperty.call(media, path)) {
       media[path] = window.fetch(path).then(function (r) {
         if (!r.ok) { throw new Error('not found'); }
         var type = (r.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-        return r.arrayBuffer().then(function (buf) { return new Blob([buf], { type: MEDIA_TYPE.test(type) ? type : 'application/octet-stream' }); });
+        return r.arrayBuffer().then(function (buf) { return new Blob([buf], { type: Object.prototype.hasOwnProperty.call(MEDIA_TYPES, type) ? type : 'application/octet-stream' }); });
       }).then(function (b) { return URL.createObjectURL(b); });
       media[path].catch(function () { delete media[path]; });
     }

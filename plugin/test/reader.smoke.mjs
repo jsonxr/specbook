@@ -940,6 +940,78 @@ try {
     }
   });
 
+  // On the website (window.SpecShare set by share.js) the book's HTML is someone else's: book.js cleans it before it is
+  // drawn. Here a stand-in SpecShare is set before the reader runs, the book's lede and one mockup carry every trick,
+  // and nothing may run or survive. A localhost page, without SpecShare, draws the same HTML as it is.
+  await check('clean() strips scripts, handlers and javascript: URLs when shared', async () => {
+    const LEDE = 'Lede <img id="x-img" src="/no-such.png" onerror="window.__pwned=1">' +
+      '<a id="x-js" href=" java\tscript:window.__pwned=2">a</a><a id="x-ctl" href="java&#x0A;script:window.__pwned=3">b</a>' +
+      '<a id="x-ok" href="#top">ok</a><form id="x-form" action="javascript:window.__pwned=4"><button id="x-fa" formaction="javascript:1">f</button></form>';
+    const MOCK = '<p id="m-kept" style="color:red">kept</p><script>window.__pwned=5</script><iframe id="m-ifr" srcdoc="x"></iframe>' +
+      '<object id="m-obj"></object><embed id="m-emb"><base href="https://evil.example/"><meta http-equiv="refresh" content="0;url=https://evil.example/">' +
+      '<link rel="import" href="/x.html"><frame id="m-frame">' +
+      '<svg><a id="m-svga" xlink:href="javascript:window.__pwned=6"><text>t</text>' +
+      '<set id="m-set" attributeName="href" to="javascript:window.__pwned=7"/>' +
+      '<animate id="m-anim" attributeName="xlink:href" values="#;javascript:window.__pwned=8"/></a>' +
+      '<rect><animate id="m-fill" attributeName="fill" values="red; javascript:window.__pwned=9" dur="1s"/></rect></svg>' +
+      '<button id="m-btn" onclick="window.__pwned=10" formaction="javascript:window.__pwned=11">b</button>' +
+      '<template><img id="m-tpl" src="/no-such.png" onerror="window.__pwned=12"></template>';
+    const MOCK_PATH = 'mockups/todos-list-1.html';
+    const draw = async shared => {
+      const ctx = await browser.newContext({ reducedMotion: 'reduce', viewport: { width: 1400, height: 900 } });
+      const p = await ctx.newPage();
+      if (shared) {
+        await p.addInitScript(() => {
+          const no = () => {};
+          window.SpecShare = { protocol: 3, me: { name: 'Owner' }, role: 'owner', ownerName: 'Owner', ready: Promise.resolve(),
+            request: () => new Promise(no), send: () => false, onLive: no, onPeerState: no, onChanged: no, status: no, showError: no, forgetPin: no };
+        });
+      }
+      await p.route('**/api/book', async route => {
+        const r = await route.fetch();
+        const j = await r.json();
+        j.book.lede = LEDE;
+        await route.fulfill({ response: r, json: j });
+      });
+      await p.route(`**/data/${MOCK_PATH}*`, route => route.fulfill({ status: 200, contentType: 'text/html', body: MOCK }));
+      await p.goto(URL);
+      await p.waitForSelector('#todos-list > h3');
+      await p.waitForFunction(m => { const h = document.querySelector(`[data-mockup="${m}"]`); return h && h.shadowRoot && h.shadowRoot.getElementById('m-kept'); }, MOCK_PATH, { timeout: 5000 });
+      await sleep(300);
+      const got = await p.evaluate(m => {
+        const sr = document.querySelector(`[data-mockup="${m}"]`).shadowRoot;
+        const at = (root, id, a) => { const e = root.getElementById ? root.getElementById(id) : root.querySelector('#' + id); return e ? e.getAttribute(a) : 'gone'; };
+        const has = s => !!sr.querySelector(s);
+        const tpl = sr.querySelector('template');
+        return {
+          pwned: window.__pwned,
+          imgOnerror: at(document, 'x-img', 'onerror'), js: at(document, 'x-js', 'href'), ctl: at(document, 'x-ctl', 'href'), ok: at(document, 'x-ok', 'href'),
+          action: at(document, 'x-form', 'action'), fa: at(document, 'x-fa', 'formaction'),
+          kept: !!sr.getElementById('m-kept'), style: has('style'),
+          dropped: ['script', 'iframe', 'object', 'embed', 'base', 'meta', 'link[rel=import]', 'frame', '#m-set', '#m-anim'].filter(has),
+          svga: at(sr, 'm-svga', 'xlink:href'), fill: at(sr, 'm-fill', 'values'), fillKept: has('#m-fill'),
+          btn: at(sr, 'm-btn', 'onclick'), btnFa: at(sr, 'm-btn', 'formaction'),
+          tpl: tpl && tpl.content.querySelector('#m-tpl') ? tpl.content.querySelector('#m-tpl').getAttribute('onerror') : 'gone',
+        };
+      }, MOCK_PATH);
+      await ctx.close();
+      return got;
+    };
+    const s = await draw(true);
+    const bad = [];
+    if (s.pwned !== undefined) { bad.push(`book HTML ran (__pwned=${s.pwned})`); }
+    for (const [k, v] of Object.entries({ imgOnerror: s.imgOnerror, js: s.js, ctl: s.ctl, action: s.action, fa: s.fa, svga: s.svga, fill: s.fill, btn: s.btn, btnFa: s.btnFa, tpl: s.tpl })) {
+      if (v !== null) { bad.push(`${k} kept ${JSON.stringify(v)}`); }
+    }
+    if (s.ok !== '#top') { bad.push(`a # link lost its href (${s.ok})`); }
+    if (s.dropped.length) { bad.push(`still there: ${s.dropped.join(', ')}`); }
+    if (!s.kept || !s.style || !s.fillKept) { bad.push('cleaning removed what it should keep (styled text, the mockup <style>, a harmless <animate>)'); }
+    // On localhost the owner's own book is drawn as it is.
+    const l = await draw(false);
+    if (l.imgOnerror !== 'window.__pwned=1' || !l.dropped.includes('#m-set')) { bad.push(`localhost changed the book's HTML: ${JSON.stringify(l)}`); }
+    if (bad.length) { throw new Error(bad.join('; ')); }
+  });
+
   await check('no console errors', async () => {
     if (errors.length) {
       throw new Error(errors.join('\n     '));
