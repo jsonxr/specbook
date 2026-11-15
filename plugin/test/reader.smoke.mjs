@@ -31,6 +31,10 @@ cpSync(join(PLUGIN, 'starter'), data, { recursive: true });
   const b = JSON.parse(readFileSync(bookFile, 'utf8'));
   // A long path among the sources, as real books have: it must wrap on a phone.
   b.sources = [...(b.sources ?? []), { label: 'SMS program (planned)', path: 'docs/specs/notifications/design-sms-program-and-other-long-names.md' }];
+  // Requirements that point at a screen state and at a component, for the chips under them.
+  const reqOf = id => b.chapters.flatMap(c => c.sections).flatMap(s => s.requirements || []).find(r => r.id === id);
+  reqOf('TOD-LGXT').screens = [{ screen: 'SCR-3WRX', state: 'empty' }];
+  reqOf('FLT-36VG').screens = [{ screen: 'SCR-Y6S2' }];
   writeFileSync(bookFile, JSON.stringify(b, null, 2));
 }
 
@@ -532,7 +536,7 @@ try {
     const changed = list.requirements.find(r => r.change === 'change');
     changed.today = changed.today + ' (reworded)';
     writeFileSync(file, JSON.stringify(book, null, 2));
-    const mock = join(data, 'mockups', 'todos-list-1.html');
+    const mock = join(data, 'mockups', 'screens', 'SCR-3WRX', 'typing.html');
     writeFileSync(mock, readFileSync(mock, 'utf8') + 'x');
     const pending = readdirSync(join(data, 'requests')).filter(f => f.endsWith('.json'));
     execFileSync(process.execPath, [join(PLUGIN, 'server', 'next-request.mjs'), '--data', data, '--done', pending[0]], { stdio: 'ignore' });
@@ -544,8 +548,8 @@ try {
       was: document.querySelector(`.rv-stack[data-key="${a}"] .rv-accepted .rv-text`)?.textContent,
       bullet: document.getElementById(b)?.textContent || '',
       today: document.querySelector(`.rv-stack[data-key="${b}"]`)?.textContent || '',
-      frame: document.querySelector('.rv-stack[data-key="todos-list-1"]')?.textContent || '',
-      frames: document.querySelectorAll('figure.frame.has-rv').length,
+      frame: document.querySelector('.rv-stack[data-key="SCR-3WRX.typing"]')?.textContent || '',
+      frames: document.querySelectorAll('figure.state.has-rv').length,
       count: document.getElementById('chg-pos').textContent.split(' / ')[1],
       stacks: document.querySelectorAll('.rv-stack').length,
     }), { a: req.id, b: changed.id });
@@ -553,7 +557,7 @@ try {
       throw new Error(`the requirement's stack does not show its accepted text: ${JSON.stringify(seen)}`);
     }
     if (!seen.bullet.includes('(reworded)') || !seen.frame.includes('Mockup changed') || seen.frames !== 1) {
-      throw new Error(`expected a stack for the reworded today and only todos-list-1 changed: ${JSON.stringify(seen)}`);
+      throw new Error(`expected a stack for the reworded today and only SCR-3WRX.typing changed: ${JSON.stringify(seen)}`);
     }
     if (seen.count !== String(seen.stacks)) {
       throw new Error(`the toolbar's n / N does not count the review stacks: ${JSON.stringify(seen)}`);
@@ -1708,6 +1712,159 @@ try {
     }
   });
 
+  // Sections draw the states they show, from the book's one catalog of screens; a component placed in a picture is
+  // drawn from its own state, never copied.
+  const LIST = 'SCR-3WRX.list';
+  const BAR = 'SCR-Y6S2';
+  await check('a section draws the states it shows, with components placed by name', async () => {
+    await open();
+    const seen = await page.evaluate(({ list, bar }) => {
+      const fig = document.querySelector(`#todos-list figure.state[data-key="${list}"]`);
+      if (!fig) { return null; }
+      const hosts = [...fig.querySelectorAll('.mock')];
+      const proposed = hosts.find(h => h.dataset.mockup.endsWith('/list.html'));
+      const today = hosts.find(h => h.dataset.mockup.endsWith('/list.today.html'));
+      const placed = [...document.querySelectorAll('.mock')].flatMap(h => [...h.shadowRoot.querySelectorAll(`.sb-component[data-key^="${bar}."]`)].map(c => c.dataset.key));
+      const added = document.querySelector('#filters-bar figure.state[data-key="SCR-3WRX.activeonly"] figcaption');
+      return {
+        caption: fig.querySelector('figcaption').textContent,
+        role: fig.querySelector('figcaption .role')?.textContent,
+        labels: [...fig.querySelectorAll('.state-pane-label')].map(e => e.textContent),
+        inProposed: proposed ? !!proposed.shadowRoot.querySelector(`.sb-component[data-key="${bar}.all"]`) : false,
+        inToday: today ? !!today.shadowRoot.querySelector('.sb-component') : null,
+        display: proposed ? getComputedStyle(proposed.shadowRoot.querySelector('.sb-component')).display : '',
+        placed,
+        newTag: added ? !!added.querySelector('.tag.new') : false,
+      };
+    }, { list: LIST, bar: BAR });
+    if (!seen || !seen.caption.includes('TodosScreen · List') || seen.role !== 'User' || seen.labels.join() !== 'Today,Proposed' ||
+      !seen.inProposed || seen.inToday !== false || seen.display !== 'contents' || !seen.newTag) {
+      throw new Error(`the list state is not drawn as expected: ${JSON.stringify(seen)}`);
+    }
+    // Once per showing: the proposed list places All, Active only places Active. Its markup lives in one file only.
+    if (seen.placed.sort().join() !== `${BAR}.active,${BAR}.all`) {
+      throw new Error(`the filter bar is drawn ${JSON.stringify(seen.placed)}`);
+    }
+    const barHtml = readFileSync(join(data, 'mockups', 'screens', BAR, 'all.html'), 'utf8').trim();
+    const walk = d => readdirSync(d, { withFileTypes: true }).flatMap(e => (e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)]));
+    const copies = walk(join(data, 'mockups')).filter(f => f.endsWith('.html') && readFileSync(f, 'utf8').includes(barHtml));
+    if (copies.length !== 1) {
+      throw new Error(`the filter bar's markup is in ${copies.length} files: ${copies.join(', ')}`);
+    }
+  });
+
+  await check('a note dropped on a placed component goes on that component\'s state, in the section it was dropped in', async () => {
+    await waitFor(async () => (await fetch(`${URL}api/book`).then(r => r.json())).claude.state === 'idle', 5000, 'Claude to be idle');
+    await open();
+    const at = await page.evaluate(({ list, bar }) => {
+      const host = [...document.querySelectorAll(`#todos-list figure.state[data-key="${list}"] .mock`)].find(h => h.dataset.mockup.endsWith('/list.html'));
+      // The wrapper is display: contents (no box of its own): its first child is the bar.
+      const comp = host.shadowRoot.querySelector(`.sb-component[data-key="${bar}.all"]`);
+      comp.firstElementChild.scrollIntoView({ block: 'center', behavior: 'instant' });
+      const r = comp.firstElementChild.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }, { list: LIST, bar: BAR });
+    await page.keyboard.press('c');
+    await page.waitForSelector('body.commenting');
+    await page.mouse.click(at.x, at.y);
+    await page.waitForSelector('.sticky.editing textarea');
+    await page.keyboard.type('Make the filters bigger');
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Escape');
+    const note = await waitFor(() => Object.values(readNotesFile().notes).find(n => n.text === 'Make the filters bigger'), 3000, 'review.json to hold the note');
+    if (note.item !== `${BAR}.all` || note.section !== 'todos-list' || note.target !== LIST) {
+      throw new Error(`the note is not on the filter bar's state: ${JSON.stringify(note)}`);
+    }
+    // Deleted again, so the checks that count notes are not changed.
+    const on = await page.evaluate(() => {
+      const x = [...document.querySelectorAll('.sticky')].find(e => e.querySelector('textarea').value === 'Make the filters bigger');
+      const r = x.getBoundingClientRect();
+      return { x: r.left + 20, y: r.top + r.height / 2 };
+    });
+    await page.mouse.click(on.x, on.y);
+    await page.waitForSelector('.sticky.selected:not(.editing)', { timeout: 3000 });
+    await page.keyboard.press('Backspace');
+    await waitFor(() => !Object.values(readNotesFile().notes).some(n => n.text === 'Make the filters bigger'), 3000, 'the note to leave review.json');
+  });
+
+  await check('a requirement about a screen shows a chip linking to it', async () => {
+    await open();
+    const chips = await page.evaluate(() => ['TOD-LGXT', 'FLT-36VG'].map(id => [...document.querySelectorAll(`li#${id} a.screen-chip`)].map(a => [a.textContent, a.getAttribute('href')])));
+    if (JSON.stringify(chips) !== JSON.stringify([[['TodosScreen · Empty', '#screen/SCR-3WRX.empty']], [['FiltersBar', '#screen/SCR-Y6S2']]])) {
+      throw new Error(`the chips are ${JSON.stringify(chips)}`);
+    }
+  });
+
+  // In its own page, with the book changed on the way in: a state drawn as another, one a role never sees, a screenshot,
+  // and chips naming a screen and a state that are not in the book.
+  await check('same-as, absent, screenshots by state key, and a chip to something missing', async () => {
+    const ctx = await browser.newContext({ reducedMotion: 'reduce', viewport: { width: 1400, height: 900 } });
+    const pageErrors = [];
+    try {
+      const p = await ctx.newPage();
+      p.on('pageerror', e => pageErrors.push(String(e)));
+      await p.route('**/api/book', async route => {
+        const r = await route.fetch();
+        const j = await r.json();
+        const todos = j.book.screens.find(s => s.id === 'SCR-3WRX');
+        todos.states.push({ id: 'mirror', name: 'Mirror', when: { role: 'user' }, sameAs: 'empty' }, { id: 'gone', name: 'Gone', when: { role: 'user' }, absent: 'Never seen by anyone.' });
+        const add = j.book.chapters.find(c => c.id === 'todos').sections.find(s => s.id === 'add');
+        add.shows = [...add.shows, { state: 'SCR-3WRX.mirror' }, { state: 'SCR-3WRX.gone' }, { state: 'SCR-ZZZZ.none' }];
+        add.requirements[0].screens = [{ screen: 'SCR-ZZZZ' }, { screen: 'SCR-3WRX', state: 'nope' }];
+        j.media = [...(j.media || []), 'media/screens/SCR-3WRX.typing.png'];
+        await route.fulfill({ response: r, json: j });
+      });
+      await p.route('**/data/media/screens/SCR-3WRX.typing.png*', route => route.fulfill({ status: 200, contentType: 'image/png',
+        body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64') }));
+      await p.addInitScript(() => localStorage.setItem('spec-book-view', 'both'));
+      await p.goto(URL);
+      await p.waitForSelector('#todos-add figure.state[data-key="SCR-3WRX.gone"]');
+      const seen = await p.evaluate(() => {
+        const fig = k => document.querySelector(`#todos-add figure.state[data-key="${k}"]`);
+        const mirror = fig('SCR-3WRX.mirror');
+        return {
+          mirror: mirror.querySelector('figcaption').textContent,
+          mirrorDraws: mirror.querySelector('.mock')?.dataset.mockup,
+          gone: fig('SCR-3WRX.gone').textContent,
+          goneMock: !!fig('SCR-3WRX.gone').querySelector('.mock'),
+          missing: fig('SCR-ZZZZ.none')?.textContent || '',
+          shot: fig('SCR-3WRX.typing').querySelector('img.shot')?.getAttribute('src'),
+          chips: [...document.querySelectorAll('#todos-add .reqs li a.screen-chip')].map(a => [a.textContent, a.classList.contains('missing')]),
+        };
+      });
+      const bad = [];
+      if (!seen.mirror.includes('TodosScreen · Mirror') || !seen.mirror.includes('Same as Empty') || seen.mirrorDraws !== 'mockups/screens/SCR-3WRX/empty.html') { bad.push(`sameAs: ${seen.mirror} drawing ${seen.mirrorDraws}`); }
+      if (!seen.gone.includes('Never seen by anyone.') || seen.goneMock) { bad.push(`absent: ${seen.gone}`); }
+      if (!seen.missing.includes('Missing')) { bad.push(`a missing state: ${JSON.stringify(seen.missing)}`); }
+      if (seen.shot !== '/data/media/screens/SCR-3WRX.typing.png') { bad.push(`screenshot: ${seen.shot}`); }
+      if (JSON.stringify(seen.chips) !== JSON.stringify([['SCR-ZZZZ · missing', true], ['TodosScreen · nope · missing', true]])) { bad.push(`chips: ${JSON.stringify(seen.chips)}`); }
+      if (pageErrors.length) { bad.push(`page errors: ${pageErrors.join('; ')}`); }
+      if (bad.length) { throw new Error(bad.join('; ')); }
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  await check('on a phone every drawn state fits the screen, today and proposed one above the other', async () => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    try {
+      await open();
+      await page.waitForTimeout(300);
+      const seen = await page.evaluate(list => {
+        const w = document.documentElement.clientWidth;
+        const wide = [...document.querySelectorAll('figure.state')].filter(f => f.getClientRects().length)
+          .map(f => [f.dataset.key, Math.ceil(f.getBoundingClientRect().right)]).filter(x => x[1] > w);
+        const panes = [...document.querySelectorAll(`#todos-list figure.state[data-key="${list}"] .state-pane`)].map(e => e.getBoundingClientRect());
+        return { w, wide, stacked: panes.length === 2 && panes[1].top >= panes[0].bottom };
+      }, LIST);
+      if (seen.wide.length || !seen.stacked) {
+        throw new Error(`on a ${seen.w}-pixel screen: ${JSON.stringify(seen)}`);
+      }
+    } finally {
+      await page.setViewportSize({ width: 1400, height: 900 });
+    }
+  });
+
   // On the website (window.SpecShare set by share.js) the book's HTML is someone else's: book.js cleans it before it is
   // drawn. Here a stand-in SpecShare is set before the reader runs, the book's lede and one mockup carry every trick,
   // and nothing may run or survive. A localhost page, without SpecShare, draws the same HTML as it is.
@@ -1724,7 +1881,7 @@ try {
       '<rect><animate id="m-fill" attributeName="fill" values="red; javascript:window.__pwned=9" dur="1s"/></rect></svg>' +
       '<button id="m-btn" onclick="window.__pwned=10" formaction="javascript:window.__pwned=11">b</button>' +
       '<template><img id="m-tpl" src="/no-such.png" onerror="window.__pwned=12"></template>';
-    const MOCK_PATH = 'mockups/todos-list-1.html';
+    const MOCK_PATH = 'mockups/screens/SCR-3WRX/empty.html';
     const draw = async shared => {
       const ctx = await browser.newContext({ reducedMotion: 'reduce', viewport: { width: 1400, height: 900 } });
       const p = await ctx.newPage();

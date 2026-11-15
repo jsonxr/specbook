@@ -90,10 +90,12 @@
       return exts.indexOf(ext) >= 0;
     });
   }
-  function screenshotFor(frame, section) {
-    if (frame.screenshot) { return frame.screenshot; }
-    var hits = findMedia('media/screens/' + frame.id + '.', ['png', 'jpg', 'jpeg', 'webp']);
-    if (hits[0]) { return hits[0]; }
+  // A state's screenshot is media/screens/<state key>.<ext>; a state drawn as another (sameAs) may use that one's.
+  function screenshotFor(keys, section) {
+    for (var i = 0; i < keys.length; i++) {
+      var hits = findMedia('media/screens/' + keys[i] + '.', ['png', 'jpg', 'jpeg', 'webp']);
+      if (hits[0]) { return hits[0]; }
+    }
     return section ? sectionEvidenceShot(section) : null;
   }
   function videosFor(fullId, section) {
@@ -112,6 +114,19 @@
     return { id: id, label: id, color: '#c9ccd2' };
   }
 
+  // The book's screens and states by id and key (SpecModel.screenIndex), made again when the book is fetched again.
+  var screensBook = null, screensIx = null;
+  function screens() {
+    if (screensBook !== state.book) { screensBook = state.book; screensIx = window.SpecModel.screenIndex(state.book); }
+    return screensIx;
+  }
+  // "<screen name>" for a screen id, "<screen name> · <state name>" for a state key; the key itself when it is gone.
+  function screenLabel(key) {
+    var ix = screens();
+    if (hasOwn(ix.states, key)) { return ix.states[key].screen.name + ' · ' + ix.states[key].state.name; }
+    return hasOwn(ix.screens, key) ? ix.screens[key].name : key;
+  }
+
   var STAGE_TEXT = { drafting: 'Drafting', ready: 'Ready', building: 'Building', built: 'Built' };
   function pill(cls, text) {
     return '<span class="pill ' + esc(cls) + '">' + esc(text) + '</span>';
@@ -126,18 +141,18 @@
   function decisionHtml(d, did) {
     return '<h4>' + esc(d.title) + ' ' + decisionTag(d) + (did ? ' <span class="sid">' + esc(did) + '</span>' : '') + '</h4><p>' + (d.body || '') + '</p>';
   }
-  // The decisions whose about names the section (by its full id), or any of its requirements or frames.
+  // The decisions whose about names the section (by its full id), or any of its requirements or the states it shows.
   function sectionDecisions(s, fullId) {
     var ids = [fullId];
     (s.requirements || []).forEach(function (r) { if (r && r.id) { ids.push(r.id); } });
-    (s.frames || []).forEach(function (f) { if (f && f.id) { ids.push(f.id); } });
+    (s.shows || []).forEach(function (sh) { if (sh && sh.state) { ids.push(sh.state); } });
     return (state.book.decisions || []).filter(function (d) {
       return (d.about || []).some(function (a) { return ids.indexOf(a) !== -1; });
     });
   }
 
   // Ready is gated on review: the server refuses it (409 unreviewed) while the section, any of its requirements or any
-  // of its frames is under review. The reason shows under the section's heading, next to the button.
+  // of the states it shows is under review. The reason shows under the section's heading, next to the button.
   var READY_GATE = 'Accept this section\'s changes before marking it ready.';
   function stageMessage(btn, text) {
     var h = btn.closest('h3');
@@ -211,6 +226,12 @@
     if (was === undefined || was === now || (!hadWas && !hasNow)) { return hasNow ? w(now) : ''; }
     return (hadWas ? '<del class="was">' + w(was) + '</del>' : '') + (hadWas && hasNow ? ' ' : '') + (hasNow ? '<ins class="now">' + w(now) + '</ins>' : '');
   }
+  // A state's value holds its pictures' text: a line says when the picture, or today's, differs from prev's.
+  function mockupChanged(prev, v) {
+    if (!prev || !v) { return ''; }
+    return (prev.mockup !== v.mockup ? '<p class="rv-field rv-mock">Mockup changed</p>' : '') +
+      (prev.today !== v.today ? '<p class="rv-field rv-mock">Today’s mockup changed</p>' : '');
+  }
   // A version of an item, compared with the one before it (prev; null for the first version shown).
   function versionHtml(kind, v, prev) {
     var p = prev || {};
@@ -223,11 +244,24 @@
         line('rv-field', 'Today:', diffField(cmp('today'), v.today)) +
         line('rv-field', 'Why:', diffField(cmp('reason'), v.reason));
     }
-    if (kind === 'frame') {
+    if (kind === 'state') {
       var role = function (r) { return esc(roleInfo(r).label); };
-      return line('rv-text', '', diffField(cmp('caption'), v.caption, esc)) +
-        line('rv-field', 'Role:', diffField(cmp('role'), v.role, role)) +
-        (prev && p.mockup !== v.mockup ? '<p class="rv-field rv-mock">Mockup changed</p>' : '');
+      var when = v.when || {}, pw = p.when || {};
+      var stTag = function (m) { return m ? '<span class="tag chg-tag">' + esc(MARKER[m] || m) + '</span>' : ''; };
+      return line('rv-text', '', diffField(cmp('name'), v.name, esc)) +
+        line('rv-field', 'Role:', diffField(prev ? pw.role : undefined, when.role, role)) +
+        line('rv-field', 'When:', diffField(prev ? pw.also : undefined, when.also, esc)) +
+        line('rv-field', 'Same as:', diffField(cmp('sameAs'), v.sameAs, esc)) +
+        line('rv-field', 'Never shown:', diffField(cmp('absent'), v.absent, esc)) +
+        line('rv-field', 'Marker:', prev && p.change !== v.change ? diffField(p.change || '', v.change || '', stTag) : stTag(v.change)) +
+        line('rv-field', 'Why:', diffField(cmp('reason'), v.reason)) +
+        mockupChanged(prev, v);
+    }
+    if (kind === 'screen') {
+      return line('rv-text', '', diffField(cmp('name'), v.name, esc)) +
+        line('rv-field', 'Kind:', diffField(cmp('kind'), v.kind, esc)) +
+        line('rv-field', 'File:', diffField(cmp('file'), v.file, esc)) +
+        line('rv-field', 'Intro:', diffField(cmp('intro'), v.intro));
     }
     return line('rv-text', '', diffField(cmp('title'), v.title, esc)) + line('rv-field', 'Intro:', diffField(cmp('intro'), v.intro));
   }
@@ -238,7 +272,7 @@
     if (!it) { return key; }
     if (it.kind === 'chapter') { return 'chapter “' + it.value.title + '”'; }
     if (it.kind === 'section') { return 'section “' + it.value.title + '”'; }
-    if (it.kind === 'frame') { return 'screen “' + (it.value.caption || key) + '”'; }
+    if (it.kind === 'screen' || it.kind === 'state') { return (it.kind === 'screen' ? 'screen' : 'state') + ' “' + screenLabel(key) + '”'; }
     return key;
   }
   var NOTE_STATUS = { draft: 'Draft', sent: 'Sent', answered: 'Answered', frozen: 'Kept' };
@@ -329,7 +363,7 @@
   }
   // The review stack under an item: the item itself shows the current version, so the stack holds what came
   // before it, newest first: the tries (all but the newest folded away), then the accepted version (or New).
-  var KIND_WORD = { req: 'requirement', frame: 'screen', section: 'section', chapter: 'chapter' };
+  var KIND_WORD = { req: 'requirement', screen: 'screen', state: 'state', section: 'section', chapter: 'chapter' };
   function reviewStack(key) {
     var r = reviewOf(key);
     if (!r) { return null; }
@@ -348,10 +382,10 @@
         (r.reversal.decisions.length ? '<ul>' + r.reversal.decisions.map(decisionRef).join('') + '</ul>' : '') + '</div>';
     }
     var tries = r.tries || [];
-    // Each older version as it was; a frame also says when its mockup differs from the version after it.
+    // Each older version as it was; a state also says when its pictures differ from the version after it.
     var newer = r.current;
     var oldHtml = function (v) {
-      var mock = kind === 'frame' && v && newer && v.mockup !== newer.mockup ? '<p class="rv-field rv-mock">Mockup changed</p>' : '';
+      var mock = kind === 'state' ? mockupChanged(v, newer) : '';
       newer = v || newer;
       return versionHtml(kind, v, null) + mock;
     };
@@ -796,7 +830,7 @@
     keys.forEach(function (key) {
       var r = reviewOf(key);
       var v = r.accepted || {};
-      var what = r.kind === 'req' ? v.text : r.kind === 'frame' ? 'Screen “' + esc(v.caption || key) + '”' : esc(v.title || key);
+      var what = r.kind === 'req' ? v.text : r.kind === 'screen' || r.kind === 'state' ? (r.kind === 'screen' ? 'Screen “' : 'State “') + esc(v.name || key) + '”' : esc(v.title || key);
       var li = el('li', { id: key, class: 'chg-gone' }, '<span class="rid chg">−</span><div><del class="was">' + (what || '') + '</del> <span class="sid">' + esc(key) + '</span></div>');
       markReview(li, key);
       tgtAttrs(li, key, key + ' (removed)', what || '', key);
@@ -824,7 +858,7 @@
   }
 
   // A target is anything a note can be dropped on. Its item is the reviewable item the note goes on (a recording's
-  // section, a decision's section); for a requirement, a frame or a heading it is the target itself.
+  // section, a decision's section); for a requirement, a shown state or a heading it is the target itself.
   function tgtAttrs(node, key, label, quote, item) {
     node.classList.add('tgt');
     node.dataset.key = key;
@@ -833,34 +867,113 @@
     node.dataset.quote = quote || '';
   }
 
-  function mountMockup(host, path) {
+  // Every mockup's shadow root: the book's phone.css, then what placed components need: a wrapper that adds no box of
+  // its own (so placing a component never changes the layout), the outline of a highlighted one, and the red
+  // placeholder for one that is missing.
+  var MOCKUP_CSS = '.sb-component{display:contents}' +
+    '.sb-hl>*{outline:2px solid #f5a524;outline-offset:2px;border-radius:4px}' +
+    '.sb-missing{margin:6px;padding:8px;border:1px dashed #d33;border-radius:6px;color:#d33;background:#fff;font:600 12px ui-monospace,monospace}';
+  // Draws the picture at path into the host's shadow root, with its sb-component tags replaced by the components'
+  // pictures (SpecModel.expandMockup); highlight is a component id to outline.
+  function mountMockup(host, path, highlight) {
     host.dataset.mockup = path;
     var root = host.attachShadow({ mode: 'open' });
-    var css = '<style>' + (state.mockupCss || '') + '</style>';
-    setHtml(root, css + (state.mockups[path] || '<p style="color:#c00">Missing mockup ' + esc(path) + '</p>'));
+    var css = '<style>' + (state.mockupCss || '') + MOCKUP_CSS + '</style>';
+    var html = hasOwn(state.mockups, path) ? window.SpecModel.expandMockup(state.book, state.mockups, state.mockups[path], { highlight: highlight }) : null;
+    setHtml(root, css + (html || '<p style="color:#c00">Missing mockup ' + esc(path) + '</p>'));
   }
 
-  function renderFrameBody(frame, section) {
-    var body = el('div', { class: 'frame-body' });
-    var shot = screenshotFor(frame, section);
-    var showMock = state.view === 'mockup' || state.view === 'both' || (state.view === 'shot' && !shot);
-    var showShot = state.view === 'shot' || state.view === 'both';
-    if (showMock && frame.mockup) {
+  // One picture of a state: its mockup, its screenshot (media/screens/<key>.<ext>, by the first of shotKeys that has
+  // one), or both, as the View menu says. Without shotKeys (a proposed picture: the app does not look like it yet)
+  // only the mockup.
+  function renderPicture(path, highlight, shotKeys, section, alt) {
+    var body = el('div', { class: 'state-body' });
+    var shot = shotKeys ? screenshotFor(shotKeys, section) : null;
+    var showShot = !!shotKeys && (state.view === 'shot' || state.view === 'both');
+    var showMock = !showShot || state.view === 'both' || !shot;
+    if (showMock) {
       var host = el('div', { class: 'mock' });
       body.appendChild(host);
-      mountMockup(host, frame.mockup);
+      mountMockup(host, path, highlight);
     }
     if (showShot) {
       if (!shot && state.view === 'shot') {
         body.insertBefore(el('p', { class: 'shot-missing' }, 'No screenshot yet, showing the mockup'), body.firstChild);
         body.classList.add('stacked');
       } else if (shot) {
-        body.appendChild(el('img', { class: 'shot', src: '/data/' + shot, alt: 'Screenshot: ' + (frame.caption || frame.id) }));
+        body.appendChild(el('img', { class: 'shot', src: '/data/' + shot, alt: 'Screenshot: ' + alt }));
       } else {
-        body.appendChild(el('div', { class: 'noshot' }, 'No screenshot yet.<br>Add <code>media/screens/' + esc(frame.id) + '.png</code>'));
+        body.appendChild(el('div', { class: 'noshot' }, 'No screenshot yet.<br>Add <code>media/screens/' + esc(shotKeys[0]) + '.png</code>'));
       }
     }
     return body;
+  }
+  // What a shown state draws: its words when the role never sees it (absent); the picture of the state it is the same
+  // as (sameAs); for a change to a built screen, today's picture beside the proposed one; else its own picture.
+  function renderStateBody(key, hit, drawn, highlight, section) {
+    if (hit && hit.state.absent) { return el('div', { class: 'state-absent' }, esc(hit.state.absent)); }
+    if (!drawn || !drawn.state.mockup) { return el('div', { class: 'state-missing' }, 'Missing state ' + esc(key)); }
+    var st = drawn.state;
+    var drawnKey = window.SpecModel.stateKey(drawn.screen.id, st.id);
+    var keys = drawnKey === key ? [key] : [key, drawnKey];
+    var alt = screenLabel(key);
+    if (st.change === 'change' && st.today) {
+      var pair = el('div', { class: 'state-change' });
+      [['Today', st.today, keys], ['Proposed', st.mockup, null]].forEach(function (x) {
+        var pane = el('div', { class: 'state-pane' });
+        pane.appendChild(el('p', { class: 'state-pane-label' }, x[0]));
+        pane.appendChild(renderPicture(x[1], highlight, x[2], section, alt + ' (' + x[0].toLowerCase() + ')'));
+        pair.appendChild(pane);
+      });
+      return pair;
+    }
+    return renderPicture(st.mockup, highlight, keys, section, alt);
+  }
+  // A shown state: a figure captioned "<screen name> · <state name>" with its role, "Same as <state name>" when it is
+  // drawn as another, and the state's marker (New, Change, Removed). Notes dropped on it go on the state.
+  function stateFigure(sh, num, s) {
+    var key = sh.state;
+    var ix = screens();
+    var hit = hasOwn(ix.states, key) ? ix.states[key] : null;
+    var drawn = window.SpecModel.drawnState(state.book, key);
+    var label = screenLabel(key);
+    var cap = '';
+    if (hit) {
+      var role = hit.state.when && hit.state.when.role;
+      if (role) { cap += '<span class="role" style="background:' + esc(roleInfo(role).color) + '">' + esc(roleInfo(role).label) + '</span> '; }
+      cap += esc(label);
+      if (hit.state.sameAs) { cap += ' <span class="fstate">Same as ' + esc(drawn ? drawn.state.name : hit.state.sameAs) + '</span>'; }
+      var m = hit.state.change;
+      if (m === 'add') { cap += ' <span class="tag new">New</span>'; }
+      if (m === 'change') { cap += ' <span class="tag chg-tag">Change</span>'; }
+      if (m === 'remove') { cap += ' <span class="tag removed">Removed</span>'; }
+    } else {
+      cap += '<span class="tag removed">Missing</span> ' + esc(key);
+    }
+    var fig = el('figure', { class: 'state' });
+    markReview(fig, key);
+    fig.appendChild(el('figcaption', {}, cap));
+    fig.appendChild(renderStateBody(key, hit, drawn, sh.highlight, s));
+    if (hit && hit.state.change === 'remove' && hit.state.reason) {
+      fig.appendChild(el('p', { class: 'today why' }, '<span>Why:</span> ' + esc(hit.state.reason)));
+    }
+    tgtAttrs(fig, key, num + ' ' + s.title + ' · screen “' + label + '”', 'Screen: ' + label, key);
+    return fig;
+  }
+  // The chips under a requirement for the screens it is about, "<name>" or "<name> · <state name>", each linking to
+  // the Screens view. One naming a screen or state that is not in the book says so.
+  function screenChips(req) {
+    var list = (req && req.screens) || [];
+    if (!list.length) { return ''; }
+    var ix = screens();
+    return '<div class="screen-chips">' + list.map(function (e) {
+      var sid = e && e.screen;
+      var key = e && e.state ? window.SpecModel.stateKey(sid, e.state) : sid;
+      var sc = hasOwn(ix.screens, sid) ? ix.screens[sid] : null;
+      var found = e && e.state ? hasOwn(ix.states, key) : !!sc;
+      var text = !sc ? String(sid) + ' · missing' : found ? screenLabel(key) : sc.name + ' · ' + e.state + ' · missing';
+      return '<a class="screen-chip' + (found ? '' : ' missing') + '" href="#screen/' + esc(key) + '">' + esc(text) + '</a>';
+    }).join('') + '</div>';
   }
 
   // Evidence ------------------------------------------------------------------------------------------
@@ -1185,7 +1298,7 @@
             var extra = kind === 'change' && x.r.today ? '<div class="today"><span>Today:</span> ' + x.r.today + '</div>' :
               kind === 'remove' && x.r.reason ? '<div class="today why"><span>Why:</span> ' + x.r.reason + '</div>' : '';
             var li = el('li', { id: rid || '' }, '<span class="rid' + (kind ? ' chg' : '') + '">' + x.pos + '</span><div>' + text + tag +
-              (rid ? ' <span class="sid" title="Stable id: stays the same when requirements move">' + esc(rid) + '</span>' : '') + extra + '</div>');
+              (rid ? ' <span class="sid" title="Stable id: stays the same when requirements move">' + esc(rid) + '</span>' : '') + extra + screenChips(x.r) + '</div>');
             if (!(rid && markReview(li, rid))) { li.classList.add('same'); }
             var ev = evFor(rid);
             var row = ev ? evidenceRow(rid, ev) : null;
@@ -1216,23 +1329,19 @@
         }
         box.appendChild(addRequirement(fullId));
         if (removed[fullId]) { box.appendChild(removedList(removed[fullId])); }
-        if (s.frames && s.frames.length) {
-          var frames = el('div', { class: 'frames' });
-          s.frames.forEach(function (f) {
-            var role = roleInfo(f.role);
-            var wrap = el('div', { class: 'frame-item' });
-            var fig = el('figure', { class: 'frame' });
-            var cap = el('figcaption', {}, (f.role ? '<span class="role" style="background:' + role.color + '">' + esc(role.label) + '</span> ' : '') + esc(f.caption || f.id) +
-              (f.state === 'proposed' && mixed ? ' <span class="fstate">shows proposed change</span>' : ''));
-            markReview(fig, f.id);
-            fig.appendChild(cap);
-            fig.appendChild(renderFrameBody(f, s));
-            tgtAttrs(fig, f.id, num + ' ' + s.title + ' · screen “' + (f.caption || f.id) + '”', 'Screen: ' + (f.caption || f.id));
+        if (s.shows && s.shows.length) {
+          var shows = el('div', { class: 'states' });
+          s.shows.forEach(function (sh) {
+            if (!sh || !sh.state) { return; }
+            var wrap = el('div', { class: 'state-item' });
+            var fig = stateFigure(sh, num, s);
+            // A state shown in several sections is the same item in each: its place in the page is per section.
+            fig.dataset.place = fullId + ' ' + sh.state;
             wrap.appendChild(fig);
-            wrap.appendChild(itemRow('div', f.id));
-            frames.appendChild(wrap);
+            wrap.appendChild(itemRow('div', sh.state));
+            shows.appendChild(wrap);
           });
-          box.appendChild(frames);
+          box.appendChild(shows);
         }
         var vids = videosFor(fullId, s);
         if (vids.length) {
@@ -1559,7 +1668,10 @@
   }
   window.addEventListener('pagehide', function () { flushNotes(true); });
   function targets() { return Array.prototype.slice.call(document.querySelectorAll('.tgt')); }
-  function byKey(k) {
+  // The target with key k; inside `within` when one is there (a state shown in several sections has a target in each).
+  function byKey(k, within) {
+    var scoped = within ? within.querySelectorAll('.tgt') : [];
+    for (var j = 0; j < scoped.length; j++) { if (scoped[j].dataset.key === k) { return scoped[j]; } }
     var all = document.querySelectorAll('.tgt');
     for (var i = 0; i < all.length; i++) { if (all[i].dataset.key === k) { return all[i]; } }
     return null;
@@ -1576,7 +1688,8 @@
   // Where a note is drawn: its target, else the heading of its section, else nowhere on this page.
   function anchorOf(n) {
     if (!n) { return null; }
-    return byKey(n.target) || (n.section ? byKey(n.section) : null);
+    var sec = n.section ? document.getElementById(n.section) : null;
+    return byKey(n.target, sec) || (n.section ? byKey(n.section) : null);
   }
   function newId() { return 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
   function migrate() {
@@ -1606,7 +1719,7 @@
       if (t) { return t; }
       // A review stack or an item's tools belong to the item above them.
       var row = e.closest('.item-row[data-key]');
-      var owner = row ? byKey(row.dataset.key) : null;
+      var owner = row ? byKey(row.dataset.key, row.parentNode) : null;
       if (owner && owner.getClientRects().length) { return owner; }
     }
     var secs = document.querySelectorAll('.bk-sec');
@@ -1620,9 +1733,9 @@
     var h = best ? best.querySelector('h3.tgt') : null;
     return h && h.getClientRects().length ? h : null;
   }
-  // The mockup element under a point inside a screen, so Claude gets the exact element and not only the screen:
-  // { mockup, selector, text, html }. Null outside a mockup (a screenshot is only an image).
-  function mockupElementAt(t, clientX, clientY) {
+  // The element of a drawn mockup under a point: { e, root, host }, or null outside a mockup (a screenshot is only an
+  // image).
+  function mockupHit(t, clientX, clientY) {
     var hosts = t.querySelectorAll('.mock');
     for (var i = 0; i < hosts.length; i++) {
       var host = hosts[i], root = host.shadowRoot;
@@ -1631,10 +1744,23 @@
       var stack = root.elementsFromPoint(clientX, clientY);
       for (var j = 0; j < stack.length; j++) {
         var e = stack[j];
-        if (e.getRootNode() === root && e.tagName !== 'STYLE') { return describeElement(e, root, host.dataset.mockup); }
+        if (e.getRootNode() === root && e.tagName !== 'STYLE') { return { e: e, root: root, host: host }; }
       }
     }
     return null;
+  }
+  // The mockup element under a point inside a screen, so Claude gets the exact element and not only the screen:
+  // { mockup, selector, text, html }. Null outside a mockup.
+  function mockupElementAt(t, clientX, clientY) {
+    var hit = mockupHit(t, clientX, clientY);
+    return hit ? describeElement(hit.e, hit.root, hit.host.dataset.mockup) : null;
+  }
+  // The item a note dropped at a point of target t goes on: the innermost component placed in the picture there (its
+  // state key), else the target's own item.
+  function noteItemAt(t, clientX, clientY) {
+    var hit = mockupHit(t, clientX, clientY);
+    var comp = hit && hit.e.closest('.sb-component[data-key]');
+    return comp ? comp.dataset.key : t.dataset.item || t.dataset.key;
   }
   function describeElement(e, root, mockup) {
     var parts = [];
@@ -1743,7 +1869,7 @@
     if (!t || !t.getClientRects().length) { return null; }
     var r = t.getBoundingClientRect();
     // On the note's own target, its letter, then its pixels; on a stand-in (its section), the fractions.
-    var own = t === byKey(n.target);
+    var own = t.dataset.key === n.target;
     var p = own && isNum(n.ch) && isNum(n.cx) && isNum(n.cy) ? letterPoint(t, n) : null;
     if (!p && own && isNum(n.ax) && isNum(n.ay)) { p = { x: r.left + Math.min(n.ax, r.width), y: r.top + Math.min(n.ay, r.height) }; }
     if (!p) { p = { x: r.left + clamp01(n.rx) * r.width, y: r.top + clamp01(n.ry) * r.height }; }
@@ -1780,8 +1906,11 @@
   // What Revise sends. The screen before Revise is built from this too, so it cannot drift.
   function items() {
     return ordered(false).map(function (id) {
-      var n = state.notes[id], t = byKey(n.target), at = anchorOf(n);
-      var it = { id: n.target, where: at ? at.dataset.label : n.target, about: t ? plain(t.dataset.quote) : '', note: n.text.trim() };
+      var n = state.notes[id], at = anchorOf(n), t = at && at.dataset.key === n.target ? at : null;
+      var where = at ? at.dataset.label : n.target;
+      // A note on a component placed in a picture says which one.
+      if (n.item && n.item !== n.target && hasOwn(screens().states, n.item)) { where += ' · on “' + screenLabel(n.item) + '”'; }
+      var it = { id: n.target, where: where, about: t ? plain(t.dataset.quote) : '', note: n.text.trim() };
       it.noteId = id;
       if (n.el) { it.element = n.el; }
       // A collaborator's words (they wrote it, or changed it last) say whose they are, so Claude weighs them as such.
@@ -1835,7 +1964,7 @@
           var s = stickies[id];
           var sl = s ? parseFloat(s.box.style.left) : NaN, st = s ? parseFloat(s.box.style.top) : NaN;
           n.target = t.dataset.key;
-          n.item = t.dataset.item || t.dataset.key;
+          n.item = noteItemAt(t, px, py);
           setSection(n, t);
           // A drop beside an item (on its review stack, say) pins it to the item's nearest edge.
           setAnchor(n, anchorFor(t, px + window.scrollX, py + window.scrollY));
@@ -2330,7 +2459,7 @@
     if (!tg) { return; }
     var a = anchorFor(tg, e.clientX + window.scrollX, e.clientY + window.scrollY);
     var id = newId();
-    state.notes[id] = { text: '', item: tg.dataset.item || tg.dataset.key, target: tg.dataset.key, created: new Date().toISOString() };
+    state.notes[id] = { text: '', item: noteItemAt(tg, e.clientX, e.clientY), target: tg.dataset.key, created: new Date().toISOString() };
     setAnchor(state.notes[id], a);
     if (viewer().guest) { state.notes[id].author = viewer().name; state.notes[id].mine = true; }
     setSection(state.notes[id], tg);
@@ -3059,8 +3188,8 @@
   // With merge, notes changed on this page and not yet saved are kept (see mergeNotes).
   function fetchBook(merge) {
     return fetch('/api/book', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (data) {
-      var paths = [];
-      (data.book.chapters || []).forEach(function (ch) { (ch.sections || []).forEach(function (s) { (s.frames || []).forEach(function (f) { if (f.mockup) { paths.push(f.mockup); } }); }); });
+      // Every state's picture (and today's of a changing one): components are drawn from them wherever they are placed.
+      var paths = window.SpecModel.mockupPaths(data.book);
       var mockups = {};
       var loads = paths.map(function (p) {
         return fetch('/data/' + p, { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : null; }).then(function (t) { if (t !== null) { mockups[p] = t; } });
@@ -3183,7 +3312,8 @@
     Object.keys(notes).forEach(function (id) {
       var n = notes[id];
       if (!n || (n.status !== 'sent' && n.status !== 'answered')) { return; }
-      var t = byKey(n.target) || byKey(n.item) || (n.section ? byKey(n.section) : null);
+      var sec = n.section ? document.getElementById(n.section) : null;
+      var t = byKey(n.target, sec) || byKey(n.item, sec) || (n.section ? byKey(n.section) : null);
       if (!t) { return; }
       var label = (n.status === 'answered' ? 'Answered' : 'Sent') + ' note: ' + (n.text || '');
       var pin = el('span', { class: 'pin pin-sent ' + n.status, role: 'img', 'aria-label': label, title: label });
@@ -3199,8 +3329,8 @@
   // after an Accept or a Change. The reader keeps their place: whatever is at the top of the screen stays where it
   // is, or, when it is hidden or gone, the nearest item after it (before it, at the end of the book) takes its place.
   // Items are found again by their key, so this holds across a new render.
-  var PLACES = '.chapter > h2.tgt, .bk-sec > h3.tgt, .reqs > li.tgt, figure.frame';
-  function placeKey(e) { return e.dataset.key || e.id; }
+  var PLACES = '.chapter > h2.tgt, .bk-sec > h3.tgt, .reqs > li.tgt, figure.state';
+  function placeKey(e) { return e.dataset.place || e.dataset.key || e.id; }
   function readingAnchor() {
     var top = barBottom();
     var all = [].slice.call(main.querySelectorAll(PLACES));
