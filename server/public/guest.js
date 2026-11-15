@@ -6,11 +6,17 @@
 //   guest -> host  { t: 'req', id, method, path, seq, last, data }   data: base64 of a slice of the body
 //   host -> guest  { t: 'res', id, status, type, seq, last, data }
 //   host -> guest  { t: 'changed' }
+//   both ways      { t: 'live', kind, ... }   protocol 2: presence, drafts and following (the plugin's app/live.js);
+//                                             this page only carries them
+// A room's protocol is the one its host asked for (GET /api/rooms/<room> says it); protocol 1 hosts get no live frames.
+// While the host's tab is closed the room stays: this page waits on its socket for host-online, without polling.
 // Handshake: the offer signs "offer\n<room>\n<key>\n<name>\n<sdp>", the answer "answer\n<room>\n<key>\n<sdp>",
 // both HMAC-SHA256 under the link's key, base64url.
 (function () {
   'use strict';
-  var PROTOCOL = 1;
+  var PROTOCOL = 2; // the newest this page speaks
+  var roomProtocol = 1; // what the room's host speaks
+  var WAITING = 'The book isn\u2019t open right now. This page will reconnect when it is.';
   var m = /^\/s\/([A-Za-z0-9_-]+)\/?$/.exec(location.pathname);
   if (!m) { return; }
   var ROOM = m[1];
@@ -125,17 +131,20 @@
       if (r.status === 404) { throw fail('This share has ended. Ask for a new link.', true); }
       return r.ok ? r.json() : { host: true };
     }).then(function (room) {
-      if (!room.host) { throw fail('The book\u2019s host is offline right now.'); }
+      roomProtocol = Math.min(PROTOCOL, Number(room.protocol) || 1);
       return new Promise(function (resolve, reject) {
         var ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/api/rooms/' + ROOM + '/guest');
         var pc = null;
         var ch = null;
         var settled = false;
-        var timer = setTimeout(function () { finish(fail('The book\u2019s host did not answer.')); }, 25000);
+        var timer = null;
+        function arm() { clearTimeout(timer); timer = setTimeout(function () { finish(fail('The book\u2019s host did not answer.')); }, 25000); }
+        arm();
         function finish(err) {
           if (settled) { return; }
           settled = true;
           clearTimeout(timer);
+          clearInterval(ping);
           try { ws.close(); } catch (e) { /* closed */ }
           if (err) { if (pc) { pc.close(); } reject(err); }
         }
@@ -153,18 +162,33 @@
             .then(function () {
               var sdp = pc.localDescription.sdp;
               return sign(['offer', ROOM, me.key, me.name, sdp].join('\n')).then(function (sig) {
-                ws.send(JSON.stringify({ type: 'offer', key: me.key, name: me.name, sdp: sdp, sig: sig, protocol: PROTOCOL }));
+                ws.send(JSON.stringify({ type: 'offer', key: me.key, name: me.name, sdp: sdp, sig: sig, protocol: roomProtocol }));
               });
             });
         }
-        ws.onopen = function () { ws.send(JSON.stringify({ type: 'ice' })); };
+        // A keepalive while waiting for the host; the share server answers it without waking.
+        var ping = null;
+        ws.onopen = function () {
+          ws.send(JSON.stringify({ type: 'ice' }));
+          ping = setInterval(function () { if (ws.readyState === 1) { ws.send('ping'); } }, 30000);
+        };
         ws.onerror = function () { finish(fail('The book\u2019s host is not sharing right now.')); };
         ws.onclose = function () { if (!settled && !(ch && ch.readyState === 'open')) { finish(fail('The book\u2019s host is not sharing right now.')); } };
         ws.onmessage = function (e) {
+          if (e.data === 'pong') { return; }
           var msg;
           try { msg = JSON.parse(e.data); } catch (err) { return; }
-          if (msg.type === 'ice') { offer(msg.iceServers).catch(function (err) { finish(err); }); return; }
-          if (msg.type === 'host-offline') { finish(fail('The book\u2019s host is offline right now.')); return; }
+          if (msg.type === 'ice') { if (pc) { return; } offer(msg.iceServers).catch(function (err) { finish(err); }); return; }
+          // The host's tab is closed: wait on this socket, without a deadline, until it comes back.
+          if (msg.type === 'host-offline') {
+            clearTimeout(timer);
+            if (pc) { try { pc.close(); } catch (err) { /* closed */ } pc = null; }
+            peerState('waiting');
+            status(WAITING, true);
+            showError(WAITING);
+            return;
+          }
+          if (msg.type === 'host-online') { arm(); status('Connecting\u2026'); ws.send(JSON.stringify({ type: 'ice' })); return; }
           if (msg.type === 'gone') { finish(fail('This share has ended. Ask for a new link.', true)); return; }
           if (msg.type === 'reject') { finish(msg.error === 'full' ? fail('This book has as many guests as it can take.') : fail('This link is not valid for this share.', true)); return; }
           if (msg.type !== 'answer' || !pc) { return; }
@@ -184,6 +208,9 @@
   var waiting = {};
   var nextId = 1;
   var changedHandlers = [];
+  var liveHandlers = [];
+  var stateHandlers = [];
+  function peerState(st) { stateHandlers.forEach(function (fn) { try { fn(st); } catch (err) { /* the page's problem */ } }); }
   function whenOpen() {
     if (channel) { return Promise.resolve(channel); }
     if (terminal) { return Promise.reject(terminal); }
@@ -202,6 +229,7 @@
     var f;
     try { f = JSON.parse(e.data); } catch (err) { return; }
     if (f.t === 'changed') { changedHandlers.forEach(function (fn) { try { fn(); } catch (err) { /* the page's problem */ } }); return; }
+    if (f.t === 'live') { liveHandlers.forEach(function (fn) { try { fn(f); } catch (err) { /* the page's problem */ } }); return; }
     if (f.t !== 'res' || !waiting[f.id]) { return; }
     var w = waiting[f.id];
     if (!w.header) { w.header = f; }
@@ -238,6 +266,8 @@
         try { ch.pc.close(); } catch (e) { /* closed */ }
         failAll('The connection to the book’s host closed.');
         status('Reconnecting…', true);
+        peerState('waiting');
+        tries = 0;
         retry();
       };
       ch.onclose = onLost;
@@ -247,12 +277,14 @@
       });
       status('Live · ' + me.name);
       settleWaiters(ch, null);
+      peerState('live');
       if (loaded) { changedHandlers.forEach(function (fn) { fn(); }); } else { loadBook(); }
     }, function (err) {
       status(err.message, true);
       showError(err.message);
       if (err.final) {
         terminal = err;
+        peerState('ended');
         settleWaiters(null, err);
         return;
       }
@@ -268,7 +300,7 @@
   function loadBook() {
     loaded = true;
     request('GET', '/app/guest.js').then(function (res) {
-      if (res.status !== 200) { throw fail('This book’s host is too old to share it; ask them to update the specbook plugin.', true); }
+      if (res.status !== 200) { throw fail('The person sharing this book needs to update the specbook plugin.', true); }
       var s = document.createElement('script');
       s.src = URL.createObjectURL(new Blob([res.bytes], { type: 'text/javascript' }));
       document.body.appendChild(s);
@@ -278,10 +310,22 @@
     });
   }
 
+  // A live frame for the host to pass on (protocol 2 rooms only); dropped while not connected, as live state is.
+  function send(obj) {
+    if (!channel || roomProtocol < 2 || channel.readyState !== 'open') { return false; }
+    var f = {};
+    Object.keys(obj || {}).forEach(function (k) { f[k] = obj[k]; });
+    f.t = 'live';
+    try { channel.send(JSON.stringify(f)); return true; } catch (e) { return false; }
+  }
+
   window.SpecShare = {
-    protocol: PROTOCOL,
+    get protocol() { return roomProtocol; },
     get me() { return me; },
     request: request,
+    send: send,
+    onLive: function (fn) { liveHandlers.push(fn); },
+    onPeerState: function (fn) { stateHandlers.push(fn); },
     onChanged: function (fn) { changedHandlers.push(fn); },
     status: status,
     showError: showError,
