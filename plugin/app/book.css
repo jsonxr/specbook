@@ -545,6 +545,42 @@ body.followed::after { content: ""; position: fixed; inset: 0; border: 3px solid
 .claude-pop #claude-status:empty { display: none; }
 body.guest #claude-menu { display: none; }
 
+/* The screen before Claude acts (book.js openConfirm): a dialog over the book on a wide screen, a sheet from the bottom
+   on a phone. Its list scrolls inside; the header and the buttons stay put. */
+.cc-backdrop { position: fixed; inset: 0; z-index: 95; background: rgba(0, 0, 0, .55); }
+.cc { position: fixed; z-index: 96; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 32px)); max-height: min(80vh, 640px);
+  display: flex; flex-direction: column; background: var(--side); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 24px 60px rgba(0, 0, 0, .6); }
+.cc[hidden], .cc-backdrop[hidden] { display: none; }
+.cc-head { padding: 16px 18px 10px; border-bottom: 1px solid var(--line); }
+.cc-head h2 { margin: 0; font-size: 17px; }
+.cc-sub { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.cc-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 6px 18px 12px; }
+.cc-group { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.cc-group:last-child { border-bottom: 0; }
+.cc-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.cc-sec { margin: 0; font-size: 14px; min-width: 0; overflow-wrap: anywhere; }
+.cc-num { font: 500 12px var(--mono); color: var(--muted); }
+.cc-go { flex: none; }
+.cc-item { margin: 8px 0 0; }
+.cc-req { margin: 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.cc-id { font: 600 12px var(--mono); color: var(--accent); margin-right: 6px; }
+.cc-tag { font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .04em; border: 1px solid currentColor; border-radius: 8px; padding: 0 6px; margin-left: 6px; color: var(--accent); }
+.cc-tag.cc-new { color: var(--built); }
+.cc-note { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0 0; font-size: 14px; overflow-wrap: anywhere; }
+.cc-n { flex: none; width: 20px; height: 20px; border-radius: 50% 50% 50% 0; background: var(--note); color: #222; font: 700 11px/20px var(--mono); text-align: center; }
+.cc-note-text { white-space: pre-wrap; min-width: 0; }
+.cc-by { flex: none; color: var(--muted); font-size: 13px; }
+.cc-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--line); }
+.cc-send { font: 700 14px var(--sans); color: #fff; background: #3a2318; border: 1px solid #6b3f2c; border-radius: 8px; padding: 7px 14px; cursor: pointer; }
+.cc-send:disabled { opacity: .45; cursor: default; }
+body.confirm-open { overflow: hidden; }
+@media (max-width: 700px) {
+  .cc { left: 0; right: 0; top: 56px; bottom: 0; transform: none; width: auto; max-height: none; border-radius: 14px 14px 0 0; border-width: 1px 0 0; }
+  .cc-foot { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .cc-foot button { flex: 1; min-height: 44px; }
+}
+@media print { .cc, .cc-backdrop { display: none !important; } }
+
 /* Phone: the review strip is a full-width bar at the bottom. */
 @media (max-width: 700px) {
   .bar { gap: 8px; padding: 8px 10px; backdrop-filter: none; background: var(--side); } 

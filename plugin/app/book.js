@@ -2343,6 +2343,11 @@
   }, true);
   document.addEventListener('keydown', function (e) {
     if (document.querySelector('.ev-lightbox')) { return; }
+    if (confirmOpen()) {
+      // The screen is modal: Esc closes it, and the book's keys wait until it is gone.
+      if (e.key === 'Escape') { e.preventDefault(); closeConfirm(); }
+      return;
+    }
     var inField = e.target && e.target.closest && e.target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
     if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNote && !inField) {
       e.preventDefault();
@@ -2375,7 +2380,7 @@
   }).observe(msgEl, { childList: true, characterData: true, subtree: true });
 
   // The Claude group --------------------------------------------------------------------------------
-  // Revise sends every note to Claude; Build builds every section marked Ready. While Claude is busy both are off,
+  // Revise sends every note to Claude; Build builds every section marked Ready (each after the screen below). While Claude is busy both are off,
   // and while it is revising the notes are locked. Claude's state is polled: often while it is busy, now and then
   // while it is idle. When it goes back to idle, the book is fetched again, since Claude has changed it.
   var reviseBtn = document.getElementById('revise');
@@ -2423,6 +2428,7 @@
       if (draft) { dropNote(draft); drawAll(); }
     }
     showBuild();
+    drawConfirm();
   }
   function setClaude(c) {
     var wasBusy = state.claude.state !== 'idle';
@@ -2487,7 +2493,9 @@
     if (ok) { o.classList.remove('show'); }
     msgEl.textContent = ok ? 'Server unreachable: copied instead. Paste it into Claude.' : 'Server unreachable: copy the text in the box and paste it into Claude.';
   }
-  reviseBtn.addEventListener('click', function () {
+  reviseBtn.addEventListener('click', function () { if (!reviseBtn.disabled) { openConfirm('revise'); } });
+  buildBtn.addEventListener('click', function () { if (!buildBtn.disabled) { openConfirm('build'); } });
+  function sendRevise() {
     if (reviseBtn.disabled) { return; }
     var its = items();
     var ids = ordered(false);
@@ -2507,8 +2515,8 @@
         msgEl.textContent = e.message === 'busy' ? 'Claude is busy; try again when it is done.' : 'Could not send: ' + e.message + '.';
         pollClaude();
       });
-  });
-  buildBtn.addEventListener('click', function () {
+  }
+  function sendBuild() {
     if (buildBtn.disabled) { return; }
     msgEl.textContent = 'Sending…';
     postJson('/api/build')
@@ -2522,6 +2530,132 @@
         pollClaude();
       })
       .catch(function () { msgEl.textContent = 'Server unreachable: the build was not sent.'; });
+  }
+
+  // The screen before Claude acts ---------------------------------------------------------------------------------
+  // Revise and Build no longer send at once: each opens a screen with what will go to Claude (the notes, under the
+  // requirement each is on and grouped by section; or the sections marked Ready), and only Send sends it. It is drawn
+  // again while open whenever the notes or the book change, so what it lists is what Send sends.
+  var confirmBox = document.getElementById('claude-confirm');
+  var confirmBackdrop = document.getElementById('cc-backdrop');
+  var confirmList = confirmBox.querySelector('.cc-list');
+  var confirmSend = confirmBox.querySelector('.cc-send');
+  var confirmKind = null;
+  var confirmDrawn = '';
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+  // A section's number and title as the book shows them, from its full id.
+  function sectionHead(fullId) {
+    var node = fullId ? document.getElementById(fullId) : null;
+    var num = node ? node.querySelector('h3 .bk-num') : null;
+    var s = fullId ? findSection(fullId) : null;
+    return { num: num ? num.textContent : '', title: s ? s.title : 'Elsewhere', node: node };
+  }
+  function confirmGroup(fullId, go) {
+    var head = sectionHead(fullId);
+    var g = el('section', { class: 'cc-group' });
+    var top = el('div', { class: 'cc-group-head' });
+    var h = el('h3', { class: 'cc-sec' });
+    if (head.num) { h.appendChild(el('span', { class: 'cc-num' })).textContent = head.num; h.appendChild(document.createTextNode(' ')); }
+    h.appendChild(document.createTextNode(head.title));
+    top.appendChild(h);
+    if (go) {
+      var b = el('button', { type: 'button', class: 'cc-go linkbtn' });
+      b.textContent = 'Go to ›';
+      b.addEventListener('click', function () { closeConfirm(); go(); });
+      top.appendChild(b);
+    }
+    g.appendChild(top);
+    return g;
+  }
+  function drawConfirm() {
+    if (!confirmKind) { return; }
+    var title = confirmBox.querySelector('#cc-title'), sub = confirmBox.querySelector('.cc-sub');
+    var key, groups = [];
+    if (confirmKind === 'revise') {
+      var its = items();
+      key = JSON.stringify(its) + reviseBtn.disabled;
+      if (key === confirmDrawn) { return; }
+      title.textContent = 'Revise: ' + plural(its.length, 'note', 'notes') + ' to send';
+      sub.textContent = 'Claude revises the book from these notes; then you review each change it makes.';
+      confirmSend.textContent = '✦ Send to Claude';
+      var bySec = {}, order = [];
+      its.forEach(function (it, i) {
+        var n = state.notes[it.noteId] || {};
+        var sec = n.section || '';
+        if (!hasOwn(bySec, sec)) { bySec[sec] = []; order.push(sec); }
+        bySec[sec].push({ it: it, num: i + 1 });
+      });
+      order.forEach(function (sec) {
+        var first = bySec[sec][0].it.noteId;
+        var g = confirmGroup(sec, pins[first] ? function () { goTo(first); } : null);
+        bySec[sec].forEach(function (x) {
+          var it = x.it, rv = reviewOf(it.id);
+          var item = el('div', { class: 'cc-item' });
+          var req = el('p', { class: 'cc-req' });
+          req.appendChild(el('span', { class: 'cc-id' })).textContent = it.id;
+          if (it.about) { req.appendChild(el('span', { class: 'cc-about' })).textContent = it.about; }
+          if (rv && (rv.status === 'changed' || rv.status === 'new')) { req.appendChild(el('span', { class: 'cc-tag cc-' + rv.status })).textContent = rv.status; }
+          item.appendChild(req);
+          var note = el('p', { class: 'cc-note' });
+          note.appendChild(el('span', { class: 'cc-n' })).textContent = String(x.num);
+          note.appendChild(el('span', { class: 'cc-note-text' })).textContent = it.note;
+          var owner = (state.owner && state.owner.name) || '';
+          if (it.by && it.by !== owner) { note.appendChild(el('span', { class: 'cc-by' })).textContent = '· ' + it.by; }
+          item.appendChild(note);
+          g.appendChild(item);
+        });
+        groups.push(g);
+      });
+      confirmSend.disabled = reviseBtn.disabled;
+    } else {
+      var ready = [];
+      ((state.book && state.book.chapters) || []).forEach(function (ch) {
+        (ch.sections || []).forEach(function (s) { if (s.stage === 'ready') { ready.push(ch.id + '-' + s.id); } });
+      });
+      key = JSON.stringify(ready) + buildBtn.disabled;
+      if (key === confirmDrawn) { return; }
+      title.textContent = 'Build: ' + plural(ready.length, 'section', 'sections') + ' marked Ready';
+      sub.textContent = 'Claude builds these, with tests as evidence. You review the calls it makes on its own.';
+      confirmSend.textContent = '✦ Build';
+      ready.forEach(function (sec) {
+        var node = sectionHead(sec).node;
+        groups.push(confirmGroup(sec, node ? function () { glideTo(node, function () {}); } : null));
+      });
+      confirmSend.disabled = buildBtn.disabled;
+    }
+    confirmDrawn = key;
+    var scroll = confirmList.scrollTop;
+    confirmList.innerHTML = '';
+    groups.forEach(function (g) { confirmList.appendChild(g); });
+    confirmList.scrollTop = scroll;
+  }
+  function openConfirm(kind) {
+    confirmKind = kind;
+    confirmDrawn = '';
+    confirmList.scrollTop = 0;
+    drawConfirm();
+    confirmBox.hidden = false;
+    confirmBackdrop.hidden = false;
+    document.body.classList.add('confirm-open');
+    confirmSend.focus({ preventScroll: true });
+  }
+  function closeConfirm() {
+    if (!confirmKind) { return; }
+    confirmKind = null;
+    confirmBox.hidden = true;
+    confirmBackdrop.hidden = true;
+    document.body.classList.remove('confirm-open');
+    if (confirmBox.contains(document.activeElement) || document.activeElement === document.body) {
+      document.getElementById('claude-btn').focus({ preventScroll: true });
+    }
+  }
+  function confirmOpen() { return !!confirmKind; }
+  confirmBox.querySelector('.cc-cancel').addEventListener('click', closeConfirm);
+  confirmBackdrop.addEventListener('click', closeConfirm);
+  confirmSend.addEventListener('click', function () {
+    var kind = confirmKind;
+    if (kind === 'revise') { sendRevise(); } else if (kind === 'build') { sendBuild(); }
+    closeConfirm();
   });
 
   // The build banner, live requirement status and the review of calls -------------------------------------

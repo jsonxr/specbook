@@ -56,6 +56,12 @@
   <p class="np-empty">Calls the build made on its own. Accept one to keep it as a decision, or reject it with what you want instead.</p>
   <ol id="rp-list" class="np-list"></ol>
 </aside>
+<div id="cc-backdrop" class="cc-backdrop" hidden></div>
+<div id="claude-confirm" class="cc" role="dialog" aria-modal="true" aria-labelledby="cc-title" hidden>
+  <div class="cc-head"><h2 id="cc-title"></h2><p class="cc-sub"></p></div>
+  <div class="cc-list"></div>
+  <div class="cc-foot"><button type="button" class="bar-btn cc-cancel">Cancel</button><button type="button" class="cc-send">✦ Send to Claude</button></div>
+</div>
 <p class="bar-msg" id="make-msg" role="status" title="Click to dismiss"></p>
 <textarea id="out" aria-label="Requests" class="out"></textarea>
 <script src="/app/relay.js"></script>

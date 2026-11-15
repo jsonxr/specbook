@@ -200,6 +200,7 @@ try {
     await page.locator('#claude-btn').click();
     const at = await buttonSpot('#revise');
     await page.mouse.click(at.x, at.y);
+    await page.locator('#claude-confirm .cc-send').click();
     await page.waitForFunction(() => document.getElementById('revise').disabled &&
       document.getElementById('build').disabled &&
       document.getElementById('claude-status').textContent === 'Revising…', null, { timeout: 3000 });
@@ -519,6 +520,7 @@ try {
     await page.locator('#claude-btn').click();
     const press = await buttonSpot('#revise');
     await page.mouse.click(press.x, press.y);
+    await page.locator('#claude-confirm .cc-send').click();
     await page.waitForFunction(() => document.getElementById('claude-status').textContent === 'Revising…', null, { timeout: 3000 });
     // Claude's edits: one requirement's text, what happens today on a drafted change, one character in a mockup.
     const file = join(data, 'book.json');
@@ -778,6 +780,233 @@ try {
       });
     } finally {
       writeNotes(keep);
+      await open();
+    }
+  });
+
+  // The screen before Revise and Build: Claude ▸ Revise (or Build) opens it.
+  const requestFiles = () => readdirSync(join(data, 'requests')).filter(f => f.endsWith('.json'));
+  const openConfirm = async kind => {
+    await page.waitForFunction(k => !document.getElementById(k).disabled, kind, { timeout: 5000 });
+    await page.locator('#claude-btn').click();
+    const at = await buttonSpot(`#${kind}`);
+    await page.mouse.click(at.x, at.y);
+    await page.waitForSelector('#claude-confirm:not([hidden])', { timeout: 3000 });
+  };
+  const confirmShut = () => page.waitForFunction(() => document.getElementById('claude-confirm').hidden && !document.body.classList.contains('confirm-open'), null, { timeout: 3000 });
+  const idle = () => waitFor(async () => (await fetch(`${URL}api/book`).then(r => r.json())).claude.state === 'idle', 5000, 'Claude to be idle');
+  // Two draft notes in two sections: one on a section's heading, one on a requirement in the next section.
+  const twoNotes = async () => {
+    writeNotes({});
+    await open();
+    await dropNoteOn('#todos-list > h3', 'Say what the list is for');
+    const req = await page.evaluate(() => document.querySelector('#todos-add .reqs li.tgt[id]').id);
+    await dropNoteOn(`li#${req}`, 'Name the button');
+    return req;
+  };
+
+  await check('Revise opens a screen with every note under its requirement, and sends only on Send', async () => {
+    const keep = readNotesFile().notes;
+    let sent = false;
+    try {
+      await idle();
+      const req = await twoNotes();
+      const before = requestFiles().length;
+      await openConfirm('revise');
+      const seen = await page.evaluate(() => {
+        const d = document.getElementById('claude-confirm');
+        return {
+          title: d.querySelector('#cc-title').textContent,
+          focus: document.activeElement && document.activeElement.classList.contains('cc-send'),
+          groups: [...d.querySelectorAll('.cc-group')].map(g => ({
+            head: g.querySelector('.cc-sec').textContent.replace(/\s+/g, ' ').trim(),
+            go: g.querySelector('.cc-go')?.textContent,
+            items: [...g.querySelectorAll('.cc-item')].map(i => ({
+              id: i.querySelector('.cc-id').textContent, about: i.querySelector('.cc-about')?.textContent || '',
+              tag: i.querySelector('.cc-tag')?.textContent || '', note: i.querySelector('.cc-note-text').textContent,
+            })),
+          })),
+          expect: ['todos-list', 'todos-add'].map(id => {
+            const s = document.getElementById(id);
+            return s.querySelector('h3 .bk-num').textContent + ' ' + s.querySelector('h3').childNodes[1].textContent.trim();
+          }),
+        };
+      });
+      const want = await page.evaluate(id => ({ about: document.getElementById(id).dataset.quote ? document.createRange().createContextualFragment(document.getElementById(id).dataset.quote).textContent.trim() : '', changed: document.getElementById(id).classList.contains('rv-is-changed') }), req);
+      const g = seen.groups;
+      if (seen.title !== 'Revise: 2 notes to send' || !seen.focus || g.length !== 2 || g.some(x => x.go !== 'Go to ›')) {
+        throw new Error(`the Revise screen is wrong: ${JSON.stringify(seen)}`);
+      }
+      if (!g[0].head.startsWith(seen.expect[0]) || !g[1].head.startsWith(seen.expect[1])) {
+        throw new Error(`the groups are not headed by their sections' number and title: ${JSON.stringify(seen)}`);
+      }
+      const it = g[1].items[0];
+      if (g[0].items[0]?.note !== 'Say what the list is for' || it?.id !== req || it.note !== 'Name the button' || it.about !== want.about || (it.tag === 'changed') !== want.changed) {
+        throw new Error(`the notes are not listed under their requirements: ${JSON.stringify({ seen, want })}`);
+      }
+      if (requestFiles().length !== before) {
+        throw new Error('opening the screen sent the notes');
+      }
+      await page.locator('#claude-confirm .cc-cancel').click();
+      await confirmShut();
+      await page.waitForTimeout(300);
+      if (requestFiles().length !== before) {
+        throw new Error('Cancel sent the notes');
+      }
+      // Go to › closes the screen and goes to the note, flashing its pin.
+      await openConfirm('revise');
+      await page.locator('#claude-confirm .cc-group:nth-child(2) .cc-go').click();
+      await confirmShut();
+      await page.waitForSelector('.pin.flash', { state: 'attached', timeout: 3000 });
+      // Esc closes it.
+      await openConfirm('revise');
+      await page.keyboard.press('Escape');
+      await confirmShut();
+      // Send sends both.
+      await openConfirm('revise');
+      await page.locator('#claude-confirm .cc-send').click();
+      await confirmShut();
+      await page.waitForFunction(() => document.getElementById('claude-status').textContent === 'Revising…', null, { timeout: 3000 });
+      sent = true;
+      const files = requestFiles();
+      const body = files.length === before + 1 ? readFileSync(join(data, 'requests', files.find(f => !f.includes('build')) || files[0]), 'utf8') : '';
+      if (!body.includes('Say what the list is for') || !body.includes('Name the button')) {
+        throw new Error(`Send did not write one request with both notes: ${files.join(', ')}`);
+      }
+    } finally {
+      if (sent) {
+        for (const f of requestFiles()) {
+          execFileSync(process.execPath, [join(PLUGIN, 'server', 'next-request.mjs'), '--data', data, '--done', f], { stdio: 'ignore' });
+        }
+        await idle();
+      }
+      writeNotes(keep);
+      await open();
+    }
+  });
+
+  await check('the Revise screen follows the notes while it is open', async () => {
+    const keep = readNotesFile().notes;
+    try {
+      writeNotes({});
+      await open();
+      // With no notes Revise is off, and the screen does not open.
+      await page.evaluate(() => document.getElementById('revise').click());
+      await page.waitForTimeout(200);
+      if (!(await page.evaluate(() => document.getElementById('revise').disabled && document.getElementById('claude-confirm').hidden))) {
+        throw new Error('Revise with no notes opened the screen');
+      }
+      await twoNotes();
+      await openConfirm('revise');
+      // Another tab saves a third note.
+      const [id, note] = Object.entries(readNotesFile().notes)[0];
+      const third = { ...note, text: 'A third, from another tab' };
+      delete third.status;
+      const res = await fetch(`${URL}api/notes`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ changes: { [`${id}x3`]: third } }) });
+      if (!res.ok) {
+        throw new Error(`the other tab's save failed: ${res.status} ${await res.text()}`);
+      }
+      await page.waitForFunction(() => document.getElementById('cc-title').textContent === 'Revise: 3 notes to send' &&
+        [...document.querySelectorAll('#claude-confirm .cc-note-text')].some(n => n.textContent === 'A third, from another tab'), null, { timeout: 3000 })
+        .catch(async () => { throw new Error(`the screen did not follow: ${await page.evaluate(() => document.getElementById('cc-title').textContent)}`); });
+      await page.locator('#claude-confirm .cc-cancel').click();
+      await confirmShut();
+    } finally {
+      writeNotes(keep);
+      await open();
+    }
+  });
+
+  await check('a refused Send says why', async () => {
+    const keep = readNotesFile().notes;
+    await page.route('**/api/revise', route => route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'busy' }) }));
+    try {
+      await twoNotes();
+      await openConfirm('revise');
+      await page.locator('#claude-confirm .cc-send').click();
+      await confirmShut();
+      await page.waitForFunction(() => document.getElementById('make-msg').textContent === 'Claude is busy; try again when it is done.', null, { timeout: 3000 })
+        .catch(async () => { throw new Error(`the message says ${JSON.stringify(await page.locator('#make-msg').textContent())}`); });
+    } finally {
+      await page.unroute('**/api/revise');
+      // The refused send is logged by the browser; it is the point of this check.
+      for (let i = errors.length - 1; i >= 0; i--) {
+        if (/409/.test(errors[i])) { errors.splice(i, 1); }
+      }
+      writeNotes(keep);
+      await open();
+    }
+  });
+
+  await check('the Revise screen fits a phone', async () => {
+    const keep = readNotesFile().notes;
+    await page.setViewportSize({ width: 390, height: 844 });
+    try {
+      await twoNotes();
+      await openConfirm('revise');
+      const fit = await page.evaluate(() => {
+        const d = document.getElementById('claude-confirm').getBoundingClientRect();
+        const list = getComputedStyle(document.querySelector('#claude-confirm .cc-list')).overflowY;
+        const btn = s => Math.round(document.querySelector(s).getBoundingClientRect().height);
+        return { d: [d.left, d.top, d.right, d.bottom].map(Math.round), w: innerWidth, h: innerHeight, list, cancel: btn('#claude-confirm .cc-cancel'), send: btn('#claude-confirm .cc-send'), page: document.documentElement.scrollWidth };
+      });
+      if (fit.d[0] < 0 || fit.d[1] < 0 || fit.d[2] > fit.w || fit.d[3] > fit.h || !/auto|scroll/.test(fit.list) || fit.cancel < 44 || fit.send < 44 || fit.page > fit.w) {
+        throw new Error(`the Revise screen does not fit a phone: ${JSON.stringify(fit)}`);
+      }
+      await page.keyboard.press('Escape');
+      await confirmShut();
+    } finally {
+      await page.setViewportSize({ width: 1400, height: 900 });
+      writeNotes(keep);
+      await open();
+    }
+  });
+
+  await check('Build opens a screen with the sections marked Ready', async () => {
+    const file = join(data, 'book.json');
+    const original = readFileSync(file, 'utf8');
+    const posts = [];
+    await page.route('**/api/build', route => {
+      posts.push(route.request().method());
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, file: 'build-test.json' }) });
+    });
+    try {
+      await idle();
+      const book = JSON.parse(original);
+      let title = '';
+      for (const ch of book.chapters) {
+        for (const s of ch.sections || []) {
+          if (s.stage === 'ready') { s.stage = 'drafting'; }
+          if (!title && ch.id === 'filters' && s.id === 'bar') { s.stage = 'ready'; title = s.title; }
+        }
+      }
+      writeFileSync(file, JSON.stringify(book, null, 2));
+      await open();
+      await openConfirm('build');
+      const seen = await page.evaluate(() => ({
+        title: document.getElementById('cc-title').textContent,
+        list: document.querySelector('#claude-confirm .cc-list').textContent,
+        send: document.querySelector('#claude-confirm .cc-send').textContent,
+      }));
+      if (seen.title !== 'Build: 1 section marked Ready' || !seen.list.includes(title) || !seen.send.includes('Build')) {
+        throw new Error(`the Build screen is wrong: ${JSON.stringify(seen)}`);
+      }
+      await page.locator('#claude-confirm .cc-cancel').click();
+      await confirmShut();
+      await page.waitForTimeout(200);
+      if (posts.length) {
+        throw new Error('Cancel started the build');
+      }
+      await openConfirm('build');
+      await page.locator('#claude-confirm .cc-send').click();
+      await confirmShut();
+      await page.waitForFunction(() => document.getElementById('make-msg').textContent === 'Build sent to Claude (build-test.json).', null, { timeout: 3000 });
+      if (posts.join() !== 'POST') {
+        throw new Error(`Build posted ${JSON.stringify(posts)}`);
+      }
+    } finally {
+      await page.unroute('**/api/build');
+      writeFileSync(file, original);
       await open();
     }
   });
