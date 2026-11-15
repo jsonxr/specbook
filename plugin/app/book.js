@@ -2409,8 +2409,9 @@
     claudeStatus.textContent = busyText(c);
     document.getElementById('claude-busy').textContent = busy ? ' \u00b7 ' + busyText(c) : '';
     document.getElementById('claude-btn').classList.toggle('busy', busy);
-    reviseBtn.querySelector('small').textContent = reviseBtn.disabled && !busy ? 'No notes to send yet.' : 'Review your ' + live().length + ' note' + (live().length === 1 ? '' : 's') + ', then send them. Claude revises the book and you review each change.';
-    buildBtn.querySelector('small').textContent = buildBtn.disabled && !busy ? 'No section is marked Ready.' : 'Build the sections marked Ready, with tests as evidence.';
+    reviseBtn.querySelector('small').textContent = busy ? 'Waiting for Claude to finish.' : reviseBtn.disabled ? 'No notes to send yet.' : 'Review your ' + live().length + ' note' + (live().length === 1 ? '' : 's') + ', then send them. Claude revises the book and you review each change.';
+    buildBtn.querySelector('small').textContent = busy ? 'Waiting for Claude to finish.' : buildBtn.disabled ? 'No section is marked Ready.' : 'Build the sections marked Ready, with tests as evidence.';
+    showRunning(c);
     document.querySelectorAll('.stage-btn').forEach(function (b) { b.hidden = busy; });
     // The page's edits write the book, which is locked while Claude works.
     document.querySelectorAll('.edit-ctl').forEach(function (b) {
@@ -2431,6 +2432,75 @@
     showBuild();
     drawConfirm();
   }
+  // Stop in the Claude menu. While Claude works, the action it is doing is the running row: what was sent and when,
+  // with Stop beside it. Stop asks once (inside the menu), then withdraws the request (POST /api/claude/stop).
+  var claudeAsk = document.getElementById('claude-ask');
+  var askKind = null;
+  function sentAt(iso) {
+    var d = new Date(iso);
+    return isNaN(d) ? '' : ', sent at ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+  function showRunning(c) {
+    var kind = c.state === 'revising' ? 'revise' : c.state === 'building' ? 'build' : null;
+    var sent = c.sent || {};
+    [['revise', reviseBtn, 'Revise'], ['build', buildBtn, 'Build']].forEach(function (x) {
+      var row = x[1].parentNode, on = x[0] === kind;
+      row.classList.toggle('running', on);
+      row.querySelector('.claude-stop').hidden = !on;
+      x[1].querySelector('.ca-label').textContent = on ? busyText(c).replace(/\u2026$/, '') : x[2];
+      if (!on) { return; }
+      var n = sent.count || 0;
+      x[1].querySelector('small').textContent = kind === 'revise' ?
+        'Your ' + n + ' note' + (n === 1 ? '' : 's') + sentAt(sent.at) + '. Claude is working through them in the terminal.' :
+        n + ' section' + (n === 1 ? '' : 's') + ' marked Ready' + sentAt(sent.at).replace('sent', 'started') + '.';
+    });
+    if (askKind && askKind !== kind) { setAsk(null); }
+  }
+  function setAsk(kind) {
+    askKind = kind;
+    claudeAsk.hidden = !kind;
+    if (!kind) { return; }
+    var revise = kind === 'revise', n = (state.claude.sent || {}).count || 0;
+    claudeAsk.querySelector('#ca-title').textContent = revise ? 'Stop revising?' : 'Stop the build?';
+    claudeAsk.querySelector('.ca-body').textContent = revise ?
+      'Your ' + (n === 1 ? 'note goes' : n + ' notes go') + ' back to drafts, ready to edit or send again. Anything Claude already changed stays in the book for you to review.' :
+      'The sections go back to Drafting, ready to build again. Tests that already pass and their evidence are kept.';
+    claudeAsk.querySelector('.ca-stop').textContent = revise ? 'Stop revising' : 'Stop the build';
+    // The question sits under the row it is about.
+    var row = (revise ? reviseBtn : buildBtn).parentNode;
+    row.parentNode.insertBefore(claudeAsk, row.nextSibling);
+    claudeAsk.querySelector('.ca-keep').focus({ preventScroll: true });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.claude-stop'), function (b) {
+    b.addEventListener('click', function () { setAsk(b.parentNode.id === 'revise-row' ? 'revise' : 'build'); });
+  });
+  claudeAsk.querySelector('.ca-keep').addEventListener('click', function () {
+    var row = askKind === 'build' ? buildBtn.parentNode : reviseBtn.parentNode;
+    setAsk(null);
+    row.querySelector('.claude-stop').focus({ preventScroll: true });
+  });
+  claudeAsk.querySelector('.ca-stop').addEventListener('click', function () {
+    var kind = askKind;
+    setAsk(null);
+    setClaudeMenu(false);
+    postJson('/api/claude/stop').then(function (res) {
+      if (!res.ok) {
+        msgEl.textContent = res.j.error === 'idle' ? 'Claude had already finished.' : 'Could not stop: ' + (res.j.error || 'failed') + '.';
+      } else if (res.j.stopped === 'revise') {
+        var n = res.j.count;
+        msgEl.textContent = 'Stopped. ' + (n === 1 ? 'Your note is a draft again.' : 'Your ' + n + ' notes are drafts again.');
+      } else {
+        msgEl.textContent = 'Stopped the build.';
+      }
+      if (kind === 'revise') { reloadNotes(''); }
+      pollClaude();
+    }).catch(function () { msgEl.textContent = 'Server unreachable: Claude was not stopped.'; });
+  });
+  // Esc closes the question first, then (on the next press) the menu.
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && askKind) { e.preventDefault(); e.stopPropagation(); setAsk(null); }
+  }, true);
+  document.getElementById('claude-btn').addEventListener('click', function () { setAsk(null); });
   function setClaude(c) {
     var wasBusy = state.claude.state !== 'idle';
     var lastAt = state.bookAt;

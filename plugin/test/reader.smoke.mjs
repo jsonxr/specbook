@@ -1102,6 +1102,141 @@ try {
     }
   });
 
+  // Stop in the Claude menu: the running action has Stop, which asks once, then withdraws the request.
+  const openClaudeMenu = async () => {
+    if (await page.locator('#claude-pop').isHidden()) {
+      await page.locator('#claude-btn').click();
+    }
+    await page.waitForSelector('#claude-pop:not([hidden])', { timeout: 3000 });
+  };
+  const tall = sel => page.evaluate(s => Math.round(document.querySelector(s).getBoundingClientRect().height), sel);
+
+  await check('while Claude revises, the menu shows Revise running with Stop, and Stop asks before it stops', async () => {
+    const keep = readNotesFile().notes;
+    let sent = false;
+    try {
+      await idle();
+      await twoNotes();
+      await openConfirm('revise');
+      await page.locator('#claude-confirm .cc-send').click();
+      await page.waitForFunction(() => document.getElementById('claude-status').textContent === 'Revising…', null, { timeout: 3000 });
+      sent = true;
+      await openClaudeMenu();
+      const row = await page.evaluate(() => ({
+        running: document.getElementById('revise-row').classList.contains('running'),
+        text: document.getElementById('revise').textContent,
+        stop: !!document.querySelector('#revise-row .claude-stop')?.getClientRects().length,
+        buildStop: !!document.querySelector('#build-row .claude-stop')?.getClientRects().length,
+        build: document.querySelector('#build small').textContent,
+      }));
+      if (!row.running || !row.text.includes('Revising') || !row.text.includes('2 notes') || !row.stop || row.buildStop || row.build !== 'Waiting for Claude to finish.') {
+        throw new Error(`the running row is wrong: ${JSON.stringify(row)}`);
+      }
+      // Stop asks; Keep going leaves everything as it was.
+      await page.locator('#revise-row .claude-stop').click();
+      await page.waitForSelector('#claude-ask:not([hidden])', { timeout: 3000 });
+      const ask = await page.locator('#claude-ask').textContent();
+      if (!ask.includes('Stop revising?') || !ask.includes('Keep going') || !ask.includes('Stop revising')) {
+        throw new Error(`the question says ${JSON.stringify(ask)}`);
+      }
+      await page.locator('#claude-ask .ca-keep').click();
+      await page.waitForSelector('#claude-ask', { state: 'hidden', timeout: 3000 });
+      if (requestFiles().length !== 1) {
+        throw new Error('Keep going withdrew the request');
+      }
+      // On a phone Stop and its answers are thumb-sized.
+      await page.setViewportSize({ width: 390, height: 844 });
+      try {
+        await openClaudeMenu();
+        const sizes = [await tall('#revise-row .claude-stop')];
+        await page.locator('#revise-row .claude-stop').click();
+        await page.waitForSelector('#claude-ask:not([hidden])', { timeout: 3000 });
+        sizes.push(await tall('#claude-ask .ca-keep'), await tall('#claude-ask .ca-stop'));
+        if (sizes.some(h => h < 44)) {
+          throw new Error(`on a phone Stop and its answers are ${sizes.join(', ')} px tall`);
+        }
+        await page.keyboard.press('Escape');
+        await page.waitForSelector('#claude-ask', { state: 'hidden', timeout: 3000 });
+      } finally {
+        await page.setViewportSize({ width: 1400, height: 900 });
+      }
+      // A stop the server refuses (Claude got there first) says so.
+      await page.route('**/api/claude/stop', route => route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'idle' }) }));
+      try {
+        await openClaudeMenu();
+        await page.locator('#revise-row .claude-stop').click();
+        await page.locator('#claude-ask .ca-stop').click();
+        await page.waitForFunction(() => document.getElementById('make-msg').textContent === 'Claude had already finished.', null, { timeout: 3000 });
+      } finally {
+        await page.unroute('**/api/claude/stop');
+        for (let i = errors.length - 1; i >= 0; i--) {
+          if (/409/.test(errors[i])) { errors.splice(i, 1); }
+        }
+      }
+      // Stop revising: the request is withdrawn, the notes are drafts again and the book unlocks.
+      await openClaudeMenu();
+      await page.locator('#revise-row .claude-stop').click();
+      await page.locator('#claude-ask .ca-stop').click();
+      await page.waitForFunction(() => document.getElementById('make-msg').textContent === 'Stopped. Your 2 notes are drafts again.', null, { timeout: 3000 })
+        .catch(async () => { throw new Error(`the toast says ${JSON.stringify(await page.locator('#make-msg').textContent())}`); });
+      sent = false;
+      await page.waitForFunction(() => !document.getElementById('revise').disabled && !document.body.classList.contains('locked-notes') && document.getElementById('claude-pop').hidden, null, { timeout: 5000 });
+      const statuses = Object.values(readNotesFile().notes).map(n => n.status);
+      if (requestFiles().length || statuses.length !== 2 || statuses.some(s => s !== 'draft')) {
+        throw new Error(`after Stop: ${requestFiles().length} pending, notes ${statuses.join(', ')}`);
+      }
+    } finally {
+      if (sent) {
+        for (const f of requestFiles()) {
+          execFileSync(process.execPath, [join(PLUGIN, 'server', 'next-request.mjs'), '--data', data, '--done', f], { stdio: 'ignore' });
+        }
+      }
+      await idle();
+      writeNotes(keep);
+      await open();
+    }
+  });
+
+  await check('Stop the build stops a build', async () => {
+    const file = join(data, 'book.json');
+    const original = readFileSync(file, 'utf8');
+    try {
+      await idle();
+      const book = JSON.parse(original);
+      for (const ch of book.chapters) {
+        for (const s of ch.sections || []) {
+          if (s.stage === 'ready') { s.stage = 'drafting'; }
+          if (ch.id === 'later' && s.id === 'due') { s.stage = 'ready'; }
+        }
+      }
+      writeFileSync(file, JSON.stringify(book, null, 2));
+      await open();
+      await openConfirm('build');
+      await page.locator('#claude-confirm .cc-send').click();
+      const id = buildCli('start').id;
+      await page.waitForFunction(() => document.getElementById('claude-btn').classList.contains('busy'), null, { timeout: 5000 });
+      await openClaudeMenu();
+      if (!(await page.evaluate(() => document.getElementById('build-row').classList.contains('running') && document.querySelector('#revise small').textContent === 'Waiting for Claude to finish.'))) {
+        throw new Error('Build is not the running row');
+      }
+      await page.locator('#build-row .claude-stop').click();
+      await page.waitForSelector('#claude-ask:not([hidden])', { timeout: 3000 });
+      if (!(await page.locator('#claude-ask').textContent()).includes('Stop the build?')) {
+        throw new Error('the question does not ask to stop the build');
+      }
+      await page.locator('#claude-ask .ca-stop').click();
+      await page.waitForFunction(() => document.getElementById('make-msg').textContent === 'Stopped the build.', null, { timeout: 3000 });
+      const progress = JSON.parse(readFileSync(join(data, 'builds', id, 'progress.json'), 'utf8'));
+      if (progress.state !== 'failed' || requestFiles().length) {
+        throw new Error(`the build was not stopped: ${progress.state}, ${requestFiles().length} pending`);
+      }
+      await idle();
+    } finally {
+      writeFileSync(file, original);
+      await open();
+    }
+  });
+
   await check('Share asks for a pin, Start shares, and the menu then has the link, this computer\'s address, who is here and only Stop sharing', async () => {
     await open();
     // The book does not share itself: the pill offers to.

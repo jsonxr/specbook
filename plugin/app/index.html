@@ -29,8 +29,9 @@
   <div class="menu-wrap bar-group claude" id="claude-menu">
     <button type="button" id="claude-btn" class="claude-btn" aria-expanded="false" aria-controls="claude-pop"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8z"/></svg><span>Claude</span><span id="claude-busy" class="claude-busy"></span><span id="claude-count" class="tool-badge claude-count" hidden>0</span><span class="chev" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M6 9l6 6 6-6"/></svg></span></button>
     <div id="claude-pop" class="bar-menu claude-pop" hidden>
-      <button type="button" id="revise" class="claude-act">Revise<small>Review your notes, then send them. Claude revises the book and you review each change.</small></button>
-      <button type="button" id="build" class="claude-act">Build<small>Build the sections marked Ready, with tests as evidence.</small></button>
+      <div id="revise-row" class="claude-row"><button type="button" id="revise" class="claude-act"><span class="ca-label">Revise</span><small>Review your notes, then send them. Claude revises the book and you review each change.</small></button><button type="button" class="claude-stop" aria-label="Stop revising" hidden><span class="ca-sq" aria-hidden="true"></span>Stop</button></div>
+      <div id="build-row" class="claude-row"><button type="button" id="build" class="claude-act"><span class="ca-label">Build</span><small>Build the sections marked Ready, with tests as evidence.</small></button><button type="button" class="claude-stop" aria-label="Stop the build" hidden><span class="ca-sq" aria-hidden="true"></span>Stop</button></div>
+      <div id="claude-ask" class="claude-ask" role="group" aria-labelledby="ca-title" hidden><p id="ca-title"></p><small class="ca-body"></small><div class="ca-row"><button type="button" class="bar-btn ca-keep">Keep going</button><button type="button" class="ca-stop"></button></div></div>
       <p id="claude-status" class="bar-hint"></p>
     </div>
   </div>
