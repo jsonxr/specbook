@@ -544,7 +544,7 @@ try {
       today: document.querySelector(`.rv-stack[data-key="${b}"]`)?.textContent || '',
       frame: document.querySelector('.rv-stack[data-key="todos-list-1"]')?.textContent || '',
       frames: document.querySelectorAll('figure.frame.has-rv').length,
-      count: document.getElementById('np-tab-changes').textContent,
+      count: document.getElementById('chg-pos').textContent.split(' / ')[1],
       stacks: document.querySelectorAll('.rv-stack').length,
     }), { a: req.id, b: changed.id });
     if (seen.was !== before) {
@@ -553,14 +553,15 @@ try {
     if (!seen.bullet.includes('(reworded)') || !seen.frame.includes('Mockup changed') || seen.frames !== 1) {
       throw new Error(`expected a stack for the reworded today and only todos-list-1 changed: ${JSON.stringify(seen)}`);
     }
-    if (seen.count !== `Changes ${seen.stacks}`) {
-      throw new Error(`Changes (n) does not count the review stacks: ${JSON.stringify(seen)}`);
+    if (seen.count !== String(seen.stacks)) {
+      throw new Error(`the toolbar's n / N does not count the review stacks: ${JSON.stringify(seen)}`);
     }
     // Accept: the review closes, the count drops by one, and it stays closed after a reload.
     await page.locator(`.rv-acts[data-key="${req.id}"] .rv-accept`).click();
     await page.waitForFunction(id => !document.querySelector(`.rv-stack[data-key="${id}"]`), req.id, { timeout: 5000 });
-    const after = await page.evaluate(() => document.getElementById('np-tab-changes').textContent);
-    if (after !== `Changes ${seen.stacks - 1}`) {
+    const after = await page.waitForFunction(n => document.getElementById('chg-pos').textContent.split(' / ')[1] === String(n), seen.stacks - 1, { timeout: 3000 })
+      .then(() => String(seen.stacks - 1), async () => page.evaluate(() => document.getElementById('chg-pos').textContent));
+    if (after !== String(seen.stacks - 1)) {
       throw new Error(`Accept did not take exactly one review off: ${seen.count} -> ${after}`);
     }
     if (readReviewFile().accepted[req.id]?.text !== req.text) {
@@ -641,7 +642,7 @@ try {
     }
   });
 
-  await check('the bar: View, the review keys, Requests and Claude', async () => {
+  await check('the bar: View, the review keys and Claude', async () => {
     await open();
     // View: Screenshots on as well as Mockups is "both"; the last one checked cannot be unchecked.
     await page.locator('#view-btn').click();
@@ -657,7 +658,7 @@ try {
     }
     await page.locator('#view-mock').check();
     await page.keyboard.press('Escape');
-    // F shows only changes, J goes to the next, R opens Requests with its Changes tab.
+    // F shows only what needs you, J goes to the next.
     const diff = await page.evaluate(() => document.body.classList.contains('diff-on'));
     await page.keyboard.press('f');
     if ((await page.evaluate(() => document.body.classList.contains('diff-on'))) === diff) {
@@ -670,14 +671,6 @@ try {
     if (!/^\d+ \/ \d+$/.test(await page.locator('#chg-pos').textContent())) {
       throw new Error('the change position is not "n / N"');
     }
-    await page.keyboard.press('r');
-    await page.waitForSelector('#notes-panel:not([hidden])');
-    await page.locator('#np-tab-changes').click();
-    const items = await page.locator('#np-changes .np-chg').count();
-    if (!items) {
-      throw new Error('the Requests pane lists no changes');
-    }
-    await page.keyboard.press('Escape');
     // Claude ▾ holds Revise and Build, each saying what it does.
     await page.locator('#claude-btn').click();
     const acts = await page.evaluate(() => ['revise', 'build'].map(id => document.getElementById(id).offsetParent !== null && document.getElementById(id).querySelector('small').textContent.length > 10));
@@ -700,6 +693,92 @@ try {
     }).filter(Boolean));
     if (bad.length) {
       throw new Error(bad.join('; '));
+    }
+  });
+
+  // Drops a note on an element of the book through Comment mode and waits for review.json to hold it.
+  const dropNoteOn = async (sel, text) => {
+    await page.evaluate(s => document.querySelector(s).scrollIntoView({ block: 'center', behavior: 'instant' }), sel);
+    await page.keyboard.press('c');
+    await page.waitForSelector('body.commenting');
+    const box = await page.locator(sel).boundingBox();
+    await page.mouse.click(box.x + Math.min(box.width / 2, 200), box.y + Math.min(box.height / 2, 10));
+    await page.waitForSelector('.sticky.editing textarea');
+    await page.keyboard.type(text);
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Escape');
+    await waitFor(() => Object.values(readNotesFile().notes).some(n => n.text === text), 3000, `review.json to hold "${text}"`);
+  };
+  const filterOff = async () => {
+    if ((await page.locator('#changes-btn').getAttribute('aria-pressed')) === 'true') {
+      await page.locator('#changes-btn').click();
+    }
+  };
+
+  await check('the filter shows only what still needs you: changes not accepted and lines with a note', async () => {
+    const keep = readNotesFile().notes;
+    try {
+      await open();
+      await filterOff();
+      const t = await page.evaluate(() => {
+        const quiet = [...document.querySelectorAll('#main .bk-sec')].filter(s => !s.querySelector('.has-rv') && s.querySelector('.reqs li.same[id]'));
+        return quiet.length < 2 ? null : { li: quiet[0].querySelector('.reqs li.same[id]').id, sec: quiet[0].id, other: quiet[1].id };
+      });
+      if (!t) {
+        throw new Error('the starter book has no two sections without changes to test with');
+      }
+      await dropNoteOn(`li#${t.li}`, 'A note on an accepted line');
+      await page.locator('#changes-btn').click();
+      await page.waitForFunction(() => document.body.classList.contains('diff-on'), null, { timeout: 3000 });
+      await page.waitForTimeout(200);
+      const seen = await page.evaluate(({ li, sec, other }) => {
+        const l = document.getElementById(li);
+        const dim = [l, ...l.children].filter(c => !c.classList.contains('pin')).map(c => getComputedStyle(c).opacity).filter(o => o !== '1');
+        return {
+          shown: !!document.getElementById(sec).getClientRects().length, dim, other: !!document.getElementById(other).getClientRects().length,
+          total: document.getElementById('chg-pos').textContent.split(' / ')[1], rv: String(document.querySelectorAll('#main .has-rv').length),
+          title: document.getElementById('changes-btn').title,
+        };
+      }, t);
+      if (!seen.shown || seen.dim.length || seen.other || seen.total !== seen.rv || seen.title !== 'Only what needs you · F') {
+        throw new Error(`the filter does not show exactly what needs you: ${JSON.stringify({ ...t, ...seen })}`);
+      }
+    } finally {
+      writeNotes(keep);
+      await open();
+      await filterOff();
+    }
+  });
+
+  await check('there is no Requests panel; the notes count is on Claude', async () => {
+    const keep = readNotesFile().notes;
+    try {
+      writeNotes({});
+      await open();
+      if (await page.locator('#notes-btn, #notes-panel').count()) {
+        throw new Error('the Requests button or panel is still there');
+      }
+      if (await page.locator('#claude-count').isVisible()) {
+        throw new Error('the notes count shows with no notes');
+      }
+      const look = () => page.evaluate(() => [document.body.className, [...document.querySelectorAll('aside, [role="dialog"]')].filter(e => e.getClientRects().length).length].join('|'));
+      const before = await look();
+      await page.keyboard.press('r');
+      await page.waitForTimeout(200);
+      if ((await look()) !== before) {
+        throw new Error(`R still does something: ${before} -> ${await look()}`);
+      }
+      await dropNoteOn('#todos-list > h3', 'First of two');
+      await dropNoteOn('#todos-add > h3', 'Second of two');
+      await page.waitForFunction(() => {
+        const c = document.getElementById('claude-count');
+        return c && !c.hidden && c.textContent === '2' && document.querySelector('#revise small').textContent.startsWith('Review your 2 notes');
+      }, null, { timeout: 3000 }).catch(async () => {
+        throw new Error(`the Claude button and Revise do not count 2 notes: ${await page.evaluate(() => [document.getElementById('claude-count')?.textContent, document.querySelector('#revise small').textContent].join(' | '))}`);
+      });
+    } finally {
+      writeNotes(keep);
+      await open();
     }
   });
 

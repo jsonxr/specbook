@@ -290,30 +290,11 @@ body.commenting main .pin, body.commenting main .pin * { cursor: pointer !import
 .np-x { border: 0; background: transparent; color: var(--muted); font: 600 22px/1 var(--sans); width: 30px; height: 30px; border-radius: 6px; cursor: pointer; }
 .np-x:hover { background: var(--surface); color: var(--ink); }
 .np-empty { color: var(--muted); }
-.np-empty[hidden], .np-send[hidden] { display: none; }
+.np-empty[hidden] { display: none; }
 .np-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .np-note { min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px 6px; }
-.np-go { display: flex; gap: 8px; align-items: flex-start; width: 100%; text-align: left; border: 0; background: transparent; color: var(--ink); padding: 2px 0; cursor: pointer; font: 600 13px var(--sans); }
-.np-go:hover .np-where { color: var(--note); }
-.np-num { flex: none; width: 22px; height: 22px; border-radius: 50% 50% 50% 0; background: var(--note); color: #222; font: 700 11px/22px var(--mono); text-align: center; }
-.np-where { padding-top: 2px; overflow-wrap: anywhere; }
-.np-about { margin: 4px 0 6px 30px; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .np-note textarea { display: block; width: 100%; min-height: 40px; resize: none; overflow: hidden; font: 14px/1.4 var(--sans); color: var(--ink); background: #2a2d32; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
 .np-row { display: flex; justify-content: flex-end; padding-top: 4px; }
-.np-del { color: var(--muted); }
-.np-del:hover { color: #ff7b72; }
-.np-send { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 14px; }
-.np-send h3 { margin: 0 0 10px; font-size: 14px; }
-.np-items { margin: 0; padding: 0 0 0 22px; display: grid; gap: 10px; }
-.np-items li::marker { font: 600 12px var(--mono); color: var(--muted); }
-.np-items dl { margin: 0; display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 2px 8px; }
-.np-items dt { font: 600 11px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .04em; padding-top: 2px; }
-.np-items dd { margin: 0; overflow-wrap: anywhere; }
-.np-i-note { white-space: pre-wrap; }
-.np-json { margin: 12px 0; }
-.np-json summary { cursor: pointer; color: var(--accent); font: 600 13px var(--sans); }
-.np-json pre { margin: 8px 0 0; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; font: 12px/1.45 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
-.np-send .make-btn { width: 100%; }
 .print-notes { display: none; }
 @media print {
   .bar, .side, .notes-panel, .note-layer { display: none !important; } .layout { display: block; }
@@ -374,8 +355,6 @@ span.ev-chip { cursor: default; }
 @media print { .ev-panel, .ev-lightbox { display: none; } body.coverage .reqs li.unproven > :not(.pin) { opacity: 1; } }
 body.coverage .reqs li.unproven:has(.ev-chip.failed) > :not(.pin) { opacity: 1; }
 .bar-group[hidden] { display: none; }
-.np-i-el code { font: 12px var(--mono); color: var(--accent); overflow-wrap: anywhere; }
-.np-i-el span { color: var(--muted); }
 
 /* the build banner: under the bar while a build runs, then the way into the review of its calls */
 .build-banner { display: grid; gap: 2px; padding: 8px max(16px, 2vw); background: #221d2e; border-bottom: 1px solid var(--line); font-size: 14px; }
@@ -474,7 +453,7 @@ body.coverage .reqs li.unproven:has(.ev-chip.failed) > :not(.pin) { opacity: 1; 
 
 /* A shared book (app/share.js): a guest reads and keeps their own notes; Claude's controls, Accept, stages and edits are
    the owner's alone, so they are not drawn. The server refuses them for guests anyway. */
-body.guest .bar-group.claude, body.guest #np-send, body.guest .rv-acts, body.guest .stage-btn, body.guest .edit-ctl,
+body.guest .bar-group.claude, body.guest .rv-acts, body.guest .stage-btn, body.guest .edit-ctl,
 body.guest .add-req, body.guest .req-form, body.guest .build-banner button, body.guest #review-panel { display: none !important; }
 
 /* Live sharing: someone else's note as they write it (read-only, over or instead of the saved sticky). */
@@ -550,8 +529,9 @@ body.followed::after { content: ""; position: fixed; inset: 0; border: 3px solid
 #view-btn, .share-start, .share-more { display: inline-flex; align-items: center; gap: 4px; }
 .claude-btn .chev { color: inherit; }
 .claude-btn .chev svg { fill: none; }
-.claude-btn { font: 700 14px var(--sans); color: var(--claude, #d97757); background: #2a1c16; border: 1px solid #5c3a2c; border-radius: 9px; padding: 6px 12px; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 7px; }
+.claude-btn { position: relative; font: 700 14px var(--sans); color: var(--claude, #d97757); background: #2a1c16; border: 1px solid #5c3a2c; border-radius: 9px; padding: 6px 12px; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 7px; }
 .claude-btn svg { fill: currentColor; }
+.claude-count { top: -7px; right: -7px; font-size: 11px; line-height: 1.5; border-color: var(--side); }
 .claude-btn.busy svg { animation: claude-pulse 1.2s infinite; }
 .claude-busy { color: #f3c1ac; font-weight: 600; }
 @keyframes claude-pulse { 50% { opacity: .3; } }
@@ -563,18 +543,9 @@ body.followed::after { content: ""; position: fixed; inset: 0; border: 3px solid
 .claude-act:disabled { opacity: .5; cursor: default; }
 .claude-pop #claude-status { margin: 0; padding: 0 8px 4px; }
 .claude-pop #claude-status:empty { display: none; }
-.make-btn.claude-send { background: #3a2318; color: #fff; border: 1px solid #6b3f2c; }
-.np-tabs { display: flex; gap: 4px; margin: -4px 0 12px; }
-.np-tabs button { font: 600 13px var(--sans); color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 3px 9px; cursor: pointer; }
-.np-tabs button[aria-selected="true"] { color: var(--ink); background: var(--surface); border-color: var(--line); }
-.notes-panel.tab-changes #np-list, .notes-panel.tab-changes #np-empty, .notes-panel.tab-changes #np-send { display: none; }
-.np-changes { list-style: none; padding: 0; }
-.np-chg-sec { color: var(--muted); font: 600 12px var(--sans); margin: 10px 0 4px; }
-.np-chg button { display: block; width: 100%; text-align: left; font: 13px/1.4 var(--sans); color: var(--ink); background: var(--surface); border: 0; border-left: 3px solid var(--proposed); border-radius: 0 6px 6px 0; padding: 6px 8px; margin-bottom: 6px; cursor: pointer; }
-.np-chg button:hover { background: #2a2c31; }
 body.guest #claude-menu { display: none; }
 
-/* Phone: the review strip sits at the bottom; the Requests pane fills the screen above it. */
+/* Phone: the review strip is a full-width bar at the bottom. */
 @media (max-width: 700px) {
   .bar { gap: 8px; padding: 8px 10px; backdrop-filter: none; background: var(--side); } 
   .bar .view-wrap #view-btn { padding: 6px 8px; }
@@ -593,7 +564,7 @@ body.guest #claude-menu { display: none; }
   /* Every menu in the bar hangs from the bar (sticky, so positioned), full width less a margin, never off the screen. */
   .share-pill, .bar .menu-wrap { position: static; }
   .share-menu, .bar .bar-menu { top: 100%; left: 8px; right: 8px; width: auto; min-width: 0; max-width: none; max-height: calc(100dvh - 140px); overflow-y: auto; }
-  .claude-btn span:not(.claude-busy):not(.chev) { display: none; }
+  .claude-btn span:not(.claude-busy):not(.chev):not(.claude-count) { display: none; }
   main { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
   /* A shared book's status chip sits above the toolbar, not under it. */
   body .share-chip { bottom: calc(63px + env(safe-area-inset-bottom)); }

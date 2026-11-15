@@ -809,8 +809,8 @@
   function diffSummary(rv, orphans) {
     var box = el('div', { class: 'diff-summary', role: 'status' });
     setHtml(box, rv.count ?
-      '<b>' + rv.count + (rv.count === 1 ? ' change' : ' changes') + '</b> to review. Sections with none are hidden; unchanged lines inside a changed section are dimmed. <b>Next</b> steps through them. <b>✓ Accept</b> takes one off the list; to ask for something else, drop a note on it with <b>Comment</b>.' :
-      'Nothing to review: every change has been accepted.');
+      '<b>' + rv.count + ' to look at</b>: changes not accepted yet and notes. Sections with none are hidden; the rest of a shown section is dimmed. <b>Next</b> steps through them. <b>✓ Accept</b> takes one off the list; to ask for something else, drop a note on it with <b>Comment</b>.' :
+      'Nothing to look at: every change has been accepted and no note is waiting.');
     if (orphans && orphans.length) { box.appendChild(removedList(orphans)); }
     return box;
   }
@@ -1309,7 +1309,7 @@
   // it on, a click on the book drops a pin and a sticky beside it, ready to type in, and the mode stays on. A note
   // stays up as that sticky, with an arrow to its pin. The sticky sits at (dx, dy): page pixels from the pin's point,
   // so it travels with the pin; dragging the sticky moves it, and clicking it edits it. Dragging a pin
-  // re-aims it (the sticky stays put), and whatever it lands on becomes the note's target. The notes panel lists
+  // re-aims it (the sticky stays put), and whatever it lands on becomes the note's target. The screen before Revise lists
   // every note in book order, with exactly what Revise will send. A note also keeps the id of its section, so it
   // still has a place on the page when its target is revised away.
   var SVG = 'http://www.w3.org/2000/svg';
@@ -1350,8 +1350,6 @@
     selectNote(null);
   }, true);
   var hot = null;
-  var panel = document.getElementById('notes-panel');
-  var notesBtn = document.getElementById('notes-btn');
   // Notes are saved to the server shortly after each change, one save at a time, each based on the revision the last
   // one returned. While Claude is revising, the notes are locked and nothing is saved.
   var saveTimer = 0;
@@ -1762,7 +1760,6 @@
   function grow(ta) { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; }
   function barBottom() { var b = document.querySelector('.bar'); return b ? b.offsetHeight + 8 : 0; }
   function labelFor(n) { var t = anchorOf(n); return t ? t.dataset.label : 'Not on this page'; }
-  function aboutFor(n) { var t = byKey(n.target); return t ? plain(t.dataset.quote) : ''; }
   // Book order: the order of the targets in the document, then top to bottom (then left to right) within one.
   function ordered(withDraft) {
     var idx = {};
@@ -1780,7 +1777,7 @@
       return na.rx - nb.rx;
     });
   }
-  // What Revise sends. The panel's preview is built from this too, so it cannot drift.
+  // What Revise sends. The screen before Revise is built from this too, so it cannot drift.
   function items() {
     return ordered(false).map(function (id) {
       var n = state.notes[id], t = byKey(n.target), at = anchorOf(n);
@@ -1792,7 +1789,6 @@
       return it;
     });
   }
-  function requestBody() { return JSON.stringify({ items: items() }); }
 
   // Pins
   function buildPin(id) {
@@ -2202,86 +2198,19 @@
     resumeRefetch();
   }
 
-  // The toolbar, the panel, the print list
+  // The notes count on Claude, the notes, the print list
   function refresh() {
     var c = live().length;
-    var badge = document.getElementById('notes-count');
+    var badge = document.getElementById('claude-count');
     badge.textContent = String(c);
     badge.hidden = c === 0;
-    notesBtn.title = 'Requests · R (' + c + ' note' + (c === 1 ? '' : 's') + ')';
-    document.getElementById('np-tab-notes').textContent = 'Notes ' + c;
-    document.getElementById('np-revise').textContent = '\u2726 Send ' + c + ' note' + (c === 1 ? '' : 's') + ' to Claude';
+    badge.title = c + ' note' + (c === 1 ? '' : 's') + ' to send';
     drawAll();
     showClaude();
-    renderPanel();
     renderPrint();
   }
   var soon = 0;
   function refreshSoon() { clearTimeout(soon); soon = setTimeout(refresh, 120); }
-  function renderPanel() {
-    var list = document.getElementById('np-list');
-    var ids = ordered(false);
-    // Never rebuild the list under the reader's cursor: a panel edit only refreshes the preview below it.
-    var act = document.activeElement;
-    var editing = act && act.tagName === 'TEXTAREA' && list.contains(act);
-    if (!editing) {
-      var hadFocus = list.contains(act);
-      list.innerHTML = '';
-      ids.forEach(function (id, i) {
-        var n = state.notes[id];
-        var li = el('li', { class: 'np-note' });
-        setHtml(li, '<button type="button" class="np-go"><span class="np-num"></span><span class="np-where"></span></button>' +
-          '<p class="np-about"></p><textarea rows="2"></textarea><div class="np-row"><button type="button" class="linkbtn np-del">Delete</button></div>');
-        li.querySelector('.np-num').textContent = String(i + 1);
-        li.querySelector('.np-where').textContent = labelFor(n);
-        li.querySelector('.np-go').setAttribute('aria-label', 'Go to note ' + (i + 1) + ' on ' + labelFor(n));
-        var about = aboutFor(n);
-        var ab = li.querySelector('.np-about');
-        if (about) { ab.textContent = about; ab.title = about; } else { ab.remove(); }
-        var ta = li.querySelector('textarea');
-        ta.value = n.text;
-        ta.readOnly = noteLocked(id);
-        li.querySelector('.np-del').disabled = noteLocked(id);
-        ta.setAttribute('aria-label', 'Note ' + (i + 1) + ' text');
-        ta.addEventListener('input', function () {
-          grow(ta);
-          if (ta.value.trim()) { n.text = ta.value; saveNotes(); renderPreview(); renderPrint(); drawStickies(); }
-        });
-        ta.addEventListener('blur', function () {
-          // Leave the list alone here, so a click that moved focus out of this box still lands where it was aimed.
-          if (!ta.value.trim() && !noteLocked(id)) { removeNote(id); } else { drawAll(); }
-        });
-        li.querySelector('.np-go').addEventListener('click', function () { goTo(id); });
-        li.querySelector('.np-del').addEventListener('click', function () { if (!noteLocked(id)) { removeNote(id); } });
-        list.appendChild(li);
-        grow(ta);
-      });
-      if (hadFocus) { panel.focus({ preventScroll: true }); }
-    }
-    document.getElementById('np-empty').hidden = ids.length > 0;
-    renderPreview();
-  }
-  function renderPreview() {
-    var its = items();
-    var send = document.getElementById('np-send');
-    send.hidden = its.length === 0;
-    var ol = document.getElementById('np-items');
-    ol.innerHTML = '';
-    its.forEach(function (it) {
-      var li = el('li', {});
-      setHtml(li, '<dl><dt>Where</dt><dd class="np-i-where"></dd><dt>About</dt><dd class="np-i-about"></dd>' +
-        (it.element ? '<dt>Element</dt><dd class="np-i-el"><code></code><span></span></dd>' : '') + '<dt>Note</dt><dd class="np-i-note"></dd></dl>');
-      if (it.element) {
-        li.querySelector('.np-i-el code').textContent = it.element.selector;
-        li.querySelector('.np-i-el span').textContent = it.element.text ? ' “' + it.element.text + '”' : '';
-      }
-      li.querySelector('.np-i-where').textContent = it.where;
-      li.querySelector('.np-i-about').textContent = it.about || '(the whole of it)';
-      li.querySelector('.np-i-note').textContent = it.note;
-      ol.appendChild(li);
-    });
-    document.getElementById('np-json').textContent = requestBody();
-  }
   function renderPrint() {
     var its = items();
     printList.innerHTML = '';
@@ -2332,22 +2261,6 @@
     };
     glide = requestAnimationFrame(step);
   }
-  function setPanel(open) {
-    if (open === !panel.hidden) { return; }
-    if (open) { setReviewPanel(false); }
-    panel.hidden = !open;
-    notesBtn.setAttribute('aria-expanded', String(open));
-    if (open) {
-      renderPanel();
-      panel.focus({ preventScroll: true });
-    } else if (panel.contains(document.activeElement) || document.activeElement === document.body) {
-      notesBtn.focus({ preventScroll: true });
-    }
-  }
-  notesBtn.addEventListener('click', function () { setPanel(panel.hidden); });
-  document.getElementById('np-close').addEventListener('click', function () { setPanel(false); });
-  document.getElementById('np-revise').addEventListener('click', function () { document.getElementById('revise').click(); });
-
   function renderNotes() {
     var before = JSON.stringify(state.notes);
     migrate();
@@ -2439,7 +2352,6 @@
     if (e.key === 'Escape') {
       if (tocOpen()) { e.preventDefault(); setToc(false); return; }
       if (selectedNote && !inField) { e.preventDefault(); selectNote(null); return; }
-      if (!panel.hidden) { e.preventDefault(); setPanel(false); return; }
       if (!reviewPanel.hidden) { e.preventDefault(); setReviewPanel(false); return; }
       if (commenting) { e.preventDefault(); setCommenting(false); }
       return;
@@ -2451,7 +2363,6 @@
     if (e.key === 'j' || e.key === 'J') { e.preventDefault(); nextChange(false); }
     if (e.key === 'k' || e.key === 'K') { e.preventDefault(); prevChange(); }
     if (e.key === 'f' || e.key === 'F') { e.preventDefault(); setDiff(!state.diff); }
-    if (e.key === 'r' || e.key === 'R') { e.preventDefault(); setPanel(panel.hidden); }
   });
 
   // The send message clears itself after a while, or when clicked.
@@ -2489,11 +2400,10 @@
     var wasLocked = document.body.classList.contains('locked-notes');
     reviseBtn.disabled = busy || live().length === 0;
     buildBtn.disabled = busy || !anyReady();
-    document.getElementById('np-revise').disabled = reviseBtn.disabled;
     claudeStatus.textContent = busyText(c);
     document.getElementById('claude-busy').textContent = busy ? ' \u00b7 ' + busyText(c) : '';
     document.getElementById('claude-btn').classList.toggle('busy', busy);
-    reviseBtn.querySelector('small').textContent = reviseBtn.disabled && !busy ? 'No notes to send yet.' : 'Send your ' + live().length + ' note' + (live().length === 1 ? '' : 's') + '. Claude revises the book and you review each change.';
+    reviseBtn.querySelector('small').textContent = reviseBtn.disabled && !busy ? 'No notes to send yet.' : 'Review your ' + live().length + ' note' + (live().length === 1 ? '' : 's') + ', then send them. Claude revises the book and you review each change.';
     buildBtn.querySelector('small').textContent = buildBtn.disabled && !busy ? 'No section is marked Ready.' : 'Build the sections marked Ready, with tests as evidence.';
     document.querySelectorAll('.stage-btn').forEach(function (b) { b.hidden = busy; });
     // The page's edits write the book, which is locked while Claude works.
@@ -2509,10 +2419,9 @@
       // Anything being written is kept on the page, but the notes cannot change until Claude has worked through them.
       setCommenting(false);
       var act = document.activeElement;
-      if (act && act.tagName === 'TEXTAREA' && (act.closest('.sticky') || panel.contains(act))) { act.blur(); }
+      if (act && act.tagName === 'TEXTAREA' && act.closest('.sticky')) { act.blur(); }
       if (draft) { dropNote(draft); drawAll(); }
     }
-    if (locked !== wasLocked && !panel.hidden) { renderPanel(); }
     showBuild();
   }
   function setClaude(c) {
@@ -2853,7 +2762,6 @@
   }
   function setReviewPanel(open) {
     if (open === !reviewPanel.hidden) { return; }
-    if (open) { setPanel(false); }
     reviewPanel.hidden = !open;
     if (open) {
       reviewKey = '';
@@ -2861,7 +2769,7 @@
       reviewPanel.focus({ preventScroll: true });
     } else if (reviewPanel.contains(document.activeElement) || document.activeElement === document.body) {
       var back = banner.querySelector('.bb-review');
-      (back || notesBtn).focus({ preventScroll: true });
+      if (back) { back.focus({ preventScroll: true }); }
     }
     showBanner();
   }
@@ -2956,14 +2864,14 @@
     });
   }
   // After Claude has changed the book: draw it again where the reader is. Notes waiting to be saved are sent first,
-  // and while a note is being written (a sticky or a panel box has the cursor) the book is not drawn
+  // and while a note is being written (a sticky has the cursor) the book is not drawn
   // again: that waits until the writing ends (resumeRefetch).
   var refetchWaiting = false;
   function writingNote() {
     if (holding) { return true; }
     var act = document.activeElement;
     if (act && /^(INPUT|SELECT|TEXTAREA)$/.test(act.tagName) && act.closest && act.closest('.inline-editor')) { return true; }
-    return !!(act && act.tagName === 'TEXTAREA' && (act.closest('.sticky') || panel.contains(act)));
+    return !!(act && act.tagName === 'TEXTAREA' && act.closest('.sticky'));
   }
   function refetchBook() {
     if (writingNote()) { refetchWaiting = true; return Promise.resolve(); }
@@ -3015,12 +2923,10 @@
     var n = state.reviews ? state.reviews.count : 0;
     changesBtn.setAttribute('aria-pressed', String(state.diff));
     changesBtn.classList.toggle('has-chg', n > 0);
-    changesBtn.title = n ? 'Show only changes · F' : 'Show only changes · F (nothing to review)';
+    changesBtn.title = n ? 'Only what needs you · F' : 'Only what needs you · F (nothing to look at)';
     nextBtn.disabled = n === 0;
     prevBtn.disabled = n === 0;
-    document.getElementById('np-tab-changes').textContent = 'Changes ' + n;
     changePosSoon();
-    if (!panel.hidden && panelTab === 'changes') { renderChangeList(); }
     sentToggle.hidden = !state.diff;
     document.getElementById('since').textContent = '';
     document.body.classList.toggle('diff-on', state.diff);
@@ -3306,49 +3212,6 @@
   changesBtn.addEventListener('click', function () { setDiff(!state.diff); });
   nextBtn.addEventListener('click', function () { nextChange(false); });
   prevBtn.addEventListener('click', prevChange);
-  // The Requests pane's tabs: the notes (what is asked), and every change under review.
-  var panelTab = 'notes';
-  function setPanelTab(t) {
-    panelTab = t;
-    document.getElementById('np-tab-notes').setAttribute('aria-selected', String(t === 'notes'));
-    document.getElementById('np-tab-changes').setAttribute('aria-selected', String(t === 'changes'));
-    panel.classList.toggle('tab-changes', t === 'changes');
-    document.getElementById('np-changes').hidden = t !== 'changes';
-    if (t === 'changes') { renderChangeList(); }
-  }
-  document.getElementById('np-tab-notes').addEventListener('click', function () { setPanelTab('notes'); });
-  document.getElementById('np-tab-changes').addEventListener('click', function () { setPanelTab('changes'); });
-  function renderChangeList() {
-    var list = document.getElementById('np-changes');
-    list.innerHTML = '';
-    var lastSec = null;
-    [].slice.call(main.querySelectorAll('.has-rv')).forEach(function (e) {
-      var sec = e.closest('.bk-sec');
-      var secTitle = sec ? (sec.querySelector('h3') || {}).textContent || '' : '';
-      if (sec && sec !== lastSec) {
-        lastSec = sec;
-        var h = el('li', { class: 'np-chg-sec' });
-        h.textContent = secTitle.replace(/\s+/g, ' ').trim();
-        list.appendChild(h);
-      }
-      var li = el('li', { class: 'np-chg' });
-      var b = el('button', { type: 'button' });
-      var label = (e.dataset.label || '') + (e.dataset.quote ? ': ' + plain(e.dataset.quote) : '');
-      var txt = (label || e.textContent || '').replace(/\s+/g, ' ').trim();
-      b.textContent = txt.length > 140 ? txt.slice(0, 139) + '\u2026' : txt;
-      b.addEventListener('click', function () {
-        if (!e.getClientRects().length) { setDiff(true); }
-        window.scrollTo({ top: e.getBoundingClientRect().top + window.scrollY - barBottom() - 12, behavior: 'smooth' });
-        e.classList.remove('chg-flash');
-        void e.offsetWidth;
-        e.classList.add('chg-flash');
-      });
-      li.appendChild(b);
-      list.appendChild(li);
-    });
-    if (!list.children.length) { list.appendChild(el('li', { class: 'np-empty' })).textContent = 'Nothing to review.'; }
-  }
-
   // The bar's menus: View and Claude. A click elsewhere or Escape closes them.
   function menuToggle(btnId, popId) {
     var btn = document.getElementById(btnId), pop = document.getElementById(popId);
