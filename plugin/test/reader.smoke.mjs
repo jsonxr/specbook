@@ -1744,9 +1744,12 @@ try {
       const today = hosts.find(h => h.dataset.mockup.endsWith('/list.today.html'));
       const placed = [...document.querySelectorAll('.mock')].flatMap(h => [...h.shadowRoot.querySelectorAll(`.sb-component[data-key^="${bar}."]`)].map(c => c.dataset.key));
       const added = document.querySelector('#filters-bar figure.state[data-key="SCR-3WRX.activeonly"] figcaption');
+      // The caption without its pills and tags: the screen's name alone, since only the role differs.
+      const words = fig.querySelector('figcaption').cloneNode(true);
+      words.querySelectorAll('.role, .tag').forEach(e => e.remove());
       return {
-        caption: fig.querySelector('figcaption').textContent,
-        role: fig.querySelector('figcaption .role')?.textContent,
+        caption: words.textContent.trim(),
+        roles: [...fig.querySelectorAll('figcaption .role')].map(e => [e.textContent, e.title]),
         labels: [...fig.querySelectorAll('.state-pane-label')].map(e => e.textContent),
         inProposed: proposed ? !!proposed.shadowRoot.querySelector(`.sb-component[data-key="${bar}.all"]`) : false,
         inToday: today ? !!today.shadowRoot.querySelector('.sb-component') : null,
@@ -1755,7 +1758,7 @@ try {
         newTag: added ? !!added.querySelector('.tag.new') : false,
       };
     }, { list: LIST, bar: BAR });
-    if (!seen || !seen.caption.includes('TodosScreen · List') || seen.role !== 'User' || seen.labels.join() !== 'Today,Proposed' ||
+    if (!seen || seen.caption !== 'TodosScreen' || JSON.stringify(seen.roles) !== JSON.stringify([['User', 'Who sees it: User']]) || seen.labels.join() !== 'Today,Proposed' ||
       !seen.inProposed || seen.inToday !== false || seen.display !== 'contents' || !seen.newTag) {
       throw new Error(`the list state is not drawn as expected: ${JSON.stringify(seen)}`);
     }
@@ -1829,8 +1832,9 @@ try {
 
   await check('a requirement about a screen shows a chip linking to it', async () => {
     await open();
-    const chips = await page.evaluate(() => ['TOD-LGXT', 'FLT-36VG'].map(id => [...document.querySelectorAll(`li#${id} a.screen-chip`)].map(a => [a.textContent, a.getAttribute('href')])));
-    if (JSON.stringify(chips) !== JSON.stringify([[['TodosScreen · Empty', '#screen/SCR-3WRX.empty']], [['FiltersBar', '#screen/SCR-Y6S2']]])) {
+    const chips = await page.evaluate(() => ['TOD-LGXT', 'FLT-36VG'].map(id => [...document.querySelectorAll(`li#${id} a.screen-chip`)].map(a => [a.textContent, a.getAttribute('href'),
+      [...a.querySelectorAll('.role')].map(e => e.textContent).join()])));
+    if (JSON.stringify(chips) !== JSON.stringify([[['User TodosScreen · No todos', '#screen/SCR-3WRX.empty', 'User']], [['FiltersBar', '#screen/SCR-Y6S2', '']]])) {
       throw new Error(`the chips are ${JSON.stringify(chips)}`);
     }
   });
@@ -1875,7 +1879,7 @@ try {
       });
       const bad = [];
       if (seen.mirrorRole !== 'Anyone') { bad.push(`the anyone role reads ${JSON.stringify(seen.mirrorRole)}`); }
-      if (!seen.mirror.includes('TodosScreen · Mirror') || !seen.mirror.includes('Same as Empty') || seen.mirrorDraws !== 'mockups/screens/SCR-3WRX/empty.html') { bad.push(`sameAs: ${seen.mirror} drawing ${seen.mirrorDraws}`); }
+      if (!seen.mirror.includes('TodosScreen · Mirror') || !seen.mirror.includes('Same as User No todos') || seen.mirrorDraws !== 'mockups/screens/SCR-3WRX/empty.html') { bad.push(`sameAs: ${seen.mirror} drawing ${seen.mirrorDraws}`); }
       if (!seen.gone.includes('Never seen by anyone.') || seen.goneMock) { bad.push(`absent: ${seen.gone}`); }
       if (!seen.missing.includes('Missing')) { bad.push(`a missing state: ${JSON.stringify(seen.missing)}`); }
       if (seen.shot !== '/data/media/screens/SCR-3WRX.typing.png') { bad.push(`screenshot: ${seen.shot}`); }
@@ -1943,6 +1947,10 @@ try {
     if (JSON.stringify(seen) !== JSON.stringify([['TodosScreen', 7, true], ['FiltersBar', 2, true]])) {
       throw new Error(`the Screens list: ${JSON.stringify(seen)}`);
     }
+    // Under each picture its caption, without the screen's name: the pill alone, a pill and a value, a component's value.
+    const caps = await page.evaluate(keys => keys.map(k => document.querySelector(`.sv-strip figure.state[data-go="${k}"] figcaption`)?.textContent.replace(/\s+/g, ' ').trim()),
+      [`${TODOS}.list`, `${TODOS}.empty`, `${BAR}.all`]);
+    if (JSON.stringify(caps) !== JSON.stringify(['User Change', 'User No todos', 'All New'])) { throw new Error(`the Screens list captions: ${JSON.stringify(caps)}`); }
     // As wide as the book's screenshot column (settings.screenshotWidth, 100px by default).
     await page.waitForFunction(() => [...document.querySelectorAll('.sv-strip .mock')].every(m => m.style.zoom), null, { timeout: 5000 });
     const widths = await page.evaluate(() => [...document.querySelectorAll('.sv-strip .mock')].map(m => Math.round(m.getBoundingClientRect().width)));
@@ -1970,11 +1978,13 @@ try {
         !!a.querySelector('.mock')?.shadowRoot?.querySelector(`.sb-component.sb-hl[data-key^="${bar}."]`)]),
       thumbTgt: document.querySelectorAll('.sv-used .tgt, .sv-used .has-rv').length,
       reqs: [...document.querySelectorAll('.sv-reqs li[data-req]')].map(li => li.dataset.req),
-      hints: document.querySelectorAll('.sv-hint').length,
+      // A component's captions are its values, with no pill.
+      captions: [...document.querySelectorAll('.sv-page .sv-states figcaption')].map(f => [f.textContent.replace(/\s+/g, ' ').trim(), f.querySelectorAll('.role').length]),
     }), BAR);
     const want = { states: [`${BAR}.all`, `${BAR}.active`],
-      used: [[`#screen/${TODOS}.list`, 'TodosScreen · List', true], [`#screen/${TODOS}.activeonly`, 'TodosScreen · Active only', true]], thumbTgt: 0, reqs: ['FLT-36VG'], hints: 0 };
-    if (!seen.name.includes('FiltersBar') || JSON.stringify({ states: seen.states, used: seen.used, thumbTgt: seen.thumbTgt, reqs: seen.reqs, hints: seen.hints }) !== JSON.stringify(want)) {
+      used: [[`#screen/${TODOS}.list`, 'User TodosScreen', true], [`#screen/${TODOS}.activeonly`, 'User TodosScreen · Active', true]], thumbTgt: 0, reqs: ['FLT-36VG'],
+      captions: [['All New', 0], ['Active New', 0]] };
+    if (!seen.name.includes('FiltersBar') || JSON.stringify({ states: seen.states, used: seen.used, thumbTgt: seen.thumbTgt, reqs: seen.reqs, captions: seen.captions }) !== JSON.stringify(want)) {
       throw new Error(`the FiltersBar page: ${JSON.stringify(seen)}`);
     }
   });
@@ -1995,7 +2005,7 @@ try {
       };
     }, `${TODOS}.empty`);
     const want = { target: [`${TODOS}.empty`], inView: true,
-      groups: [['Todos › The todo list', [['TOD-LGXT', 'Empty']]], ['Filters › The filter bar', [['FLT-36VG', 'via FiltersBar']]]], reqLink: '#TOD-LGXT' };
+      groups: [['Todos › The todo list', [['TOD-LGXT', 'User No todos']]], ['Filters › The filter bar', [['FLT-36VG', 'via FiltersBar']]]], reqLink: '#TOD-LGXT' };
     if (JSON.stringify(seen) !== JSON.stringify(want)) {
       throw new Error(`the TodosScreen page: ${JSON.stringify(seen)}`);
     }
@@ -2007,8 +2017,9 @@ try {
     }
   });
 
-  // In its own page, with a second role in the book that no state of TodosScreen covers.
-  await check('a screen with no state for a role says so, quietly; a component never does', async () => {
+  // In its own page, with a second role in the book and a state of two values drawn as another: the screen's variables,
+  // then one coverage row per combination it accounts for. A component lists its own; a screen not in the book says so.
+  await check('a screen\'s page lists its variables and its coverage: drawn, same as, never shown and not drawn', async () => {
     const ctx = await browser.newContext({ reducedMotion: 'reduce', viewport: { width: 1400, height: 900 } });
     try {
       const p = await ctx.newPage();
@@ -2016,23 +2027,61 @@ try {
         const r = await route.fetch();
         const j = await r.json();
         j.book.roles = [...j.book.roles, { id: 'admin', label: 'Admin', color: '#f2b45a' }];
+        const todos = j.book.screens.find(s => s.id === TODOS);
+        todos.states.push({ id: 'emptytyping', when: { role: 'user', data: 'empty', field: 'typing' }, sameAs: 'typing' },
+          { id: 'noadmin', when: { role: ['admin'] }, absent: 'Admins never see the list.' });
         await route.fulfill({ response: r, json: j });
       });
       await p.goto(`${URL}#screen/${TODOS}`);
-      await p.waitForSelector('.sv-page');
-      const screenHints = await p.evaluate(() => [...document.querySelectorAll('.sv-hint')].map(e => e.textContent));
+      await p.waitForSelector('.sv-page .sv-cov');
+      const seen = await p.evaluate(() => ({
+        vars: [...document.querySelectorAll('.sv-vars .sv-var')].map(e => e.textContent),
+        rows: [...document.querySelectorAll('.sv-cov .sv-cov-row')].map(li => [li.dataset.kind, li.textContent.replace(/\s+/g, ' ').trim(),
+          [...li.querySelectorAll('a')].map(a => a.getAttribute('href'))]),
+        twoValues: document.querySelector('figure.state[data-key="SCR-3WRX.emptytyping"] figcaption')?.textContent.replace(/\s+/g, ' ').trim(),
+        hints: document.querySelectorAll('.sv-hint').length,
+      }));
+      const want = {
+        vars: ['Role: User · Admin', 'Data: Some to do · All done · No todos', 'Filter: All · Active · Completed', 'Field: Empty field · Typing',
+          'Row: Not editing · Editing · Swiped'],
+        rows: [
+          ['drawn', 'User Drawn', [`#screen/${TODOS}.list`]],
+          ['drawn', 'User No todos Drawn', [`#screen/${TODOS}.empty`]],
+          ['drawn', 'User Typing Drawn', [`#screen/${TODOS}.typing`]],
+          ['drawn', 'User All done Drawn', [`#screen/${TODOS}.alldone`]],
+          ['drawn', 'User Editing Drawn', [`#screen/${TODOS}.editing`]],
+          ['drawn', 'User Swiped Drawn', [`#screen/${TODOS}.swiped`]],
+          ['drawn', 'User Active Drawn', [`#screen/${TODOS}.activeonly`]],
+          ['same', 'User No todos, Typing Same as User Typing', [`#screen/${TODOS}.typing`]],
+          ['absent', 'Admin Never shown: Admins never see the list.', []],
+          ['undrawn', 'User Completed Not drawn: The Completed filter is not drawn yet FLT-36VG', ['#FLT-36VG']],
+        ],
+        twoValues: 'User No todos, Typing Same as User Typing',
+        hints: 0,
+      };
+      if (JSON.stringify(seen) !== JSON.stringify(want)) { throw new Error(`the TodosScreen page: ${JSON.stringify(seen)}`); }
+      // A not-drawn row's requirement goes to it in the book.
+      await p.locator('.sv-cov-row[data-kind="undrawn"] a[href="#FLT-36VG"]').click();
+      await p.waitForSelector('li#FLT-36VG', { timeout: 5000 });
       await p.goto(`${URL}#screen/${BAR}`);
-      await p.waitForSelector('.sv-page h2');
-      const compHints = await p.evaluate(() => document.querySelectorAll('.sv-hint').length);
+      await p.waitForSelector('.sv-page .sv-cov');
+      const comp = await p.evaluate(() => ({
+        vars: [...document.querySelectorAll('.sv-vars .sv-var')].map(e => e.textContent),
+        rows: [...document.querySelectorAll('.sv-cov .sv-cov-row')].map(li => li.textContent.replace(/\s+/g, ' ').trim()),
+        // Its own captions have no pill (Used on shows the placing screens' states, which do).
+        pills: document.querySelectorAll('.sv-page .sv-states .role, .sv-page .sv-cov .role').length,
+      }));
+      if (JSON.stringify(comp) !== JSON.stringify({ vars: ['Filter: All · Active · Completed'], rows: ['All Drawn', 'Active Drawn'], pills: 0 })) {
+        throw new Error(`the FiltersBar page: ${JSON.stringify(comp)}`);
+      }
       await p.goto(`${URL}#screen/SCR-ZZZZ`);
       await p.waitForSelector('.sv-page');
       const missing = await p.evaluate(() => document.querySelector('.sv-page').textContent);
       await p.goto(`${URL}#screen/`);
       await p.waitForSelector('.sv-page');
       const blank = await p.evaluate(() => document.querySelector('.sv-page .state-missing')?.textContent);
-      if (JSON.stringify(screenHints) !== JSON.stringify(['No state for Admin: same as another, or doesn\'t see it?']) || compHints !== 0 || !missing.includes('SCR-ZZZZ') ||
-        blank !== 'There is no screen with that id.') {
-        throw new Error(`hints ${JSON.stringify(screenHints)}, on the component ${compHints}; a missing screen reads ${JSON.stringify(missing)}, no id ${JSON.stringify(blank)}`);
+      if (!missing.includes('SCR-ZZZZ') || blank !== 'There is no screen with that id.') {
+        throw new Error(`a missing screen reads ${JSON.stringify(missing)}, no id ${JSON.stringify(blank)}`);
       }
     } finally {
       await ctx.close();
@@ -2176,8 +2225,8 @@ try {
         };
       }, KEY);
       const desk = await seen();
-      if (desk.was !== 'Shows: TodosScreen · Active only (outlines FiltersBar)' ||
-        desk.added.join('|') !== 'TodosScreen · All done|TodosScreen · Empty' || desk.gone.join('|') !== 'TodosScreen · Active only (outlines FiltersBar)') {
+      if (desk.was !== 'Shows: User TodosScreen · Active (outlines FiltersBar)' ||
+        desk.added.join('|') !== 'User TodosScreen · All done|User TodosScreen · No todos' || desk.gone.join('|') !== 'User TodosScreen · Active (outlines FiltersBar)') {
         throw new Error(`the Shows lines: ${JSON.stringify(desk)}`);
       }
       await page.setViewportSize({ width: 390, height: 844 });
@@ -2206,7 +2255,7 @@ try {
         const out = [...bar.children, ...document.querySelectorAll('.view-switch button')].filter(e => e.getClientRects().length && e.getBoundingClientRect().width)
           .filter(e => e.getBoundingClientRect().left < 0 || Math.ceil(e.getBoundingClientRect().right) > cw).map(e => e.id || e.className);
         const title = Math.round(document.getElementById('book-title').getBoundingClientRect().width);
-        const wide = [...document.querySelectorAll('main figure.state, main .sv-thumb, main .sv-row, main .sv-reqs')].filter(e => e.getClientRects().length)
+        const wide = [...document.querySelectorAll('main figure.state, main .sv-thumb, main .sv-row, main .sv-reqs, main .sv-vars, main .sv-cov, main .sv-cov-row')].filter(e => e.getClientRects().length)
           .filter(e => Math.ceil(e.getBoundingClientRect().right) > cw).map(e => e.dataset.key || e.className);
         return { cw, out, title, main: Math.ceil(document.querySelector('main').getBoundingClientRect().right), wide };
       });

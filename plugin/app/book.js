@@ -124,11 +124,41 @@
     if (screensBook !== state.book) { screensBook = state.book; screensIx = window.SpecModel.screenIndex(state.book); }
     return screensIx;
   }
-  // "<screen name>" for a screen id, "<screen name> · <state name>" for a state key; the key itself when it is gone.
+  // A state's caption (SpecModel.stateCaption): { roles, text }. With neither (no role, every value a default) the text
+  // is the state's id, so a caption is never blank.
+  function captionOf(key) {
+    var cap = window.SpecModel.stateCaption(state.book, key);
+    if (!cap.roles.length && !cap.text && hasOwn(screens().states, key)) { cap.text = screens().states[key].state.id; }
+    return cap;
+  }
+  // A caption in words, for titles and labels that cannot hold a pill: "User", "User · No todos", "All".
+  function captionWords(cap) {
+    return cap.roles.map(function (r) { return roleInfo(r).label; }).concat(cap.text ? [cap.text] : []).join(' · ');
+  }
+  // A role's pill, in the role's color.
+  function rolePill(id) {
+    var r = roleInfo(id);
+    var label = r.label || id;
+    return '<span class="role" style="background:' + esc(r.color || '#c9ccd2') + '" title="Who sees it: ' + esc(label) + '">' + esc(label) + '</span>';
+  }
+  // A caption drawn: a pill per role, then the text. withName puts the screen's name before the text (a picture in the
+  // book, a chip, a review label): "[User] TodosScreen · No todos".
+  function captionHtml(cap, name) {
+    var words = [name, cap.text].filter(function (x) { return x; }).join(' · ');
+    return cap.roles.map(rolePill).join(' ') + (cap.roles.length && words ? ' ' : '') + esc(words);
+  }
+  // "<screen name>" for a screen id, "<screen name> · <caption in words>" for a state key; the key itself when it is
+  // gone. Plain text, for titles and note labels.
   function screenLabel(key) {
     var ix = screens();
-    if (hasOwn(ix.states, key)) { return ix.states[key].screen.name + ' · ' + ix.states[key].state.name; }
+    if (hasOwn(ix.states, key)) { return ix.states[key].screen.name + ' · ' + captionWords(captionOf(key)); }
     return hasOwn(ix.screens, key) ? ix.screens[key].name : key;
+  }
+  // The same drawn, with the state's role pills: "[User] TodosScreen · No todos". HTML.
+  function screenLabelHtml(key) {
+    var ix = screens();
+    if (hasOwn(ix.states, key)) { return captionHtml(captionOf(key), ix.states[key].screen.name); }
+    return esc(hasOwn(ix.screens, key) ? ix.screens[key].name : key);
   }
 
   var STAGE_TEXT = { drafting: 'Drafting', ready: 'Ready', building: 'Building', built: 'Built' };
@@ -258,11 +288,11 @@
   // A shown state as `<screen name> · <state name>`, with the component it outlines; a requirement's screen entry as
   // its screen, or its state when it names one.
   function showLabel(sh) {
-    var text = screenLabel(sh && sh.state);
-    return esc(sh && sh.highlight ? text + ' (outlines ' + screenLabel(sh.highlight) + ')' : text);
+    var html = screenLabelHtml(sh && sh.state);
+    return sh && sh.highlight ? html + ' (outlines ' + screenLabelHtml(sh.highlight) + ')' : html;
   }
   function screenEntryLabel(e) {
-    return esc(e && e.state ? screenLabel(e.screen + '.' + e.state) : screenLabel(e && e.screen));
+    return e && e.state ? screenLabelHtml(e.screen + '.' + e.state) : screenLabelHtml(e && e.screen);
   }
   // A section's shows or a requirement's screens, when they differ from the version after (newer): what that version
   // has, with the entries it added highlighted and those it dropped struck through.
@@ -271,6 +301,45 @@
     if (!f || !v || !newer || window.SpecModel.sameValue(v[f] || [], newer[f] || [])) { return ''; }
     var html = listField(v[f] || [], newer[f] || [], f === 'shows' ? showLabel : screenEntryLabel);
     return '<p class="rv-field rv-mock"><span>' + (f === 'shows' ? 'Shows now:' : 'Screens now:') + '</span> ' + (html || 'none') + '</p>';
+  }
+  // A variable by id for a reviewed value, which does not say its screen: role, a book variable, or one a screen
+  // declares inline; null when none is found.
+  function variableNamed(id) {
+    if (id === 'role') { return { label: 'Role', values: [] }; }
+    var found = null;
+    (state.book.variables || []).forEach(function (d) { if (!found && d && d.id === id) { found = d; } });
+    (state.book.screens || []).forEach(function (sc) {
+      (Array.isArray(sc.variables) ? sc.variables : []).forEach(function (d) { if (!found && d && typeof d === 'object' && d.id === id) { found = d; } });
+    });
+    return found;
+  }
+  // A `when` in words, for a review: "Role: User, Data: No todos"; a list of roles reads "Visitor / Admin".
+  function whenWords(when) {
+    var w = when && typeof when === 'object' ? when : {};
+    return Object.keys(w).map(function (k) {
+      var v = variableNamed(k);
+      var value = function (x) {
+        if (k === 'role') { return roleInfo(x).label; }
+        var hit = v && (v.values || []).filter(function (y) { return y && y.id === x; })[0];
+        return hit ? hit.label || x : String(x);
+      };
+      return (v ? v.label || k : k) + ': ' + (Array.isArray(w[k]) ? w[k].map(value).join(' / ') : value(w[k]));
+    }).join(', ');
+  }
+  // A screen's variables list in words, for a review: "Role, Data, Field".
+  function variablesWords(list) {
+    return (Array.isArray(list) ? list : []).map(function (e) {
+      var v = e && typeof e === 'object' ? e : variableNamed(e);
+      return v ? v.label || v.id || String(e) : String(e);
+    }).join(', ');
+  }
+  // A screen's undrawn entries in words, for a review: "Role: User, Filter: Completed (FLT-36VG)", one after another.
+  function undrawnWords(list) {
+    return (Array.isArray(list) ? list : []).map(function (u) {
+      if (!u || typeof u !== 'object') { return ''; }
+      var about = Array.isArray(u.about) && u.about.length ? ' (' + u.about.join(', ') + ')' : '';
+      return whenWords(u.when) + about + (u.note ? ': ' + u.note : '');
+    }).join('; ');
   }
   // A version of an item, compared with the one before it (prev; null for the first version shown).
   function versionHtml(kind, v, prev) {
@@ -286,12 +355,10 @@
         line('rv-field', 'Screens:', listField(prev ? p.screens || [] : undefined, v.screens, screenEntryLabel));
     }
     if (kind === 'state') {
-      var role = function (r) { return esc(roleInfo(r).label); };
-      var when = v.when || {}, pw = p.when || {};
       var stTag = function (m) { return m ? '<span class="tag chg-tag">' + esc(MARKER[m] || m) + '</span>' : ''; };
       return line('rv-text', '', diffField(cmp('name'), v.name, esc)) +
-        line('rv-field', 'Role:', diffField(prev ? pw.role : undefined, when.role, role)) +
-        line('rv-field', 'When:', diffField(prev ? pw.also : undefined, when.also, esc)) +
+        line('rv-field', 'When:', diffField(prev ? whenWords(p.when) : undefined, whenWords(v.when), esc)) +
+        line('rv-field', 'Also:', diffField(cmp('also'), v.also, esc)) +
         line('rv-field', 'Same as:', diffField(cmp('sameAs'), v.sameAs, esc)) +
         line('rv-field', 'Never shown:', diffField(cmp('absent'), v.absent, esc)) +
         line('rv-field', 'Marker:', prev && p.change !== v.change ? diffField(p.change || '', v.change || '', stTag) : stTag(v.change)) +
@@ -302,7 +369,9 @@
       return line('rv-text', '', diffField(cmp('name'), v.name, esc)) +
         line('rv-field', 'Kind:', diffField(cmp('kind'), v.kind, esc)) +
         line('rv-field', 'File:', diffField(cmp('file'), v.file, esc)) +
-        line('rv-field', 'Intro:', diffField(cmp('intro'), v.intro));
+        line('rv-field', 'Intro:', diffField(cmp('intro'), v.intro)) +
+        line('rv-field', 'Variables:', diffField(prev ? variablesWords(p.variables) : undefined, variablesWords(v.variables), esc)) +
+        line('rv-field', 'Not drawn:', diffField(prev ? undrawnWords(p.undrawn) : undefined, undrawnWords(v.undrawn), esc));
     }
     return line('rv-text', '', diffField(cmp('title'), v.title, esc)) + line('rv-field', 'Intro:', diffField(cmp('intro'), v.intro)) +
       line('rv-field', 'Shows:', listField(prev ? p.shows || [] : undefined, v.shows, showLabel));
@@ -873,7 +942,7 @@
     keys.forEach(function (key) {
       var r = reviewOf(key);
       var v = r.accepted || {};
-      var what = r.kind === 'req' ? v.text : r.kind === 'screen' || r.kind === 'state' ? (r.kind === 'screen' ? 'Screen “' : 'State “') + esc(v.name || key) + '”' : esc(v.title || key);
+      var what = r.kind === 'req' ? v.text : r.kind === 'screen' || r.kind === 'state' ? (r.kind === 'screen' ? 'Screen “' + esc(v.name || key) : 'State “' + esc(v.name || whenWords(v.when) || key)) + '”' : esc(v.title || key);
       var li = el('li', { id: key, class: 'chg-gone' }, '<span class="rid chg">−</span><div><del class="was">' + (what || '') + '</del> <span class="sid">' + esc(key) + '</span></div>');
       markReview(li, key);
       tgtAttrs(li, key, key + ' (removed)', what || '', key);
@@ -972,38 +1041,32 @@
     }
     return renderPicture(st.mockup, highlight, keys, section, alt);
   }
-  // A shown state: a figure captioned "<screen name> · <state name>" with its role, "Same as <state name>" when it is
-  // drawn as another, and the state's marker (New, Change, Removed). Notes dropped on it go on the state.
+  // A shown state: a figure captioned with its role pills, its screen's name and its computed caption, "Same as <its
+  // caption>" when it is drawn as another, and the state's marker (New, Change, Removed). Notes dropped on it go on the
+  // state.
   function stateFigure(sh, num, s) {
     var key = sh.state;
     var label = screenLabel(key);
-    var fig = stateFigureFor(key, label, sh.highlight, s);
+    var fig = stateFigureFor(key, true, sh.highlight, s);
     tgtAttrs(fig, key, num + ' ' + s.title + ' · screen “' + label + '”', 'Screen: ' + label, key);
     // Outside comment mode a click on the picture opens the screen's page at this state.
     fig.dataset.go = key;
     fig.title = 'Open ' + label + ' in Screens';
     return fig;
   }
-  // The figure of a state, captioned with `label`, without its note target (the chapter view and the Screens view
-  // name it differently).
-  function stateFigureFor(key, label, highlight, section) {
+  // The figure of a state, captioned without its screen's name unless withName (the Screens view is the screen's own),
+  // and without its note target (the chapter view and the Screens view name it differently).
+  function stateFigureFor(key, withName, highlight, section) {
     var ix = screens();
     var hit = hasOwn(ix.states, key) ? ix.states[key] : null;
     var drawn = window.SpecModel.drawnState(state.book, key);
     var cap = '';
     if (hit) {
-      var role = hit.state.when && hit.state.when.role;
-      var name = hit.state.name || hit.state.id;
-      if (role) {
-        var rl = roleInfo(role).label;
-        cap += '<span class="role" style="background:' + esc(roleInfo(role).color) + '" title="Who sees it: ' + esc(rl) + '">' + esc(rl) + '</span> ';
-        // A state named after its role ("Signed out" for the signed-out view) says it once, in the role's pill.
-        if (String(name).trim().toLowerCase() === String(rl).trim().toLowerCase()) {
-          label = label === name ? '' : label.slice(-(' · ' + name).length) === ' · ' + name ? label.slice(0, -(' · ' + name).length) : label;
-        }
+      cap += captionHtml(captionOf(key), withName ? hit.screen.name : '');
+      if (hit.state.sameAs) {
+        var same = window.SpecModel.stateKey(hit.screen.id, hit.state.sameAs);
+        cap += ' <span class="fstate">Same as ' + (hasOwn(ix.states, same) ? captionHtml(captionOf(same), '') : esc(hit.state.sameAs)) + '</span>';
       }
-      cap += esc(label);
-      if (hit.state.sameAs) { cap += ' <span class="fstate">Same as ' + esc(drawn ? drawn.state.name : hit.state.sameAs) + '</span>'; }
       var m = hit.state.change;
       if (m === 'add') { cap += ' <span class="tag new">New</span>'; }
       if (m === 'change') { cap += ' <span class="tag chg-tag">Change</span>'; }
@@ -1034,8 +1097,8 @@
       var key = e.state ? window.SpecModel.stateKey(sid, e.state) : sid;
       var sc = hasOwn(ix.screens, sid) ? ix.screens[sid] : null;
       var found = e.state ? hasOwn(ix.states, key) : !!sc;
-      var text = !sc ? String(sid) + ' · missing' : found ? screenLabel(key) : sc.name + ' · ' + e.state + ' · missing';
-      return '<a class="screen-chip' + (found ? '' : ' missing') + '" href="#screen/' + esc(key) + '">' + esc(text) + '</a>';
+      var html = !sc ? esc(String(sid) + ' · missing') : found ? screenLabelHtml(key) : esc(sc.name + ' · ' + e.state + ' · missing');
+      return '<a class="screen-chip' + (found ? '' : ' missing') + '" href="#screen/' + esc(key) + '">' + html + '</a>';
     }).join('') + '</div>';
   }
 
@@ -1088,7 +1151,7 @@
     span.appendChild(document.createTextNode('Under review in Screens: '));
     keys.forEach(function (k, i) {
       if (i) { span.appendChild(document.createTextNode(', ')); }
-      span.appendChild(el('a', { href: '#screen/' + k })).textContent = screenLabel(k);
+      span.appendChild(el('a', { href: '#screen/' + k }, screenLabelHtml(k)));
     });
     return span;
   }
@@ -1134,7 +1197,7 @@
           var strip = el('div', { class: 'states sv-strip' });
           window.SpecModel.byRole(state.book, sc.states).forEach(function (st) {
             var key = window.SpecModel.stateKey(id, st.id);
-            var fig = stateFigureFor(key, st.name || st.id, null, null);
+            var fig = stateFigureFor(key, false, null, null);
             fig.dataset.go = key;
             fig.title = 'Open ' + screenLabel(key);
             var wrap = el('div', { class: 'state-item' });
@@ -1214,10 +1277,11 @@
     window.SpecModel.byRole(state.book, sc.states).forEach(function (st) {
       var key = window.SpecModel.stateKey(id, st.id);
       var wrap = el('div', { class: 'state-item' });
-      var fig = stateFigureFor(key, st.name || st.id, null, null);
+      var fig = stateFigureFor(key, false, null, null);
       fig.id = 'screen/' + key;
       if (route.key === key) { fig.classList.add('sv-target'); }
-      if (st.when && st.when.also) { fig.querySelector('figcaption').appendChild(el('span', { class: 'sv-also' }, ' · ' + esc(st.when.also))); }
+      // A state's free words, never in its caption, are shown here.
+      if (typeof st.also === 'string' && st.also) { fig.querySelector('figcaption').appendChild(el('span', { class: 'sv-also' }, ' · ' + esc(st.also))); }
       tgtAttrs(fig, key, 'Screens · ' + screenLabel(key), 'Screen: ' + screenLabel(key), key);
       wrap.appendChild(fig);
       wrap.appendChild(itemRow('div', key));
@@ -1225,10 +1289,14 @@
     });
     if (!(sc.states || []).length) { row.appendChild(el('p', { class: 'sv-none' }, 'No states yet.')); }
     page.appendChild(row);
-    window.SpecModel.missingRoles(state.book, id).forEach(function (r) {
-      page.appendChild(el('p', { class: 'sv-hint' }, esc('No state for ' + roleInfo(r).label + ': same as another, or doesn\'t see it?')));
-    });
     if (gone.length) { page.appendChild(removedList(gone)); }
+    var vars = window.SpecModel.variablesOf(state.book, id);
+    if (vars.length) {
+      page.appendChild(el('h3', { class: 'sv-h' }, 'Variables'));
+      page.appendChild(variablesLine(vars));
+    }
+    page.appendChild(el('h3', { class: 'sv-h' }, 'Coverage'));
+    page.appendChild(coverageList(id));
 
     page.appendChild(el('h3', { class: 'sv-h' }, 'Requirements'));
     page.appendChild(screenRequirements(id, word));
@@ -1237,6 +1305,43 @@
       page.appendChild(usedOnRow(id));
     }
     return page;
+  }
+  // A screen's variables, each with its values in order: "Role: Visitor · Member · Admin", "Connection: Online · Offline".
+  function variablesLine(vars) {
+    var box = el('p', { class: 'sv-vars' });
+    vars.forEach(function (v) {
+      var values = v.values.map(function (x) { return x && (x.label || x.id); }).filter(function (x) { return x; });
+      box.appendChild(el('span', { class: 'sv-var', 'data-var': v.id }, '<span class="sv-var-name">' + esc(v.label) + ':</span> ' + esc(values.join(' · '))));
+    });
+    return box;
+  }
+  // Every combination a screen accounts for (SpecModel.coverage), one row each: its caption, then drawn (a link to the
+  // state), the state it is the same as, its words when it is never shown, or not drawn (its note and the requirements
+  // that imply it, as links).
+  function coverageList(id) {
+    var ix = screens();
+    var rows = window.SpecModel.coverage(state.book, id);
+    if (!rows.length) { return el('p', { class: 'sv-none' }, 'Nothing drawn or listed yet.'); }
+    var ul = el('ul', { class: 'sv-cov' });
+    rows.forEach(function (row) {
+      var hit = row.key && hasOwn(ix.states, row.key) ? ix.states[row.key] : null;
+      var cap = hit ? captionHtml(captionOf(row.key), '') : captionHtml(window.SpecModel.whenCaption(state.book, id, row.when), '');
+      var what = '';
+      if (row.kind === 'drawn') {
+        what = '<a class="sv-cov-go" href="#screen/' + esc(row.key) + '">Drawn</a>';
+      } else if (row.kind === 'same') {
+        var to = window.SpecModel.stateKey(id, hit.state.sameAs);
+        what = 'Same as ' + (hasOwn(ix.states, to) ? '<a class="sv-cov-go" href="#screen/' + esc(to) + '">' + captionHtml(captionOf(to), '') + '</a>' : esc(hit.state.sameAs));
+      } else if (row.kind === 'absent') {
+        what = 'Never shown: ' + esc(hit.state.absent);
+      } else {
+        what = 'Not drawn' + (row.note ? ': ' + esc(row.note) : '') + (row.about.length ? ' ' + row.about.map(function (r) {
+          return '<a class="sv-rid" href="#' + esc(r) + '">' + esc(r) + '</a>';
+        }).join(' ') : '');
+      }
+      ul.appendChild(el('li', { class: 'sv-cov-row', 'data-kind': row.kind }, '<span class="sv-cov-cap">' + (cap || 'Any') + '</span> <span class="sv-cov-what">' + what + '</span>'));
+    });
+    return ul;
   }
   // The requirements about a screen, grouped by section in book order ("<chapter> › <section>"), each with the state it
   // narrows to or the component it reaches the screen through.
@@ -1262,10 +1367,10 @@
       var ul = el('ul', { class: 'sv-req-list' });
       g.list.forEach(function (x) {
         var sk = x.state ? window.SpecModel.stateKey(x.via || id, x.state) : '';
-        var narrow = x.state ? (hasOwn(ix.states, sk) ? ix.states[sk].state.name : x.state) + (x.via ? ' · via ' + (hasOwn(ix.screens, x.via) ? ix.screens[x.via].name : x.via) : '') :
-          x.via ? 'via ' + (hasOwn(ix.screens, x.via) ? ix.screens[x.via].name : x.via) : '';
+        var via = x.via ? 'via ' + (hasOwn(ix.screens, x.via) ? ix.screens[x.via].name : x.via) : '';
+        var narrow = x.state ? (hasOwn(ix.states, sk) ? captionHtml(captionOf(sk), '') : esc(x.state)) + (via ? ' · ' + esc(via) : '') : esc(via);
         var li = el('li', { 'data-req': x.req.id || '' }, '<a class="sv-rid" href="#' + esc(x.req.id || g.fullId) + '">' + esc(x.req.id || '') + '</a> ' +
-          '<span class="sv-text">' + (x.req.text || '') + '</span>' + (narrow ? ' <span class="sv-narrow">' + esc(narrow) + '</span>' : ''));
+          '<span class="sv-text">' + (x.req.text || '') + '</span>' + (narrow ? ' <span class="sv-narrow">' + narrow + '</span>' : ''));
         ul.appendChild(li);
       });
       div.appendChild(ul);
@@ -1287,7 +1392,7 @@
       })[0];
       if (!path) { return; }
       var a = el('a', { class: 'sv-thumb', href: '#screen/' + key });
-      a.appendChild(el('span', { class: 'sv-thumb-cap' }, esc(screenLabel(key))));
+      a.appendChild(el('span', { class: 'sv-thumb-cap' }, screenLabelHtml(key)));
       var host = el('div', { class: 'mock' });
       a.appendChild(host);
       mountMockup(host, path, id);

@@ -200,6 +200,15 @@ test('stateCaption follows a variable\'s label, so renaming a label changes the 
   assert.ok(M.sameValue(M.itemsOf(book, {})['SCR-HOME.offline'].value, before));
 });
 
+test('whenCaption captions a combination that has no state, as stateCaption would, without a name', () => {
+  const book = varBook();
+  assert.deepEqual(M.whenCaption(book, 'SCR-HOME', { role: 'admin', sharing: 'notshared', connection: 'unreachable' }),
+    { roles: ['admin'], text: 'Not shared yet, Server unreachable' });
+  assert.deepEqual(M.whenCaption(book, 'SCR-HOME', { role: 'member' }), { roles: ['member'], text: '' });
+  assert.deepEqual(M.whenCaption(book, 'SCR-TABS', { tab: 'home' }), { roles: [], text: 'Home' });
+  assert.deepEqual(M.whenCaption(book, 'SCR-NOPE', { role: 'member' }), { roles: [], text: '' });
+});
+
 test('coverage: one entry per state, then per undrawn entry, in order', () => {
   const book = varBook();
   const rows = M.coverage(book, 'SCR-HOME');

@@ -643,25 +643,35 @@
     return typeof r === 'string' && r ? [r] : [];
   }
 
-  // A state's caption: the role ids for its pills (none on a component, or when the state is for any role), and the
-  // labels of the values that are not defaults, in the screen's variable order, joined by ", ". A component shows every
-  // value's label, defaults included. A typed `name` overrides the text.
+  // The caption of a combination of values on a screen: the role ids for its pills (none on a component, or when it is
+  // for any role), and the labels of the values that are not defaults, in the screen's variable order, joined by ", ".
+  // A component shows every value's label, defaults included.
+  function captionIn(book, screen, when) {
+    var w = when || {};
+    var component = screen.kind === 'component';
+    var labels = [];
+    variablesIn(book, screen).forEach(function (v) {
+      if (v.isRole || !has(w, v.id) || w[v.id] === undefined) { return; }
+      var isDefault = v.values.length > 0 && v.values[0] && v.values[0].id === w[v.id];
+      if (component || !isDefault) { labels.push(valueLabel(v, w[v.id])); }
+    });
+    return { roles: component ? [] : rolesIn(w), text: labels.join(', ') };
+  }
+
+  // The caption of a `when` on a screen (an undrawn entry has no state to caption).
+  function whenCaption(book, screenId, when) {
+    var screen = screenIndex(book).screens[screenId];
+    return screen ? captionIn(book, screen, when) : { roles: [], text: '' };
+  }
+
+  // A state's caption: its `when`'s caption; a typed `name` overrides the text.
   function stateCaption(book, key) {
     var hit = screenIndex(book).states[key];
     if (!hit) { return { roles: [], text: '' }; }
-    var when = hit.state.when || {};
-    var component = hit.screen.kind === 'component';
-    var labels = [];
-    variablesIn(book, hit.screen).forEach(function (v) {
-      if (v.isRole || !has(when, v.id) || when[v.id] === undefined) { return; }
-      var isDefault = v.values.length > 0 && v.values[0] && v.values[0].id === when[v.id];
-      if (component || !isDefault) { labels.push(valueLabel(v, when[v.id])); }
-    });
+    var cap = captionIn(book, hit.screen, hit.state.when);
     var name = hit.state.name;
-    return {
-      roles: component ? [] : rolesIn(when),
-      text: typeof name === 'string' && name ? name : labels.join(', ')
-    };
+    if (typeof name === 'string' && name) { cap.text = name; }
+    return cap;
   }
 
   // Every combination a screen accounts for: each state (drawn, same as another, or absent), then each `undrawn` entry
@@ -903,6 +913,7 @@
     requirementsFor: requirementsFor,
     variablesOf: variablesOf,
     stateCaption: stateCaption,
+    whenCaption: whenCaption,
     coverage: coverage,
     offPageKeys: offPageKeys,
     screenOrder: screenOrder,

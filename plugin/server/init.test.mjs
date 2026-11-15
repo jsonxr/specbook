@@ -52,6 +52,15 @@ test('the starter book has screens, no frames, and valid screens', () => {
   }
   assert.equal(book.screens.find(s => s.name === 'TodosScreen').undrawn.length, 1);
   const todos = book.screens.find(s => s.name === 'TodosScreen');
+  // The starter's captions, exactly: the pill alone when only the role differs, a pill and one value, a component's value.
+  const caption = (sc, id) => M.stateCaption(book, sc.id + '.' + id);
+  assert.deepEqual(caption(todos, 'list'), { roles: ['user'], text: '' });
+  assert.deepEqual(caption(todos, 'empty'), { roles: ['user'], text: 'No todos' });
+  assert.deepEqual(caption(todos, 'editing'), { roles: ['user'], text: 'Editing' });
+  assert.deepEqual(caption(todos, 'activeonly'), { roles: ['user'], text: 'Active' });
+  assert.deepEqual(caption(bar, 'all'), { roles: [], text: 'All' });
+  // No starter state sets two values; a combination of two reads in the screen's variable order.
+  assert.deepEqual(M.whenCaption(book, todos.id, { role: 'user', data: 'empty', field: 'typing' }), { roles: ['user'], text: 'No todos, Typing' });
   const list = todos.states.find(s => s.id === 'list');
   assert.equal(list.change, 'change');
   assert.ok(list.today);

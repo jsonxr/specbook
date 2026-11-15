@@ -18,7 +18,7 @@
   "variables": [
     {
       "id": "data",
-      "label": "List",
+      "label": "Data",
       "values": [
         {
           "id": "some",
@@ -30,7 +30,7 @@
         },
         {
           "id": "empty",
-          "label": "Empty"
+          "label": "No todos"
         }
       ]
     },
@@ -54,11 +54,11 @@
     },
     {
       "id": "edit",
-      "label": "Todo",
+      "label": "Row",
       "values": [
         {
           "id": "none",
-          "label": "Resting"
+          "label": "Not editing"
         },
         {
           "id": "editing",
