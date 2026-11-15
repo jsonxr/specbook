@@ -996,7 +996,8 @@ const server = createServer(async (req, res) => {
       }
       const book = JSON.parse(readFileSync(join(DATA, 'book.json'), 'utf8'));
       if (body.stage === 'ready') {
-        // Ready is gated on review: the section, its requirements and its frames must all be accepted.
+        // Ready is gated on review: the section, its requirements and everything its Accept gate covers (gateKeys) must
+        // all be accepted.
         if (sectionsUnderReview(DATA, [body.section]).length > 0) {
           json(res, 409, { error: 'unreviewed' });
           return;

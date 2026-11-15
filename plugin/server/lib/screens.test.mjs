@@ -211,3 +211,63 @@ test('byRole: anyone, then the book\'s roles in order, then unknown roles, then 
   assert.deepEqual(M.byRole(book, states).map(s => s.id), ['all', 'mem1', 'mem2', 'adm', 'vis', 'odd', 'none1', 'none2']);
   assert.deepEqual(M.byRole(book, undefined), []);
 });
+
+test('componentsIn reads id and state, not data-id or data-state', () => {
+  const html = '<sb-component data-id="Z" data-state="q" id="X" state="a"></sb-component><sb-component data-state="q" state="b" data-id="Z" id="Y">';
+  assert.deepEqual(M.componentsIn(html), [{ id: 'X', state: 'a' }, { id: 'Y', state: 'b' }]);
+});
+
+// A book of components A and B whose pictures place one another as a test needs.
+const cycleBook = () => {
+  const book = fixture();
+  book.screens.push(
+    { id: 'SCR-A', name: 'A', kind: 'component', states: [{ id: 's', name: 'S', mockup: 'mockups/a.html' }, { id: 'gone', name: 'Gone', absent: true }, { id: 'like', name: 'Like', sameAs: 'gone' }] },
+    { id: 'SCR-B', name: 'B', kind: 'component', states: [{ id: 't', name: 'T', mockup: 'mockups/b.html' }] }
+  );
+  return book;
+};
+const cycleProblem = (a, b) => M.screenProblem(cycleBook(), all, { ...mockups(), 'mockups/a.html': a, 'mockups/b.html': b });
+
+test('screenProblem fails a component cycle, naming it, and a placed state that draws no picture', () => {
+  assert.equal(cycleProblem('<sb-component id="SCR-B" state="t"></sb-component>', '<i>b</i>'), null);
+  assert.equal(cycleProblem('<sb-component id="SCR-A" state="s"></sb-component>', '<i>b</i>'),
+    'The picture mockups/a.html places SCR-A.s, a component cycle: SCR-A.s → SCR-A.s');
+  assert.equal(cycleProblem('<sb-component id="SCR-B" state="t"></sb-component>', '<sb-component id="SCR-A" state="s"></sb-component>'),
+    'The picture mockups/b.html places SCR-A.s, a component cycle: SCR-A.s → SCR-B.t → SCR-A.s');
+  assert.equal(cycleProblem('<i>a</i>', '<sb-component id="SCR-A" state="gone"></sb-component>'),
+    'The picture mockups/b.html places SCR-A.gone, which draws no picture');
+  assert.equal(cycleProblem('<i>a</i>', '<sb-component id="SCR-A" state="like"></sb-component>'),
+    'The picture mockups/b.html places SCR-A.like, which draws no picture');
+  // A cycle reached from a screen's picture is named from where it starts.
+  const m = { ...mockups(), 'mockups/card-waiting.html': '<sb-component id="SCR-CARD" state="waiting"></sb-component>' };
+  assert.match(M.screenProblem(fixture(), all, m), /a component cycle: SCR-CARD\.waiting → SCR-CARD\.waiting$/);
+});
+
+test('expandMockup stops a chain of components deeper than its cap with a missing marker', () => {
+  const book = { screens: [], chapters: [] };
+  const m = {};
+  for (let i = 0; i < 10; i++) {
+    book.screens.push({ id: `SCR-C${i}`, name: `C${i}`, kind: 'component', states: [{ id: 's', name: 'S', mockup: `mockups/c${i}.html` }] });
+    m[`mockups/c${i}.html`] = i < 9 ? `<p>${i}</p><sb-component id="SCR-C${i + 1}" state="s"></sb-component>` : '<p>9</p>';
+  }
+  const out = M.expandMockup(book, m, '<sb-component id="SCR-C0" state="s"></sb-component>');
+  assert.equal((out.match(/class="sb-component"/g) || []).length, 8);
+  assert.match(out, /<p>7<\/p><div class="sb-missing" data-key="SCR-C8\.s">Missing component SCR-C8\.s<\/div>/);
+  assert.doesNotMatch(out, /<p>8<\/p>/);
+});
+
+test('screenProblem accepts the role "anyone" whether or not the book lists it', () => {
+  const book = fixture();
+  book.screens[0].states[0].when.role = 'anyone';
+  assert.equal(M.screenProblem(book, all, mockups()), null);
+  book.roles.push({ id: 'anyone' });
+  assert.equal(M.screenProblem(book, all, mockups()), null);
+});
+
+test('screenProblem fails a state whose change is not add, change or remove', () => {
+  const book = fixture();
+  book.screens[0].states[1].change = 'remove';
+  assert.equal(M.screenProblem(book, all, mockups()), null);
+  book.screens[0].states[1].change = 'changed';
+  assert.equal(M.screenProblem(book, all, mockups()), 'State SCR-HOME.admin has the change changed, which is not add, change or remove');
+});

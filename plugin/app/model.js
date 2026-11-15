@@ -267,7 +267,7 @@
       }
     });
     // A note whose item and causes are gone from the book and from `accepted` (a draft requirement Claude deleted, a new
-    // frame dropped) has nothing to show on. It gets a review under its own item key, placed on its section: from
+    // state dropped) has nothing to show on. It gets a review under its own item key, placed on its section: from
     // `review.where`, else the note's `section`, else that chapter, else the first chapter. Accepting that key settles it.
     var placeOf = function (key, n) {
       var chapters = (book && book.chapters) || [];
@@ -371,7 +371,8 @@
   }
 
   function attr(tag, name) {
-    var m = new RegExp('\\b' + name + '\\s*=\\s*(?:"([^"]*)"|\'([^\']*)\')', 'i').exec(tag);
+    // After whitespace only, so data-id and data-state are not read as id and state.
+    var m = new RegExp('(?:^|\\s)' + name + '\\s*=\\s*(?:"([^"]*)"|\'([^\']*)\')', 'i').exec(tag);
     return m ? (m[1] !== undefined ? m[1] : m[2]) : '';
   }
 
@@ -630,7 +631,11 @@
         if (kinds.length !== 1) {
           return 'State ' + key + ' needs exactly one of mockup, sameAs and absent (it has ' + (kinds.join(', ') || 'none') + ')';
         }
-        if (st.when && st.when.role && roles.indexOf(st.when.role) < 0) {
+        if (st.change !== undefined && ['add', 'change', 'remove'].indexOf(st.change) < 0) {
+          return 'State ' + key + ' has the change ' + st.change + ', which is not add, change or remove';
+        }
+        // "anyone" covers every role, whether or not the book lists it.
+        if (st.when && st.when.role && st.when.role !== 'anyone' && roles.indexOf(st.when.role) < 0) {
           return 'State ' + key + ' names the role ' + st.when.role + ', which the book does not define';
         }
         var files = pictureOf(st);
@@ -652,21 +657,41 @@
         }
       }
     }
+    // A picture's component tags, and theirs in turn, walked as expandMockup draws them: each names a component state
+    // that draws a picture, and none leads back to a state already on the way (`path`, the drawn keys so far).
+    // `clean` holds drawn keys whose pictures were walked without a problem.
+    var clean = {};
+    var tagProblem = function (file, path) {
+      var tags = componentsIn(mockups && mockups[file]);
+      for (var t = 0; t < tags.length; t++) {
+        var tk = stateKey(tags[t].id, tags[t].state);
+        var comp = has(ix.screens, tags[t].id) ? ix.screens[tags[t].id] : null;
+        if (!comp || comp.kind !== 'component') {
+          return 'The picture ' + file + ' places ' + tags[t].id + ', which is not a component in the book';
+        }
+        if (!has(ix.states, tk)) { return 'The picture ' + file + ' places ' + tk + ', which is not a state'; }
+        var d = drawnIn(ix, tk);
+        if (!d || !d.state.mockup) { return 'The picture ' + file + ' places ' + tk + ', which draws no picture'; }
+        var dk = stateKey(d.screen.id, d.state.id);
+        if (path.indexOf(dk) >= 0) {
+          return 'The picture ' + file + ' places ' + tk + ', a component cycle: ' + path.slice(path.indexOf(dk)).concat(dk).join(' \u2192 ');
+        }
+        if (!has(clean, dk)) {
+          var inner = tagProblem(d.state.mockup, path.concat(dk));
+          if (inner) { return inner; }
+          clean[dk] = true;
+        }
+      }
+      return null;
+    };
     for (var i2 = 0; i2 < screens.length; i2++) {
       var states2 = screens[i2].states || [];
       for (var j2 = 0; j2 < states2.length; j2++) {
-        var files2 = pictureOf(states2[j2]);
-        for (var p = 0; p < files2.length; p++) {
-          var tags = componentsIn(mockups && mockups[files2[p]]);
-          for (var t = 0; t < tags.length; t++) {
-            var tk = stateKey(tags[t].id, tags[t].state);
-            var comp = has(ix.screens, tags[t].id) ? ix.screens[tags[t].id] : null;
-            if (!comp || comp.kind !== 'component') {
-              return 'The picture ' + files2[p] + ' places ' + tags[t].id + ', which is not a component in the book';
-            }
-            if (!has(ix.states, tk)) { return 'The picture ' + files2[p] + ' places ' + tk + ', which is not a state'; }
-          }
-        }
+        var own = stateKey(screens[i2].id, states2[j2].id);
+        // A state's own picture is drawn as that state; today's picture is drawn on its own.
+        var pm = states2[j2].mockup ? tagProblem(states2[j2].mockup, [own]) : null;
+        var pt = pm || !states2[j2].today ? null : tagProblem(states2[j2].today, []);
+        if (pm || pt) { return pm || pt; }
       }
     }
     var problem = null;

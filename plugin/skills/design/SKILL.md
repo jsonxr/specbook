@@ -82,7 +82,8 @@ is an entry, and so is every piece placed on several screens. Draw each once; se
   its component `name` (unique in the book) and, when the app has one, its `file`; a screen not built yet has no
   `file` (the build fills it in), and a screen with no app component (a system prompt, a notification) never does.
   Run `assign-ids.mjs` for the `SCR-` ids.
-- **Every state is a picture and its conditions.** `when.role` is a book role (or `anyone`); `when.also` is words
+- **Every state is a picture and its conditions.** `when.role` is a book role or `anyone` (it covers every role
+  and is always valid, even when `roles` does not list it); `when.also` is words
   for the rest (empty, error, offline, a particular data shape). A role whose picture is exactly another's is
   `"sameAs": "<state id>"` (no picture of its own, no chains); a role that never sees the screen is `"absent":
   "<words>"`, an honest entry instead of silence. States that are not roles (signed out, no account yet) are entries

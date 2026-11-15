@@ -83,31 +83,35 @@ banner, header) is listed once and drawn once per state. A section does not copy
 ]
 ```
 
-- **`id`** is a stable id (`SCR-` and four of `0-9A-Z`, minted by `assign-ids.mjs`). Requirements, `shows`,
+- **`id`** is a stable id (`SCR-` and four of `23456789ABCDEFGHJKLMNPQRSTUVWXYZ`, minted by
+  `assign-ids.mjs`). Requirements, `shows`,
   `sb-component` tags, reviews, notes and media all link to it, so renaming a screen changes only `name` and
   `file`. **`name`** is the component's name, unique in the book, and the only name the reader shows. **`file`** is
   optional: a screen with no app component (a lock-screen notification, a system prompt) has none, and a screen not
   built yet has none until the build creates it and fills it in. **`kind`** is `screen` (navigated to) or `component`
   (placed inside screens). `intro` is optional HTML.
 - **A state** is one picture and the conditions behind it. Its key is `<screen-id>.<state-id>` (`SCR-4K7M.admin`),
-  unique in the book; state ids are unique within the screen. **`when.role`** is one of the book's `roles` (or
-  `anyone`, a role the book defines for everyone, which covers every role); **`when.also`** is free words for every
+  unique in the book; state ids are unique within the screen. **`when.role`** is one of the book's `roles` or
+  `anyone`, which covers every role and is always valid, whether or not `roles` lists it; **`when.also`** is free words for every
   other condition (data, errors, connection).
 - A state has exactly one of `mockup` (a file under the data folder, `mockups/screens/<screen-id>/<state-id>.html`),
   `sameAs` (the id of another state of the same screen that looks exactly like it; no chains, no cycles) and
   `absent` (words saying the role never sees the screen; no picture).
 - **A change to a built screen** is carried by the state, like a requirement's: `"change": "change"` makes `mockup`
   the proposed picture and `today` the path of today's picture (shown side by side); `"change": "add"` is a new
-  state; `"change": "remove"` is a state going away, with a `reason`. A build drops `change` and `today` when it
-  lands the state (and deletes today's picture file), and deletes a removed state, recording a `removed` decision
-  named for its key. This replaces a frame's `"state": "proposed"`.
+  state; `"change": "remove"` is a state going away, with a `reason`; no other value is valid. A section that
+  builds lands every state its Accept gate covers (the states it shows, the states they are `sameAs`, the
+  component states their pictures place): the build drops `change` and `today` (and deletes today's picture file),
+  and deletes a removed state, recording a `removed` decision named for its key. This replaces a frame's `"state": "proposed"`.
 - **Missing roles.** A `screen` (not a component) with no state covering one of the book's roles gets a hint in the
   Screens view: "No state for Visitor: same as another, or doesn't see it?". It is a hint, not a review: resolve it
   with a `sameAs` or `absent` state.
 - **Components placed by name.** A picture places a component with
   `<sb-component id="SCR-9QX2" state="waiting"></sb-component>` instead of copying its markup. The reader swaps the
   tag for that state's picture (components may place components). A cycle, a missing component, state or picture
-  draws a red placeholder naming it, and a tag naming something that is not a component state is invalid.
+  draws a red placeholder naming it. A tag naming something that is not a component state, a state that draws
+  no picture (`absent`, or `sameAs` one that is), or a chain of tags that leads back to a state on the way (a
+  component placing itself, A placing B placing A) is invalid.
   "Used on" for a component is computed by scanning pictures for tags, never stored.
 - **`shows`** (a section's, in order) lists the states the section draws: `state` is a state key and `highlight`
   (optional) is the id of a component placed in that picture, outlined there. The caption is `<screen name> ·
@@ -117,14 +121,17 @@ banner, header) is listed once and drawn once per state. A section does not copy
   "via <component>"); name a screen only when the rule is about that screen. The requirement still lives in one
   section.
 - **Valid** means: screen ids and names are unique; state ids are unique within a screen; each state has exactly one
-  of `mockup`, `sameAs` and `absent`; every `mockup` and `today` file exists; `sameAs` targets exist and are not
-  themselves `sameAs`; `when.role` is a book role; every `sb-component` tag names an existing component and state;
-  every `shows` and requirement `screens` entry names an existing screen, component and state; every `highlight`
-  names a component placed in that state's picture. `review.mjs land` and the server refuse a book that is not.
+  of `mockup`, `sameAs` and `absent`; `change`, when present, is `add`, `change` or `remove`; every `mockup` and
+  `today` file exists; `sameAs` targets exist and are not themselves `sameAs`; `when.role` is a book role or
+  `anyone`; every `sb-component` tag names an existing component state that draws a picture, and no chain of tags
+  is a cycle; every `shows` and requirement `screens` entry names an existing screen, component and state; every
+  `highlight` names a component placed in that state's picture. Only `review.mjs land` checks this (it refuses to
+  land a working book that is not valid); nothing else does.
 
 ## Stable ids
 
-Every requirement, decision and call has a **stable id**: a prefix of capitals, a dash, and four of `0-9A-Z`
+Every requirement, decision and call has a **stable id**: a prefix of capitals, a dash, and four of
+`23456789ABCDEFGHJKLMNPQRSTUVWXYZ` (no 0, 1, I or O)
 (`ONB-S5U2`). A chapter's `prefix` is used for new requirement ids.
 
 - Add new requirements and decisions as plain strings, then run
