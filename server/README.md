@@ -24,7 +24,10 @@ it, so an idle share costs nothing.
 
 ## Deploy
 
-From this folder: `./wrangler.sh deploy`. It serves at `https://specbook.jasonrowland.com` (the `routes` entry in
+To release a new reader: bump `version` in `plugin/.claude-plugin/plugin.json`, run `node server/publish-reader.mjs`
+(from the repository root; it copies `plugin/app/` into `server/public/r/<version>/` and rewrites
+`server/public/r/versions.json`), and commit `server/public/r/<version>/`. A published version is never overwritten with
+different bytes. Then, from this folder, `./wrangler.sh deploy`. It serves at `https://specbook.jasonrowland.com` (the `routes` entry in
 `wrangler.jsonc`; change it to deploy under another domain in your own account). The plugin uses
 `https://specbook.jasonrowland.com` unless a book names another in `settings.shareBroker`.
 
