@@ -157,7 +157,8 @@ checkbox (Changes mode only, remembered) draws the pins of sent and answered not
 
 `/specbook:share` hands out a link to the live book, so others (or you, from a phone) can read it and leave notes from
 anywhere. Your open book tab is the host. It sends the book straight to each guest over WebRTC, encrypted end to end.
-A share server, deployed separately (`settings.shareBroker`), passes the handshake and serves the small guest page.
+A share server, `https://specbook.jasonrowland.com` unless the book names its own in `settings.shareBroker`, passes the
+handshake and serves the small guest page.
 The handshake is signed with the key after `#` in the link, so a share server running this code can neither read the
 book nor join; the guest page comes from the share server, so use one you run or trust.
 The reader itself reaches the guest from your tab, so a new reader needs no new share server.
@@ -193,7 +194,7 @@ may only read and `PUT /api/notes`; anything else is 403 `guest`.
 | `POST /api/revise` | Sends the draft notes: sets them `sent`, writes the request |
 | `POST /api/stage { section, stage }` | Ready: 409 `unreviewed` while the section has an open review |
 | `GET /api/share/events?tab=<id>` | Every owner tab listens here; the server sends `start` (host this share), `stop` and `changed` |
-| `POST /api/share { hours }` | Asks the newest listening tab to host a share; 409 `no-broker` or `no-tab` |
+| `POST /api/share { hours }` | Asks the newest listening tab to host a share; 409 `no-broker` (an invalid `settings.shareBroker`) or `no-tab` |
 | `GET /api/share` | `{ state, url, expiresAt, guests, error, tabs }` |
 | `POST /api/share/live\|guests\|failed\|ended { tab, … }`, `POST /api/share/stop` | The hosting tab's reports; stop asks it to end the share |
 

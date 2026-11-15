@@ -27,6 +27,7 @@ import { listBuilds, reviewCall, stopBuild } from './lib/builds.mjs';
 import { findRequirement, findSection, listSections, setUserStage } from './lib/book-model.mjs';
 import { ensureIgnores, findProjectRoot } from './lib/gitignore.mjs';
 import { readJson, writeJsonAtomic } from './lib/json-file.mjs';
+import { shareBrokerOf } from './lib/broker.mjs';
 import { SERVER_FIELDS, checkGuestNotes, guestMay, guestOf, mergeGuestNotes, reviewForGuest } from './lib/guest.mjs';
 
 const SpecModel = createRequire(import.meta.url)('../app/model.js');
@@ -499,9 +500,7 @@ function shareView() {
 }
 function shareBroker() {
   try {
-    const url = readBook().settings?.shareBroker;
-    // https, or a share server on this machine (for trying one out with wrangler dev).
-    return typeof url === 'string' && /^(https:\/\/[^/\s]+|http:\/\/(localhost|127\.0\.0\.1)(:\d+)?)\/?$/.test(url) ? url.replace(/\/+$/, '') : null;
+    return shareBrokerOf(readBook().settings);
   } catch {
     return null;
   }

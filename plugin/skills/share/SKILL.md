@@ -12,8 +12,8 @@ the commands below yourself; the user never types one. `SHARE` means
 `node ${CLAUDE_PLUGIN_ROOT}/server/share.mjs --data <dir>`.
 
 How it works: the user's open book tab is the host. The book goes from that tab straight to each guest, and closing
-the tab ends the share. A share server passes the handshake between them. It is deployed separately, outside this
-plugin, and the book names it in `settings.shareBroker`. Only this session starts a share. Guests can read the book
+the tab ends the share. A share server passes the handshake between them. The plugin comes set to the public one,
+`https://specbook.jasonrowland.com`; a book may name its own in `settings.shareBroker`. Only this session starts a share. Guests can read the book
 and keep their own notes, nothing else.
 
 ## stop, status
@@ -23,11 +23,9 @@ and keep their own notes, nothing else.
 
 ## Start (no argument)
 
-1. **The share server.** Run `SHARE --check`. It prints `{ broker, sharing }`.
-   - If `sharing` is a link, give the user that link (step 3) and stop.
-   - If `broker` is null, ask the user for their share server's address, an `https://…` URL. Save it with
-     `SHARE --set-broker <url>`. If they have none, say a share server has to be deployed first, and stop. Do not
-     deploy one; it is not part of this plugin.
+1. **Already sharing?** Run `SHARE --check`. It prints `{ broker, sharing }`. If `sharing` is a link, give the user
+   that link (step 3) and stop. Never ask the user for a share server. Only if they ask to use their own, save it
+   with `SHARE --set-broker <https url>`; they deploy it themselves, never you.
 2. **Start.** Run `SHARE`, adding `--hours <n>` if the user gave a length (8 by default, at most 24). It starts the
    book's server if needed. If an older copy of the plugin started that server, it restarts it, because the older
    copy cannot check guests. If no book tab is open, it opens one in the browser. Then it waits for the tab to host

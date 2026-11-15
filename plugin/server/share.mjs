@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-// Shares the live spec book through a share server (a Cloudflare Worker deployed on its own, outside this plugin;
-// book.json settings.shareBroker). The owner's open book tab is the host (app/host.js): the book goes from that tab
-// straight to each guest over WebRTC, encrypted end to end, and closing the tab ends the share.
+// Shares the live spec book through a share server (a Cloudflare Worker deployed on its own, outside this plugin):
+// https://specbook.jasonrowland.com unless book.json settings.shareBroker names another. The owner's open book tab
+// is the host (app/host.js): the book goes from that tab straight to each guest over WebRTC, encrypted end to end,
+// and closing the tab ends the share.
 //
 //   node share.mjs --data <dir> [--hours 8]      start, opening the book in the browser if no tab is open; prints the link
 //   node share.mjs --data <dir> --status | --stop
 //   node share.mjs --data <dir> --check           { broker, sharing } for the share skill
-//   node share.mjs --data <dir> --set-broker https://…
+//   node share.mjs --data <dir> --set-broker https://…   share through your own server instead
 //
 // Used by the specbook:share skill. Guests may read the book and keep their own notes, nothing else; the host tab
 // and the server both check every call.
@@ -15,6 +16,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeJsonAtomic } from './lib/json-file.mjs';
+import { shareBrokerOf } from './lib/broker.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -109,7 +111,7 @@ async function api(port, method, path, body) {
 if (arg('check')) {
   const port = await findServer();
   const view = port ? (await api(port, 'GET', '/api/share')).body : null;
-  console.log(JSON.stringify({ broker: settings().shareBroker ?? null, sharing: view?.state === 'live' ? view.url : null }));
+  console.log(JSON.stringify({ broker: shareBrokerOf(settings()), sharing: view?.state === 'live' ? view.url : null }));
   process.exit(0);
 }
 
@@ -136,8 +138,8 @@ if (arg('status') || arg('stop')) {
 
 // Start: this book's server (restarting one an older plugin started, which cannot check guests), an open tab, then
 // the share.
-if (!settings().shareBroker) {
-  console.error('No share server is set for this book (settings.shareBroker). Set one with --set-broker https://….');
+if (!shareBrokerOf(settings())) {
+  console.error(`settings.shareBroker in book.json is not an https:// address. Fix it, or remove it to share through the public server.`);
   process.exit(2);
 }
 const recorded = recordedPort();

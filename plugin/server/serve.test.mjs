@@ -769,8 +769,10 @@ test('a guest cannot write a note on an item that does not exist', async () => {
 });
 
 test('a share asks the newest listening tab to host, goes live on its word, and ends when that tab goes', async () => {
-  assert.equal((await api('POST', '/api/share', { hours: 2 })).body.error, 'no-broker');
   const book = freshBook();
+  book.settings = { shareBroker: 'http://share.example' };
+  writeFileSync(join(data, 'book.json'), JSON.stringify(book));
+  assert.equal((await api('POST', '/api/share', { hours: 2 })).body.error, 'no-broker');
   book.settings = { shareBroker: 'https://share.example' };
   writeFileSync(join(data, 'book.json'), JSON.stringify(book));
   assert.equal((await api('POST', '/api/share', { hours: 2 })).body.error, 'no-tab');
