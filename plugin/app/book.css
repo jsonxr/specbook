@@ -160,7 +160,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 /* design bar */
 .bar { position: sticky; top: 0; z-index: 60; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 9px max(16px, 2vw);
   background: rgba(29, 31, 34, .96); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); font-size: 14px; }
-.bar-title { font-size: 16px; }
+.bar-title { font-size: 16px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bar-group { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; }
 .bar-spacer { flex: 1; }
 .bar-label { font: 600 12px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
@@ -199,9 +199,13 @@ body.locked-notes .sticky, body.locked-notes .pin { cursor: default; }
 .sb-secs a:hover { color: var(--ink); }
 .chapter, .bk-sec, .reqs li { scroll-margin-top: 70px; }
 .sb-chl.sb-here, .sb-secs a.sb-here { color: var(--ink); }
-/* "Where am I" and the contents sheet: a narrow screen has no sidebar, so the bar names the section in view, and it
-   (or the strip's Contents button) opens the contents as a sheet from the bottom. Wide screens never show either. */
-.bar-where, .bar .toc-tool, .toc-backdrop { display: none; }
+/* The contents sheet: a narrow screen has no sidebar, so the toolbar's Contents button opens the contents as a sheet
+   from the bottom, marking the section in view. A wide screen's Contents button hides and shows the sidebar instead. */
+.toc-backdrop { display: none; }
+@media (min-width: 861px) {
+  body.toc-hidden .layout { grid-template-columns: minmax(0, 1fr); }
+  body.toc-hidden .side { display: none; }
+}
 /* A shared book's status chip (share.js) speaks only when something is wrong: once the book is drawn here, the
    connection is live, so a plain "Live · name" chip hides. */
 .share-chip { position: fixed; left: 12px; bottom: 12px; z-index: 99; max-width: min(420px, calc(100vw - 24px)); padding: 6px 12px;
@@ -219,20 +223,12 @@ body .share-chip:not(.bad) { display: none; }
 .share-join input { font: inherit; font-size: 16px; padding: 9px 11px; border: 1px solid #c9c9cf; border-radius: 8px; }
 .share-join button { font: 600 15px/1 system-ui, sans-serif; padding: 11px; border: 0; border-radius: 8px; background: #1f6f43; color: #fff; }
 @media (max-width: 860px) {
-  .bar-title { display: none; }
   .bar > * { flex-shrink: 0; }
+  .bar .bar-title { flex: 1 1 auto; }
   .bar .bar-spacer { display: none; }
   #view-btn { white-space: nowrap; }
-  .bar-where { display: flex; align-items: center; justify-content: flex-start; gap: 4px; min-width: 0; flex: 1 1 auto; text-align: left; background: none; border: 0; padding: 6px 4px;
-    color: var(--ink); font: 600 15px var(--sans); cursor: pointer; border-radius: 7px; }
-  .bar .bar-where { flex-shrink: 1; }
-  .bar-where:hover { background: #2c2f34; }
-  #where-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .bar-where-caret { color: var(--muted); font-size: 12px; }
-  .bar .tool.toc-tool { display: grid; }
-  .bar .tool-sep.toc-tool { display: block; }
   body.toc-open { overflow: hidden; }
-  body.toc-open .side { display: block; position: fixed; left: 0; right: 0; top: auto; bottom: 0; height: auto; max-height: 75vh; z-index: 91;
+  body.toc-open .side { display: block; position: fixed; left: 0; right: 0; top: auto; bottom: 0; height: auto; max-height: calc(100dvh - 60px); z-index: 91;
     border-right: 0; border-top: 1px solid var(--line); border-radius: 14px 14px 0 0; padding: 26px 16px calc(24px + env(safe-area-inset-bottom));
     box-shadow: 0 -14px 40px rgba(0, 0, 0, .6); overscroll-behavior: contain; font-size: 15px; }
   body.toc-open .side::before { content: ''; position: absolute; top: 9px; left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: var(--line); }
@@ -526,7 +522,16 @@ body.followed::after { content: ""; position: fixed; inset: 0; border: 3px solid
 .bar-menu[hidden] { display: none; }
 .bar-menu-head { margin: 0; font: 600 12px var(--sans); color: var(--muted); }
 .bar-menu .bar-hint { margin: 4px 0 0; font-size: 12px; }
-.tools { display: flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 3px; }
+/* The review toolbar sits at the bottom on every screen: on a wide one it floats, centered under the book. */
+.tools { position: fixed; z-index: 70; display: flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 3px; }
+@media (min-width: 701px) {
+  .tools { bottom: 16px; left: 50%; transform: translateX(-50%); border-radius: 12px; padding: 4px; box-shadow: 0 10px 30px rgba(0, 0, 0, .5); }
+  .bar-msg, .share-chip { bottom: 80px; }
+}
+@media (min-width: 861px) {
+  .tools { left: calc(50% + 135px); }
+  body.toc-hidden .tools { left: 50%; }
+}
 .tool { position: relative; width: 34px; height: 32px; display: grid; place-items: center; border: 0; background: transparent; color: var(--ink); border-radius: 7px; cursor: pointer; padding: 0; }
 .tool:hover { background: #2c2f34; }
 .tool:disabled { opacity: .4; cursor: default; background: transparent; }
@@ -565,7 +570,7 @@ body.guest #claude-menu { display: none; }
 
 /* Phone: the review strip sits at the bottom; the Requests pane fills the screen above it. */
 @media (max-width: 700px) {
-  .bar { gap: 8px; padding: 8px 10px; backdrop-filter: none; background: var(--side); } /* a filter would pin .tools to the bar */
+  .bar { gap: 8px; padding: 8px 10px; backdrop-filter: none; background: var(--side); } 
   .bar .view-wrap #view-btn { padding: 6px 8px; }
   /* The review strip is the phone's bottom toolbar: full width, every button a 44 by 44 point target (Apple's
      minimum), spread evenly, clear of the home indicator. */

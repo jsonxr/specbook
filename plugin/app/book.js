@@ -3233,10 +3233,9 @@
   }
   window.addEventListener('scroll', changePosSoon, { passive: true });
 
-  // Where am I, on a narrow screen: the bar names the chapter or section in view (the last one whose top has passed
-  // just under the bar), and the contents mark it. The label, or the strip's Contents button, opens the contents as a
-  // sheet; a jump, the backdrop, Esc or a swipe down closes it.
-  var whereBtn = document.getElementById('where');
+  // Where am I, on a narrow screen: the contents mark the chapter or section in view (the last one whose top has passed
+  // just under the bar). The toolbar's Contents button opens the contents as a sheet; a jump, the backdrop, Esc or a
+  // swipe down closes it. On a wide screen the same button hides and shows the sidebar, and the choice is kept.
   var tocBtn = document.getElementById('toc-btn');
   var tocNav = document.getElementById('toc-nav');
   var tocBackdrop = document.getElementById('toc-backdrop');
@@ -3254,21 +3253,12 @@
     var link = here && here.id ? tocNav.querySelector('a[href="#' + CSS.escape(here.id) + '"]') : null;
     var was = tocNav.querySelector('.sb-here');
     if (was && was !== link) { was.classList.remove('sb-here'); }
-    var text = 'Contents';
-    if (link) {
-      link.classList.add('sb-here');
-      var copy = link.cloneNode(true);
-      Array.prototype.forEach.call(copy.querySelectorAll('.sb-chg, .sb-n'), function (x) { x.remove(); });
-      text = copy.textContent.trim().replace(/^§[\d.]+\s*/, '') || text; // the section's number is in the sheet
-    }
-    var label = document.getElementById('where-text');
-    if (label.textContent !== text) { label.textContent = text; }
+    if (link) { link.classList.add('sb-here'); }
   }
   function tocOpen() { return document.body.classList.contains('toc-open'); }
   function setToc(open) {
     document.body.classList.toggle('toc-open', open);
     tocBackdrop.hidden = !open;
-    whereBtn.setAttribute('aria-expanded', String(open));
     tocBtn.setAttribute('aria-expanded', String(open));
     tocNav.style.transform = '';
     if (!open) { return; }
@@ -3279,12 +3269,23 @@
       tocNav.scrollTop = Math.max(0, top - tocNav.clientHeight / 3);
     }
   }
-  whereBtn.addEventListener('click', function () { setToc(!tocOpen()); });
-  tocBtn.addEventListener('click', function () { setToc(!tocOpen()); });
+  // Wide, the button is a toggle (pressed while the sidebar shows); narrow, it opens the sheet and is not a toggle.
+  function syncTocBtn() {
+    if (narrow()) { tocBtn.removeAttribute('aria-pressed'); } else { tocBtn.setAttribute('aria-pressed', String(!document.body.classList.contains('toc-hidden'))); }
+  }
+  if (store('spec-book-toc') === 'hidden') { document.body.classList.add('toc-hidden'); }
+  syncTocBtn();
+  tocBtn.addEventListener('click', function () {
+    if (narrow()) { setToc(!tocOpen()); return; }
+    var hidden = document.body.classList.toggle('toc-hidden');
+    store('spec-book-toc', hidden ? 'hidden' : 'shown');
+    syncTocBtn();
+    changePosSoon();
+  });
   tocBackdrop.addEventListener('click', function () { setToc(false); });
   tocNav.addEventListener('click', function (e) { if (tocOpen() && e.target.closest('a')) { setToc(false); } });
   if (narrowQuery.addEventListener) {
-    narrowQuery.addEventListener('change', function () { if (!narrow()) { setToc(false); } else { showWhere(); } });
+    narrowQuery.addEventListener('change', function () { syncTocBtn(); if (!narrow()) { setToc(false); } else { showWhere(); } });
   }
   // A swipe down from the top of the sheet's list pulls it closed.
   var swipeY = null;

@@ -885,7 +885,7 @@ try {
     const bad = [];
     try {
       await open();
-      for (const [btn, menu] of [['#where', '#toc-nav'], ['#view-btn', '#view-menu'], ['#claude-btn', '#claude-pop']]) {
+      for (const [btn, menu] of [['#toc-btn', '#toc-nav'], ['#view-btn', '#view-menu'], ['#claude-btn', '#claude-pop']]) {
         await page.click(btn);
         await page.waitForTimeout(200);
         const why = await inside(menu);
@@ -991,41 +991,119 @@ try {
     }
   });
 
-  await check('on a phone the bar says where you are, and it opens the contents as a sheet that jumps and closes', async () => {
-    if (await page.locator('#where').isVisible()) {
-      throw new Error('the "where am I" label shows on a desktop');
+  await check('the review toolbar sits at the bottom on a desktop, and its Contents button hides and shows the contents', async () => {
+    await page.evaluate(() => localStorage.removeItem('spec-book-toc'));
+    await open();
+    const seen = await page.evaluate(() => {
+      const t = document.getElementById('review-tools');
+      const bar = document.querySelector('header.bar');
+      const r = t.getBoundingClientRect(), m = document.querySelector('main').getBoundingClientRect();
+      return {
+        inBar: bar.contains(t), bottom: Math.round(innerHeight - r.bottom), off: Math.round(Math.abs((r.left + r.right) / 2 - (m.left + m.right) / 2)),
+        where: !!document.getElementById('where'), head: ['#book-title', '#view-btn', '#share-slot', '#claude-btn'].filter(s => !bar.querySelector(s)),
+        tools: bar.querySelectorAll('.tool').length,
+      };
+    });
+    if (seen.inBar || seen.bottom < 0 || seen.bottom > 40 || seen.off > 2 || seen.where || seen.head.length || seen.tools) {
+      throw new Error(`the toolbar is not at the bottom under the book, or the header holds more than its four: ${JSON.stringify(seen)}`);
     }
+    // The toast sits above the floating toolbar, not under it.
+    const toast = await page.evaluate(() => {
+      const msg = document.getElementById('make-msg');
+      msg.textContent = 'A toast long enough to reach toward the middle of the window, where the toolbar floats';
+      const a = msg.getBoundingClientRect(), b = document.getElementById('review-tools').getBoundingClientRect();
+      msg.textContent = '';
+      return a.right > b.left && a.left < b.right && a.bottom > b.top && a.top < b.bottom ? `${JSON.stringify(a)} over ${JSON.stringify(b)}` : null;
+    });
+    if (toast) {
+      throw new Error(`the toast overlaps the toolbar: ${toast}`);
+    }
+    const contents = () => page.evaluate(() => ({
+      hidden: document.body.classList.contains('toc-hidden'),
+      side: !!document.querySelector('.side').getClientRects().length,
+      left: Math.round(document.querySelector('main').getBoundingClientRect().left),
+      pressed: document.getElementById('toc-btn').getAttribute('aria-pressed'),
+    }));
+    let c = await contents();
+    if (c.hidden || !c.side || c.pressed !== 'true') {
+      throw new Error(`the contents do not show by default: ${JSON.stringify(c)}`);
+    }
+    await page.locator('#toc-btn').click();
+    c = await contents();
+    if (!c.hidden || c.side || c.left >= 40 || c.pressed !== 'false') {
+      throw new Error(`Contents did not hide the sidebar and widen the book: ${JSON.stringify(c)}`);
+    }
+    const centered = await page.evaluate(() => {
+      const r = document.getElementById('review-tools').getBoundingClientRect(), m = document.querySelector('main').getBoundingClientRect();
+      return Math.round(Math.abs((r.left + r.right) / 2 - (m.left + m.right) / 2));
+    });
+    if (centered > 2) {
+      throw new Error(`with the contents hidden the toolbar is ${centered} px off the book's center`);
+    }
+    await open();
+    c = await contents();
+    if (!c.hidden || c.side) {
+      throw new Error(`a reload showed the hidden contents again: ${JSON.stringify(c)}`);
+    }
+    // On a phone the hidden sidebar means nothing: the button still opens the sheet. Wide again, it is still hidden.
+    await page.setViewportSize({ width: 390, height: 844 });
+    try {
+      await page.locator('#toc-btn').click();
+      await page.waitForSelector('body.toc-open .side', { state: 'visible', timeout: 3000 });
+      await page.keyboard.press('Escape');
+      await page.waitForFunction(() => !document.body.classList.contains('toc-open'), null, { timeout: 3000 });
+    } finally {
+      await page.setViewportSize({ width: 1400, height: 900 });
+    }
+    c = await contents();
+    if (!c.hidden || c.side) {
+      throw new Error(`back on a desktop the contents came back: ${JSON.stringify(c)}`);
+    }
+    await page.locator('#toc-btn').click();
+    c = await contents();
+    if (c.hidden || !c.side || c.pressed !== 'true') {
+      throw new Error(`Contents did not show the sidebar again: ${JSON.stringify(c)}`);
+    }
+  });
+
+  await check('on a phone the Contents button opens the contents as a tall sheet that jumps and closes', async () => {
     await page.setViewportSize({ width: 390, height: 844 });
     try {
       await open();
+      if (!(await page.locator('#book-title').isVisible())) {
+        throw new Error('the header does not show the book\'s title on a phone');
+      }
       // Earlier checks leave "show only changes" on, which hides the unchanged sections.
       if ((await page.locator('#changes-btn').getAttribute('aria-pressed')) === 'true') {
         await page.locator('#changes-btn').click();
       }
       await page.waitForSelector('#todos-add', { state: 'visible', timeout: 3000 });
       await page.evaluate(() => document.getElementById('todos-add').scrollIntoView({ behavior: 'instant' }));
-      await page.waitForFunction(() => /Adding a todo/.test(document.getElementById('where')?.textContent ?? ''), null, { timeout: 3000 }).catch(async e => {
-        throw new Error(`${e.message}: the label says ${JSON.stringify(await page.evaluate(() => document.getElementById('where')?.textContent))}}`);
-      });
-      await page.locator('#where').click();
+      await page.waitForTimeout(200);
+      await page.locator('#toc-btn').click();
       await page.waitForSelector('body.toc-open .side', { state: 'visible', timeout: 3000 });
-      const here = await page.evaluate(() => document.querySelector('.side .sb-here')?.getAttribute('href'));
-      if (here !== '#todos-add') {
-        throw new Error(`the contents mark ${here} as where you are`);
+      const sheet = await page.evaluate(() => {
+        const s = document.querySelector('.side');
+        const r = s.getBoundingClientRect();
+        return { top: Math.round(r.top), bottom: Math.round(r.bottom), scrolls: s.scrollHeight > s.clientHeight, here: document.querySelector('.side .sb-here')?.getAttribute('href') };
+      });
+      if (sheet.scrolls && sheet.top > 70) {
+        throw new Error(`the sheet scrolls but starts ${sheet.top} px down; it should be as tall as the screen allows`);
+      }
+      if (sheet.top < 40 || sheet.bottom > 844) {
+        throw new Error(`the sheet runs ${sheet.top}..${sheet.bottom}: it must leave a strip of the book and fit the screen`);
+      }
+      if (sheet.here !== '#todos-add') {
+        throw new Error(`the contents mark ${sheet.here} as where you are`);
       }
       await page.locator('.side a[href="#filters-bar"]').click();
       await page.waitForFunction(() => !document.body.classList.contains('toc-open'), null, { timeout: 3000 });
-      await page.waitForFunction(() => /The filter bar/.test(document.getElementById('where').textContent), null, { timeout: 3000 });
-      // The strip's Contents button opens it too, and Esc closes it.
       await page.locator('#toc-btn').click();
       await page.waitForSelector('body.toc-open', { timeout: 3000 });
       await page.keyboard.press('Escape');
       await page.waitForFunction(() => !document.body.classList.contains('toc-open'), null, { timeout: 3000 });
     } finally {
       await page.setViewportSize({ width: 1400, height: 900 });
-    }
-    if (await page.locator('#toc-btn').isVisible()) {
-      throw new Error('the Contents button shows on a desktop');
     }
   });
 
