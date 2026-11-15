@@ -32,6 +32,17 @@
     try { localStorage.setItem(PIN_KEY, given[1]); } catch (e) { pin = given[1]; }
   }
   given = null;
+  // The pin link opened in a tab that already shows this book changes only the address's #: the pin is taken out and
+  // saved the same way, and the page opens again with it.
+  window.addEventListener('hashchange', function () {
+    var again = /^#pin=(.*)$/.exec(location.hash);
+    if (!again) { return; }
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { location.hash = ''; }
+    if (m && PIN_OK.test(again[1])) {
+      try { localStorage.setItem(PIN_KEY, again[1]); } catch (e) { /* not saved: this page goes on as it is */ return; }
+      location.reload();
+    }
+  });
 
   var PROTOCOL = 3;
   var CHUNK = 12000;
