@@ -25,9 +25,9 @@ The page `serve` opens, in detail. The `specbook` skill points here.
   too.
 - **The book**: a cover, then chapters. A chapter has an eyebrow ("Chapter 03"), a title, a status pill and an
   intro. Each section has a § number, title, a stage pill, intro, a list of requirements, then the screen
-  states it shows (`shows`) side by side, each captioned "<screen name> · <state name>" with a colored role tag.
+  states it shows (`shows`) side by side, each captioned "<screen name> · <computed caption>" with a colored role tag (the role pill, then the labels of the non-default variable values; a typed `name` overrides the words).
   Every picture is the one drawing of that state, so it reads the same wherever it is shown. A state drawn as
-  another (`sameAs`) says "Same as <state name>" and a role that never sees the screen (`absent`) shows its words
+  another (`sameAs`) says "Same as <that state's caption>" and a role that never sees the screen (`absent`) shows its words
   where the picture would be. A component named by `highlight` is outlined in its picture; a component placed in a
   picture is drawn in place, or as a red placeholder naming it when it, its state or its picture is missing.
   Recordings play under their section. At the end: **Decisions and what was rejected**, the full list.
@@ -169,12 +169,15 @@ drawn once per state, with every requirement about it. Pressing **Book** goes ba
   created it). The contents sidebar lists the same names; on a phone it is the usual sheet.
 - **A page** (`#screen/<screen-id>`, or `#screen/<screen-id>.<state-id>` to scroll to a state and outline it):
   the name and id, its kind, its `file`, its `intro`, then
+  - **Variables**: one line naming each variable the screen uses (role included) with its values, the default first.
   - **States**, in a row laid out by role (`anyone` first, then the book's roles in order, then states with no
-    role), each captioned with its role tag and its `when.also` words; on a phone they stack. They follow the
-    View menu's Mockups and Screenshots, and a state with a `change` draws **Today** and **Proposed** panes as in
-    the chapter view.
-  - A quiet hint for every book role a screen's states do not cover: "No state for Visitor: same as another, or
-    doesn't see it?" Components get none. It opens no review.
+    role), each captioned with its computed caption (role pill, then the non-default values' labels) and its `also`
+    words; on a phone they stack. They follow the View menu's Mockups and Screenshots, and a state with a `change`
+    draws **Today** and **Proposed** panes as in the chapter view.
+  - **Coverage**: one line per combination the screen accounts for, each written as its `when` in words ("Role: User,
+    Data: No todos"): drawn, same as another state, absent, or **not drawn** (an `undrawn` entry, with the
+    requirement ids it is about and its note). It is a list, not a review, and opens none. Components list their
+    variables and states the same way.
   - **Requirements**, grouped under "<chapter> › <section>" in book order, each with its id, its text, the state it
     narrows to, and "via <component>" when it reached the screen through a component the screen places.
   - For a component, **Used on**: a small picture of every state that places it, the component outlined, each

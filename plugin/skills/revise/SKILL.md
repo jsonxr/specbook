@@ -55,7 +55,7 @@ Then re-arm the watch (step 8).
      asked for, ids kept, decisions respected, the mockups matching the requirements. The implementer fixes what it
      finds; review again until it passes.
    - **Land the section:** `node ${CLAUDE_PLUGIN_ROOT}/server/review.mjs --data <dir> land --request <file>` checks the
-     request is still pending and the working book is valid (it parses, ids are unique, every screen is valid: states have pictures, `sameAs` and `sb-component` targets exist, `shows` and requirement `screens` name real states),
+     request is still pending and the working book is valid (it parses, ids are unique, every screen is valid: states have pictures, every `when` uses the screen's declared variables and values, `sameAs` and `sb-component` targets exist, `shows` and requirement `screens` name real states),
      then writes the working copy to the book in one step. `stopped`: see **The user can Stop**. `invalid`: the
      implementer fixes `<work>`, the reviewer checks again, then land again.
    - **Then link and reply** for that section's notes, on `<dir>` (steps 4 and 5 below): the items exist in the book
