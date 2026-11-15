@@ -99,3 +99,11 @@ test('mayCall: owners call anything but the share, guests what guestMay allows',
   assert.equal(mayCall('owner', 'GET', 'api/book'), false);
   assert.equal(mayCall('nobody', 'GET', '/api/book'), false);
 });
+
+test('mayCall: nobody calls /api/live over the channel', () => {
+  assert.equal(mayCall('owner', 'POST', '/api/live'), false);
+  assert.equal(mayCall('owner', 'POST', '/api/live/x'), false);
+  assert.equal(mayCall('owner', 'POST', '//api/live'), false);
+  assert.equal(mayCall('guest', 'POST', '/api/live'), false);
+  assert.equal(mayCall('owner', 'GET', '/api/lively'), true);
+});

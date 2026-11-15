@@ -157,6 +157,12 @@ export function createHost({ broker, port, version, ownerName, saved = null, rtc
   }
 
   // A reader's live message: stamped with who sent it (never trusted from the reader), checked, then passed on.
+  // Whether this reader is still connected to the share being hosted: a dropped or revoked connection has no rights,
+  // whatever its channel still delivers.
+  function current(peer) {
+    return !!share && share.peers[peer.from] === peer;
+  }
+
   function onLiveFrame(peer, f) {
     if (!LIVE_KINDS.has(f.kind)) {
       return;
@@ -166,7 +172,12 @@ export function createHost({ broker, port, version, ownerName, saved = null, rtc
       drop(peer);
       return;
     }
-    const msg = { ...f, t: 'live', from: peer.id };
+    if (!current(peer)) {
+      return;
+    }
+    // Who sent it is the host's to say: what the reader wrote there is dropped, on every kind.
+    const { name, role, color, author, you, people: _, ...rest } = f;
+    const msg = { ...rest, t: 'live', from: peer.id };
     if (msg.kind === 'hello') {
       Object.assign(msg, { name: nameOf(peer), color: RELAY.colorOf(peer.id), role: peer.rights });
       roster(peer);
@@ -238,6 +249,9 @@ export function createHost({ broker, port, version, ownerName, saved = null, rtc
     if (!u || u.origin !== origin || !raw.startsWith('/') || !METHODS.has(method) || !mayCall(peer.rights, method, path)) {
       return reply(403, 'application/json', jsonBytes({ error: peer.rights === 'owner' ? 'forbidden' : 'guest' }));
     }
+    if (!current(peer)) {
+      return undefined;
+    }
     if (peer.inFlight >= IN_FLIGHT || inFlight >= SHARE_IN_FLIGHT) {
       return reply(429, 'application/json', jsonBytes({ error: 'busy' }));
     }
@@ -255,6 +269,9 @@ export function createHost({ broker, port, version, ownerName, saved = null, rtc
       }
       let r;
       try {
+        if (!current(peer)) {
+          return undefined;
+        }
         r = await fetch(origin + u.pathname + u.search, { method, headers, body: withBody && body ? body : undefined, redirect: 'error' });
       } catch {
         return await reply(502, 'application/json', jsonBytes({ error: 'unreachable' }));
@@ -296,7 +313,7 @@ export function createHost({ broker, port, version, ownerName, saved = null, rtc
     peer.channel = ch;
     const frames = assembler({ maxOpen: MAX_OPEN, maxBody: MAX_BODY });
     ch.onmessage = e => {
-      if (peer.mismatched || typeof e.data !== 'string') {
+      if (!current(peer) || peer.mismatched || typeof e.data !== 'string') {
         return;
       }
       let f;
@@ -335,6 +352,11 @@ export function createHost({ broker, port, version, ownerName, saved = null, rtc
     }
     delete s.peers[peer.from];
     clearTimeout(peer.timer);
+    try {
+      peer.channel?.close();
+    } catch {
+      // closed
+    }
     try {
       peer.pc?.close();
     } catch {
@@ -640,7 +662,7 @@ export function createHost({ broker, port, version, ownerName, saved = null, rtc
       return;
     }
     kept = { room: room.room, hostToken: room.hostToken, expiresAt: room.expiresAt ?? null };
-    const s = (share = { room: room.room, token: room.hostToken, expiresAt: room.expiresAt ?? null, keeps: room.keeps, peers: {}, claims: {}, live: false, ice: null });
+    const s = (share = { room: room.room, token: room.hostToken, expiresAt: room.expiresAt ?? null, keeps: room.keeps, peers: Object.create(null), claims: Object.create(null), live: false, ice: null });
     s.timer = every(() => renew(s), RENEW_MS);
     report();
     connectBroker(s, 1000);

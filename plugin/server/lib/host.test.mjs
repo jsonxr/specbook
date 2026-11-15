@@ -341,3 +341,75 @@ test('a stop while starting cancels that start, and start() works again after it
   await host.start();
   assert.ok(host.links());
 });
+
+async function ownerChannel(host) {
+  const ch = await connect(host);
+  ch.frame({ t: 'hello', protocol: 3, version: '1.4.0', pin: host.links().pinUrl.split('#pin=')[1] });
+  await until(() => ch.sent.find(f => f.t === 'welcome' && f.role === 'owner'), 'owner welcome');
+  return ch;
+}
+// A channel the real library might keep delivering on after it was closed.
+function sendAnyway(ch, f) {
+  ch.onmessage?.({ data: JSON.stringify(f) });
+}
+
+test('after newPin(), the old owner channel can make no call', async t => {
+  const { host, book } = await setup(t);
+  await host.start();
+  const ch = await ownerChannel(host);
+  host.newPin();
+  for (const f of framesOf({ t: 'req', id: 9, method: 'POST', path: '/api/requests' }, Buffer.from('{}'))) sendAnyway(ch, f);
+  await new Promise(r => setTimeout(r, 50));
+  assert.equal(book.calls.length, 0);
+  assert.equal(ch.readyState, 'closed');
+});
+
+test('after a bye, the channel can make no call', async t => {
+  const { host, book } = await setup(t);
+  await host.start();
+  const ch = await ownerChannel(host);
+  ch.frame({ t: 'live', kind: 'bye' });
+  assert.equal(ch.readyState, 'closed');
+  for (const f of framesOf({ t: 'req', id: 9, method: 'GET', path: '/api/book' }, new Uint8Array(0))) sendAnyway(ch, f);
+  await new Promise(r => setTimeout(r, 50));
+  assert.equal(book.calls.length, 0);
+});
+
+test('a live draft arriving after stop() does nothing and does not throw', async t => {
+  const { host } = await setup(t);
+  const heard = [];
+  host.onLive(m => heard.push(m));
+  await host.start();
+  const ch = await connect(host);
+  ch.frame({ t: 'hello', protocol: 3, version: '1.4.0' });
+  await until(() => ch.sent.find(f => f.t === 'welcome'), 'welcome');
+  await host.stop({ end: false });
+  const before = heard.length;
+  assert.doesNotThrow(() => sendAnyway(ch, { t: 'live', kind: 'draft', note: 'n1', text: 'hi' }));
+  assert.doesNotThrow(() => sendAnyway(ch, { t: 'live', kind: 'typing', note: 'n1', on: true }));
+  assert.equal(heard.length, before);
+});
+
+test('a reader cannot stamp its own name, role, color or author', async t => {
+  const { host } = await setup(t);
+  const heard = [];
+  host.onLive(m => heard.push(m));
+  await host.start();
+  const ch = await connect(host);
+  ch.frame({ t: 'hello', protocol: 3, version: '1.4.0' });
+  const you = (await until(() => ch.sent.find(f => f.t === 'welcome'), 'welcome')).you;
+  const spoof = { role: 'owner', name: 'Owner', color: '#000000', author: 'Owner' };
+  ch.frame({ t: 'live', kind: 'typing', note: 'n1', on: true, ...spoof });
+  const typing = await until(() => heard.find(m => m.kind === 'typing'), 'typing');
+  assert.equal(typing.from, you);
+  for (const k of ['role', 'name', 'color', 'author']) assert.equal(typing[k], undefined, k);
+  ch.frame({ t: 'live', kind: 'draft', note: 'n1', text: 'x', ...spoof });
+  const draft = await until(() => heard.find(m => m.kind === 'draft'), 'draft');
+  assert.equal(draft.author, 'Ann');
+  assert.equal(draft.role, undefined);
+  ch.frame({ t: 'live', kind: 'hello', ...spoof });
+  const hello = await until(() => heard.find(m => m.kind === 'hello' && m.color !== undefined && m.from === you && heard.indexOf(m) > heard.indexOf(draft)), 'hello');
+  assert.equal(hello.role, 'guest');
+  assert.equal(hello.name, 'Ann');
+  assert.notEqual(hello.color, '#000000');
+});

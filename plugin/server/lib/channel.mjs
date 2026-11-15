@@ -64,15 +64,20 @@ export function rightsOf(hello, pin) {
 }
 
 // Whether a connection may make this call. `path` is the decoded path, without the query. The owner may call anything
-// but the share itself, which is managed only from localhost; a guest only what guestMay allows (checked again by the
-// book server).
+// but the share itself and /api/live, which are for localhost only; a guest only what guestMay allows (checked again
+// by the book server).
 export function mayCall(rights, method, path) {
   if (typeof path !== 'string' || !path.startsWith('/')) {
     return false;
   }
+  // Repeated slashes are collapsed first, so '//api/share' is no way around it.
+  const flat = path.replace(/\/+/g, '/');
+  // Live frames travel on the channel as { t: 'live' }; the route is for localhost tabs only, whoever calls.
+  if (flat === '/api/live' || flat.startsWith('/api/live/')) {
+    return false;
+  }
   if (rights === 'owner') {
-    // Repeated slashes are collapsed first, so '//api/share' is no way around it.
-    return !path.replace(/\/+/g, '/').startsWith('/api/share');
+    return !flat.startsWith('/api/share');
   }
   if (rights === 'guest') {
     return guestMay(method, path);
