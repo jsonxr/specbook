@@ -1,0 +1,11 @@
+{
+  "description": "Stop in the spec book reader: refuse edits to the book and commits once the user pressed Stop",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/server/stop-hook.mjs\"", "timeout": 10 }]
+      }
+    ]
+  }
+}
