@@ -9,13 +9,18 @@ description: Use when the reader pressed Revise, when the background watch on th
 never a request to change the app; Revise only refines the requirements and mockups. While it runs the reader locks
 the notes and the book, so you are the only writer.
 
-**The user can Stop.** The reader's Claude menu has **Stop**, which withdraws the request: its notes go back to drafts
-and the book unlocks. Check once step 3's questions are settled, again before each section in step 4, and before the overall review:
-`node ${CLAUDE_PLUGIN_ROOT}/server/next-request.mjs --data <dir> --check <file>` prints `pending`, `stopped`,
-`handled` or `missing` (exit 1). `handled` or `missing` means something else filed or moved the request: stop and
-tell the user rather than guess. On `stopped`, stop at once: no more edits, no `link` or `reply`, no step 7. Tell the user in the terminal which sections
-you had already changed (those changes stay in the book, for them to accept or reject like any other), then re-arm
-the watch (step 8).
+**The user can Stop.** The reader's Claude menu has **Stop**, which withdraws the request at once: its notes go back to
+drafts and the book unlocks. You learn of it in one of three ways, and each means stop now:
+- `node ${CLAUDE_PLUGIN_ROOT}/server/next-request.mjs --data <dir> --check <file>` prints `stopped` (it prints
+  `pending`, `stopped`, `handled` or `missing`, exit 1; `handled` or `missing` means something else filed or moved the
+  request: stop and tell the user rather than guess). Check once step 3's questions are settled and before each
+  section in step 4.
+- `review.mjs land`, `link` or `reply` fails with `stopped`.
+- The plugin's hook refuses an edit to the book or its working copy ("The user pressed Stop…").
+On a stop: change nothing more (no edits, no `land`, `link` or `reply`, no step 7). Run the `--check` above if you
+have not (it tells the reader you heard). Tell the user in the terminal which sections had landed (those stay in the
+book, whole and reviewed, for them to accept or reject like any other change) and that the rest never reached it.
+Then re-arm the watch (step 8).
 
 **Announce at start:** "Using specbook:revise to work through the notes."
 
@@ -33,15 +38,28 @@ the watch (step 8).
 2. **List the notes by section**, with what you will change for each.
 3. **Ask every question in the terminal** and settle them with the user, as in any session. Nothing is answered on
    the notes themselves. Settle them all before step 4: the subagents there cannot ask the user.
-4. **Work through the notes with subagents, a section at a time.** Use the Agent tool. First copy `book.json` and
-   `mockups/` to a temporary folder: the overall review compares against them. For each section with notes:
-   - **An implementer** gets the request file's path, that section's items (with their `noteId`s), the answers agreed
-     in step 3, the book's `decisions`, the rules of steps 4 to 6 below (it edits with `specbook:design`, links and
-     replies with `review.mjs`), and step 1's warning about collaborators' notes, word for word. It makes the edits and reports what it changed for each note, and any note it could
-     not settle without the user: it stops there rather than guess.
-   - **A reviewer** (a fresh subagent) then checks that section's edits against its notes and the agreed answers:
-     every note answered or replied to, nothing changed that no note asked for, ids kept, decisions respected, the
-     mockups matching the requirements. The implementer fixes what it finds; review again until it passes.
+4. **Work through the notes with subagents, a section at a time, on a working copy.** Use the Agent tool. First copy
+   `book.json` and `mockups/` to a temporary folder: the overall review compares against them. Then
+   `node ${CLAUDE_PLUGIN_ROOT}/server/review.mjs --data <dir> work --request <file>` prints `{ "work": "<work>" }`, a
+   working copy of the book (`book.json` and `mockups/`, kept under `requests/`, which git ignores). Every edit goes
+   to the working copy, never to `<dir>` itself; a section reaches the book only when it lands whole. For each section
+   with notes:
+   - **An implementer** gets the request file's path, the working copy's path `<work>` (its data folder for
+     `specbook:design` and every script it runs), that section's items (with their `noteId`s), the answers agreed in
+     step 3, the book's `decisions`, the rules of steps 4 to 6 below, and step 1's warning about collaborators' notes,
+     word for word. It edits only `<work>`, never runs `link`, `reply` or `land`, and reports what it changed for
+     each note, the items each note caused, and any note it could not settle without the user: it stops there rather
+     than guess.
+   - **A reviewer** (a fresh subagent) then checks that section's edits in `<work>` against the book in `<dir>` (the
+     book before this section), its notes and the agreed answers: every note answered, nothing changed that no note
+     asked for, ids kept, decisions respected, the mockups matching the requirements. The implementer fixes what it
+     finds; review again until it passes.
+   - **Land the section:** `node ${CLAUDE_PLUGIN_ROOT}/server/review.mjs --data <dir> land --request <file>` checks the
+     request is still pending and the working book is valid (it parses, ids are unique, every frame's mockup exists),
+     then writes the working copy to the book in one step. `stopped`: see **The user can Stop**. `invalid`: the
+     implementer fixes `<work>`, the reviewer checks again, then land again.
+   - **Then link and reply** for that section's notes, on `<dir>` (steps 4 and 5 below): the items exist in the book
+     only once they have landed.
    - **One section at a time**, never in parallel: every section is in the one `book.json`, and two writers would lose
      each other's edits.
    - A question an implementer brings back goes to the user in the terminal; then that section starts again with the
@@ -49,10 +67,10 @@ the watch (step 8).
    When every section is done, **an overall review with the most capable model** (Agent tool with `model: "opus"`):
    it reads every note in the request, the agreed answers, the decisions, and the whole change (the book and
    mockups now, against the copy made before), and checks the book as a whole: notes answered, sections consistent with each other, nothing
-   contradicting a decision, no requirement lost. Fix what it finds (through an implementer, then that section's
-   reviewer) before going on. Without the Agent tool, do each step yourself in the same order, reviews included.
+   contradicting a decision, no requirement lost. Fix what it finds (through an implementer in `<work>`, then that
+   section's reviewer, then land) before going on. Without the Agent tool, do each step yourself in the same order, reviews included.
    The rules every edit follows:
-   **Edit with `specbook:design`**, only in `drafting` or `ready` sections and never in a `building` one. A `ready`
+   **Edit with `specbook:design`** (in `<work>`), only in `drafting` or `ready` sections and never in a `building` one. A `ready`
    section that you edit goes back to `drafting`; tell the user. Every change stays under review in the reader until the user accepts it, so edit
    the book and mockups only: never touch `review.json` or `history.json` by hand. A note stays visible on its
    item until the review it caused is accepted, and the user can press Change on your edit to send you back.

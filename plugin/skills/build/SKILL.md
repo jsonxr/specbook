@@ -21,9 +21,12 @@ of `book.json`.
 **The user can Stop.** The reader's Claude menu has **Stop**, which stops a running build (its sections go back to
 Drafting) and withdraws the request. Check before step 1, before each task, and before step 6:
 `node ${CLAUDE_PLUGIN_ROOT}/server/next-request.mjs --data <dir> --check <file>` prints `pending`, `stopped`,
-`handled` or `missing` (exit 1). On `stopped`: if you have not run `start`, do nothing more; if you have, the reader
+`handled` or `missing` (exit 1). Check before each commit too. The plugin's hook also refuses edits to the book and
+any `git commit` once the user pressed Stop ("The user pressed Stop…"): treat that as `stopped`. On `stopped`: if you
+have not run `start`, do nothing more; if you have, the reader
 has already stopped the build (a `build.mjs` command now fails with `not-running`, which is expected): run neither
-`stop` nor `finish`, commit what you have to the branch, tell the user what was done, and re-arm the watch. On
+`stop` nor `finish`, commit nothing more, tell the user what was done (and what is uncommitted on the branch), run the
+`--check` if you have not (it tells the reader you heard), and re-arm the watch. On
 `handled` or `missing`, stop and tell the user rather than guess.
 
 Every `build.mjs` command is `node ${CLAUDE_PLUGIN_ROOT}/server/build.mjs --data <dir> <command>`

@@ -1227,15 +1227,26 @@ try {
       await open();
       await openConfirm('build');
       await page.locator('#claude-confirm .cc-send').click();
-      const id = buildCli('start').id;
       await page.waitForFunction(() => document.getElementById('claude-btn').classList.contains('busy'), null, { timeout: 5000 });
+      // Before the build starts, the row and the question say so: the sections would stay Ready.
+      await openClaudeMenu();
+      await page.locator('#build-row .claude-stop').click();
+      await page.waitForSelector('#claude-ask:not([hidden])', { timeout: 3000 });
+      const early = await page.evaluate(() => [document.querySelector('#build small').textContent, document.getElementById('claude-ask').textContent]);
+      if (!early[0].includes('requested at') || !early[1].includes('stay Ready')) {
+        throw new Error(`before the build starts the menu says ${JSON.stringify(early)}`);
+      }
+      await page.locator('#claude-ask .ca-keep').click();
+      const id = buildCli('start').id;
+      await page.waitForFunction(() => document.querySelector('#build small').textContent.includes('started at'), null, { timeout: 8000 })
+        .catch(async () => { throw new Error(`once started the row says ${JSON.stringify(await page.locator('#build small').textContent())}`); });
       await openClaudeMenu();
       if (!(await page.evaluate(() => document.getElementById('build-row').classList.contains('running') && document.querySelector('#revise small').textContent === 'Waiting for Claude to finish.'))) {
         throw new Error('Build is not the running row');
       }
       await page.locator('#build-row .claude-stop').click();
       await page.waitForSelector('#claude-ask:not([hidden])', { timeout: 3000 });
-      if (!(await page.locator('#claude-ask').textContent()).includes('Stop the build?')) {
+      if (!/Stop the build\?.*back to Drafting/.test(await page.locator('#claude-ask').textContent())) {
         throw new Error('the question does not ask to stop the build');
       }
       await page.locator('#claude-ask .ca-stop').click();

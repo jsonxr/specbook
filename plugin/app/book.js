@@ -2452,7 +2452,7 @@
       var n = sent.count || 0;
       x[1].querySelector('small').textContent = kind === 'revise' ?
         'Your ' + n + ' note' + (n === 1 ? '' : 's') + sentAt(sent.at) + '. Claude is working through them in the terminal.' :
-        n + ' section' + (n === 1 ? '' : 's') + ' marked Ready' + sentAt(sent.at).replace('sent', 'started') + '.';
+        n + ' section' + (n === 1 ? '' : 's') + ' marked Ready' + sentAt(sent.at).replace('sent', sent.started ? 'started' : 'requested') + '.';
     });
     if (askKind && askKind !== kind) { setAsk(null); }
   }
@@ -2464,7 +2464,8 @@
     claudeAsk.querySelector('#ca-title').textContent = revise ? 'Stop revising?' : 'Stop the build?';
     claudeAsk.querySelector('.ca-body').textContent = revise ?
       'Your ' + (n === 1 ? 'note goes' : n + ' notes go') + ' back to drafts, ready to edit or send again. Anything Claude already changed stays in the book for you to review.' :
-      'The sections go back to Drafting, ready to build again. Tests that already pass and their evidence are kept.';
+      ((state.claude.sent || {}).started ? 'The sections go back to Drafting, ready to build again. Tests that already pass and their evidence are kept.' :
+        'The build has not started: its sections stay Ready, and nothing is built.');
     claudeAsk.querySelector('.ca-stop').textContent = revise ? 'Stop revising' : 'Stop the build';
     // The question sits under the row it is about.
     var row = (revise ? reviseBtn : buildBtn).parentNode;

@@ -103,10 +103,14 @@ in reach of the thumb. If the server is unreachable, Revise copies the request t
 picks the request up. While Claude is busy, the action it is doing is the menu's running row (`Revising`, or
 `Building · task 3 of 9`): what was sent and when, with **Stop** beside it; the other action says "Waiting for Claude to
 finish." **Stop** asks once, inside the menu (**Keep going** or **Stop revising** / **Stop the build**), then withdraws
-the request (`POST /api/claude/stop`). A stopped Revise puts its notes back to drafts, and anything Claude already
-changed stays in the book for review; a stopped Build sends its sections back to Drafting and keeps the evidence. A
-toast says what happened, and the book unlocks at once. The skills check `next-request.mjs --check <file>` before each
-section or task and stop there.
+the request (`POST /api/claude/stop`). A stopped Revise puts its notes back to drafts (without any reply or link Claude
+had written for them). Revise edits a working copy and lands each section whole, only while its request is pending, so
+the sections that landed stay in the book for review and the rest never reach it. A stopped Build that had started
+sends its sections back to Drafting and keeps the evidence; one that had not started leaves them Ready (the row says
+"requested at" until it starts). A toast says what happened, and the book unlocks at once. Claude stops at its next
+write: the plugin's hook (`server/stop-hook.mjs`) refuses its edits to the book and any `git commit` once Stop was
+pressed (for an hour, or until the skill acknowledges with `next-request.mjs --check <file>`), and the skills check
+before each section or task.
 
 What the user can change depends on what Claude is doing. The server enforces it with 409 answers.
 
