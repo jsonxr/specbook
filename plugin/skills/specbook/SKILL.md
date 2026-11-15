@@ -18,7 +18,7 @@ user marked Ready.
 A sticky bar (Screens: Mockups · Screenshots · Both; Recordings; Comment; Notes; **Claude**: Revise · Build), a
 table of contents, then the book: chapters, numbered sections with their stage (Drafting, Ready, Building, Built),
 requirements with their stable ids, pending changes and test evidence, every frame side by side, and the decisions
-and the changelog at the end. **Changes (n)** shows what is under review, each with **✓ Accept** (a note on it asks for something else);
+and the changelog at the end. The toolbar's filter (**Only what needs you**) shows what is under review, each with **✓ Accept** (a note on it asks for something else);
 **History (n) ▸** shows an item's accepted reviews. When you need how any part looks
 or behaves (to explain it, or to check a change to it), read `${CLAUDE_PLUGIN_ROOT}/reference/reader.md`.
 

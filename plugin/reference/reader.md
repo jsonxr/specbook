@@ -2,25 +2,26 @@
 
 The page `serve` opens, in detail. The `specbook` skill points here.
 
-- **Design bar** across the top (sticky), left to right:
-  - the book's title;
-  - **View ▾**: checkboxes for **Mockups**, **Screenshots** (both checked shows both; one always stays checked),
-    **Recordings**, **Coverage** (when there is evidence) and, in Changes mode, **Show sent notes**, plus the media
+- **Header** across the top (sticky), left to right. Every dropdown ends in the toolbar's chevron:
+  - the book's title (cut short with … when the screen is narrow);
+  - **View**: checkboxes for **Mockups**, **Screenshots** (both checked shows both; one always stays checked),
+    **Recordings**, **Coverage** (when there is evidence) and, with the filter on, **Show sent notes**, plus the media
     count;
-  - the review strip, icons with hover text naming each and its key: **Comment** (C), previous change (K), the
-    position "n / N", next change (J), **Show only changes** (F), and **Requests** (R) with a count of open notes;
   - the share pill (see "Sharing a book");
-  - **✦ Claude ▾**, a menu holding **Revise** and **Build**, each saying what Claude will do (see "The Claude group").
-    While Claude works, the button reads "✦ Claude · Building…".
+  - **✦ Claude**, a menu holding **Revise** and **Build**, each saying what Claude will do (see "The Claude group"),
+    with a badge counting the draft notes. While Claude works, the button reads "✦ Claude · Building…".
+- **The review toolbar**, at the bottom on every screen, icons with hover text naming each and its key: **Contents**,
+  **Comment** (C), previous (K), the position "n / N", next (J) and the filter, **Only what needs you** (F). On a
+  desktop it floats, centered under the book. On a phone (under 700 px) it is a full-width strip above the home
+  indicator, with every button at least 44 by 44 points (Apple's minimum touch target).
+- **Sidebar** on the left: the table of contents only, chapters and their numbered sections, sticky under the header.
+  The toolbar's **Contents** hides and shows it (shown by default; the choice is remembered in this browser), and the
+  book takes the whole width while it is hidden.
 
-  On a phone (under 700 px) the review strip is the bottom toolbar: full width, above the home indicator, with every
-  button at least 44 by 44 points (Apple's minimum touch target). The Requests pane fills the screen above it.
-- **Sidebar** on the left: the table of contents only, chapters and their numbered sections, sticky under the bar.
-
-  On a narrow screen (860 px or less) the sidebar hides. In place of the book's title, the bar names the chapter or
-  section in view, and the review strip starts with a **Contents** button. Either one opens the contents as a sheet
-  from the bottom, scrolled to the section in view. Tapping an entry jumps there and closes the sheet; the backdrop,
-  Esc or a swipe down closes it too. A wide screen shows neither.
+  On a narrow screen (860 px or less) the sidebar is never shown beside the book: **Contents** opens it as a sheet
+  from the bottom, as tall as the screen allows (a strip of the book stays in view above it), scrolled to and marking
+  the section in view. Tapping an entry jumps there and closes the sheet; the backdrop, Esc or a swipe down closes it
+  too.
 - **The book**: a cover, then chapters. A chapter has an eyebrow ("Chapter 03"), a title, a status pill and an
   intro. Each section has a § number, title, a stage pill, intro, a list of requirements, then every screen
   ("frame") it describes side by side, each captioned with a colored role tag. Recordings play under their
@@ -84,15 +85,21 @@ The page `serve` opens, in detail. The `specbook` skill points here.
   sends it.
 ## The Claude group
 
-A bar group labeled **Claude**, with **Revise** and **Build**. **Revise** also sits at the foot of the Notes panel.
+The **✦ Claude** menu in the header, with **Revise** and **Build**. Its badge counts the draft notes; a guest has no Claude menu.
 
 | Button | Enabled when |
 | --- | --- |
 | **Revise** | There is at least one draft note and Claude is idle |
 | **Build** | At least one section is Ready and Claude is idle |
 
-Pressing **Revise** posts every draft note, in pin order, as a revise request (the notes become `sent`); **Build** posts a build request naming the
-Ready sections. If the server is unreachable, Revise copies the request to the clipboard instead. The session's watch
+Neither sends at once. **Revise** opens a screen with every draft note that will go to Claude, grouped by section (the
+section's number and title, with **Go to ›** to that note in the book): under each, the requirement it is on (its id
+and text, tagged `changed` or `new` when not accepted yet), then the note, and who wrote it when it was not you. The
+screen follows the notes while it is open (another tab or a collaborator saving one). **✦ Send to Claude** posts every
+draft note, in pin order, as a revise request (the notes become `sent`); **Cancel**, the backdrop or Esc goes back to
+the book. **Build** opens the same screen listing the sections marked Ready, and **✦ Build** posts a build request
+naming them. On a desktop the screen is a dialog over the book; on a phone it is a sheet from the bottom, its buttons
+in reach of the thumb. If the server is unreachable, Revise copies the request to the clipboard instead. The session's watch
 picks the request up. While Claude is busy both buttons are disabled and the group says `Revising…` or
 `Building · task 3 of 9` (`Building…` before the first task).
 
@@ -137,12 +144,12 @@ headings and chapter headings; `book-format.md` has the keys and `review.json`. 
 `state` and decisions are not reviewed, and the review is about wording: whether the app does it yet is the
 requirement's `change` marker and the stages.
 
-The review strip's **Show only changes** (F) turns Changes mode on and off (remembered in this browser). In Changes
-mode the page shows only what is under review: chapters and sections with none are hidden, and the contents list shows
-each section's count. Previous (K) and next (J) scroll to the item under review before or after the top of the screen
-and flash it, in either mode; "n / N" says which one is at the top, of how many. **Requests** (R) opens the Requests
-pane: its **Notes** tab is the notes list (with **✦ Send n notes to Claude**, which is Revise), its **Changes** tab lists
-every item under review by section, and clicking one goes to it. A **Show sent notes** checkbox in View ▾ (Changes mode
+The toolbar's filter, **Only what needs you** (F), turns Changes mode on and off (remembered in this browser). In
+Changes mode the page shows only what still needs you: every line not accepted yet (changed or new) and every line
+with a note. Chapters and sections with none are hidden, the rest of a shown section is dimmed, and the contents list
+shows each section's count. Previous (K) and next (J) scroll to the item under review before or after the top of the screen
+and flash it, in either mode; "n / N" says which one is at the top, of how many (they count what
+needs you). The full list of notes is the screen before Revise. A **Show sent notes** checkbox in View (Changes mode
 only, remembered) draws the pins of sent and answered notes again, read-only.
 
 - **Review stack**, drawn under each item under review, oldest first: the **accepted** version (or **New**, or for a
@@ -185,7 +192,7 @@ each reader over WebRTC, encrypted end to end, and no tab needs to stay open. A 
 book names its own in `settings.shareBroker`, passes the handshake and serves the reader's interface.
 
 - **One link.** Everyone, you included, opens the same `https://specbook.jasonrowland.com/s/<room>`. The address bar
-  is always a link that can be sent as it is (a `#section` after it still works). **Share ▾** in the bar shows it with
+  is always a link that can be sent as it is (a `#section` after it still works). **Share** in the bar shows it with
   **Copy**; `/specbook:start` opens the book for you on `localhost`, and prints the link when the book is shared.
 - **The interface comes from the website, the book from your machine.** The page loads the reader published for your
   plugin's version under `/r/<version>/` on the share server; your book server sends only data: the book's JSON, its
@@ -196,7 +203,7 @@ book names its own in `settings.shareBroker`, passes the handshake and serves th
   script). A reader left open while you update the plugin says "This book was updated. Reload this page."; a share
   server that does not have your version yet says "This book needs a newer share server. Ask its owner to deploy it."
 - **The pin gives your powers on the link.** Without it a reader is a guest. The pin is the 6 digits you chose at
-  **Start**. A guest's **Share ▾** has a box for it (**Use pin**); your pin link is the link with `#pin=<pin>` after
+  **Start**. A guest's **Share** has a box for it (**Use pin**); your pin link is the link with `#pin=<pin>` after
   it, and does the same without typing (`/specbook:start` prints it when the book is shared). **Never send either to
   anyone.** Opened, the page saves the pin in that browser
   (`localStorage`, which never leaves it) and takes it out of the address at once, so the address bar is again the
@@ -219,11 +226,11 @@ book names its own in `settings.shareBroker`, passes the handshake and serves th
   typed or moved shows on everyone's screen as it happens, on the note's own sticky with its arrow, and a saved change
   reaches every screen at once.
 - **Following.** Click a face to follow that person: your window goes where theirs does (the same item, on any screen
-  size) and takes their view (Show only changes, Mockups or Screenshots, Recordings, Coverage). A chip says
+  size) and takes their view (the filter, Mockups or Screenshots, Recordings, Coverage). A chip says
   "Following Ana · scroll or type to stop". Scrolling, clicking into the book, typing, or clicking the face again
   stops it, and your own view comes back. Your face shows how many follow you, and a colored edge runs round your
   window while anyone does.
-- While shared, the pill's **Share ▾** on `localhost` holds the link (as text, with **Copy** under it), who is here and what each is doing, and **Stop sharing**. On the website a reader
+- While shared, the pill's **Share** on `localhost` holds the link (as text, with **Copy** under it), who is here and what each is doing, and **Stop sharing**. On the website a reader
   with the pin gets the same. A guest gets the link and **Use pin**.
 - Every `localhost` tab of a book has the whole **Share** menu and its own stream from the book server, so each sees
   who comes and goes at once; the menu lists each of your open tabs ("this tab", "another tab"). Each speaks for you while it is in front (a hidden tab keeps quiet), and closing one

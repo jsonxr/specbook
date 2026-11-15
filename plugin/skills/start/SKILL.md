@@ -25,13 +25,13 @@ docs README it points to) put it elsewhere. `${CLAUDE_PLUGIN_ROOT}` is this plug
 4. **The watch.** If this session has not already started it, start it with `run_in_background`:
    `node ${CLAUDE_PLUGIN_ROOT}/server/next-request.mjs --data <dir> --wait`, and handle what it prints as in
    `serve` in the `specbook` skill (a `revise` goes to `specbook:revise`, a `build` to `specbook:build`).
-5. **Tell the user** the `localhost` URL it opened, in one line, and that **Changes (n)** in the bar shows every change
-   still under review. Each has **✓ Accept** to keep it; to say "not yet", drop a note on it for the next Revise;
+5. **Tell the user** the `localhost` URL it opened, in one line, and that the filter in the bottom toolbar (**Only what needs you**, F) shows every
+   change still under review and every note. Each has **✓ Accept** to keep it; to say "not yet", drop a note on it for the next Revise;
    **History (n) ▸** on an item shows what was accepted before.
    **Sharing.** The book is not shared until the user presses **Share** in the bar, types a 6-digit pin of their own
    and presses **Start**; the menu then shows the link to give others, and **Stop sharing** ends it. Say so in one
    line. The pin gives the owner's powers (Revise, Build, Accept) on the link, typed into **Use pin** under
-   **Share ▾** on another device: it must never be sent to anyone. If the book was already served and shared,
+   **Share** on another device: it must never be sent to anyone. If the book was already served and shared,
    `serve.mjs` printed `Share link: <url>` and `Your pin link (opens with your powers; never send it to anyone):
    <pinUrl>`: the user sees only your message, never the command's output, so pass both on exactly, with that
    warning. If it said the share library could not be installed, pass that line on.

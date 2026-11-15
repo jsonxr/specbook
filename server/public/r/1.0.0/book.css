@@ -160,7 +160,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 /* design bar */
 .bar { position: sticky; top: 0; z-index: 60; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 9px max(16px, 2vw);
   background: rgba(29, 31, 34, .96); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); font-size: 14px; }
-.bar-title { font-size: 16px; }
+.bar-title { font-size: 16px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bar-group { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; }
 .bar-spacer { flex: 1; }
 .bar-label { font: 600 12px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
@@ -199,9 +199,13 @@ body.locked-notes .sticky, body.locked-notes .pin { cursor: default; }
 .sb-secs a:hover { color: var(--ink); }
 .chapter, .bk-sec, .reqs li { scroll-margin-top: 70px; }
 .sb-chl.sb-here, .sb-secs a.sb-here { color: var(--ink); }
-/* "Where am I" and the contents sheet: a narrow screen has no sidebar, so the bar names the section in view, and it
-   (or the strip's Contents button) opens the contents as a sheet from the bottom. Wide screens never show either. */
-.bar-where, .bar .toc-tool, .toc-backdrop { display: none; }
+/* The contents sheet: a narrow screen has no sidebar, so the toolbar's Contents button opens the contents as a sheet
+   from the bottom, marking the section in view. A wide screen's Contents button hides and shows the sidebar instead. */
+.toc-backdrop { display: none; }
+@media (min-width: 861px) {
+  body.toc-hidden .layout { grid-template-columns: minmax(0, 1fr); }
+  body.toc-hidden .side { display: none; }
+}
 /* A shared book's status chip (share.js) speaks only when something is wrong: once the book is drawn here, the
    connection is live, so a plain "Live · name" chip hides. */
 .share-chip { position: fixed; left: 12px; bottom: 12px; z-index: 99; max-width: min(420px, calc(100vw - 24px)); padding: 6px 12px;
@@ -219,20 +223,12 @@ body .share-chip:not(.bad) { display: none; }
 .share-join input { font: inherit; font-size: 16px; padding: 9px 11px; border: 1px solid #c9c9cf; border-radius: 8px; }
 .share-join button { font: 600 15px/1 system-ui, sans-serif; padding: 11px; border: 0; border-radius: 8px; background: #1f6f43; color: #fff; }
 @media (max-width: 860px) {
-  .bar-title { display: none; }
   .bar > * { flex-shrink: 0; }
+  .bar .bar-title { flex: 1 1 auto; }
   .bar .bar-spacer { display: none; }
   #view-btn { white-space: nowrap; }
-  .bar-where { display: flex; align-items: center; justify-content: flex-start; gap: 4px; min-width: 0; flex: 1 1 auto; text-align: left; background: none; border: 0; padding: 6px 4px;
-    color: var(--ink); font: 600 15px var(--sans); cursor: pointer; border-radius: 7px; }
-  .bar .bar-where { flex-shrink: 1; }
-  .bar-where:hover { background: #2c2f34; }
-  #where-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .bar-where-caret { color: var(--muted); font-size: 12px; }
-  .bar .tool.toc-tool { display: grid; }
-  .bar .tool-sep.toc-tool { display: block; }
   body.toc-open { overflow: hidden; }
-  body.toc-open .side { display: block; position: fixed; left: 0; right: 0; top: auto; bottom: 0; height: auto; max-height: 75vh; z-index: 91;
+  body.toc-open .side { display: block; position: fixed; left: 0; right: 0; top: auto; bottom: 0; height: auto; max-height: calc(100dvh - 60px); z-index: 91;
     border-right: 0; border-top: 1px solid var(--line); border-radius: 14px 14px 0 0; padding: 26px 16px calc(24px + env(safe-area-inset-bottom));
     box-shadow: 0 -14px 40px rgba(0, 0, 0, .6); overscroll-behavior: contain; font-size: 15px; }
   body.toc-open .side::before { content: ''; position: absolute; top: 9px; left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: var(--line); }
@@ -294,30 +290,11 @@ body.commenting main .pin, body.commenting main .pin * { cursor: pointer !import
 .np-x { border: 0; background: transparent; color: var(--muted); font: 600 22px/1 var(--sans); width: 30px; height: 30px; border-radius: 6px; cursor: pointer; }
 .np-x:hover { background: var(--surface); color: var(--ink); }
 .np-empty { color: var(--muted); }
-.np-empty[hidden], .np-send[hidden] { display: none; }
+.np-empty[hidden] { display: none; }
 .np-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .np-note { min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px 6px; }
-.np-go { display: flex; gap: 8px; align-items: flex-start; width: 100%; text-align: left; border: 0; background: transparent; color: var(--ink); padding: 2px 0; cursor: pointer; font: 600 13px var(--sans); }
-.np-go:hover .np-where { color: var(--note); }
-.np-num { flex: none; width: 22px; height: 22px; border-radius: 50% 50% 50% 0; background: var(--note); color: #222; font: 700 11px/22px var(--mono); text-align: center; }
-.np-where { padding-top: 2px; overflow-wrap: anywhere; }
-.np-about { margin: 4px 0 6px 30px; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .np-note textarea { display: block; width: 100%; min-height: 40px; resize: none; overflow: hidden; font: 14px/1.4 var(--sans); color: var(--ink); background: #2a2d32; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
 .np-row { display: flex; justify-content: flex-end; padding-top: 4px; }
-.np-del { color: var(--muted); }
-.np-del:hover { color: #ff7b72; }
-.np-send { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 14px; }
-.np-send h3 { margin: 0 0 10px; font-size: 14px; }
-.np-items { margin: 0; padding: 0 0 0 22px; display: grid; gap: 10px; }
-.np-items li::marker { font: 600 12px var(--mono); color: var(--muted); }
-.np-items dl { margin: 0; display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 2px 8px; }
-.np-items dt { font: 600 11px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .04em; padding-top: 2px; }
-.np-items dd { margin: 0; overflow-wrap: anywhere; }
-.np-i-note { white-space: pre-wrap; }
-.np-json { margin: 12px 0; }
-.np-json summary { cursor: pointer; color: var(--accent); font: 600 13px var(--sans); }
-.np-json pre { margin: 8px 0 0; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; font: 12px/1.45 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
-.np-send .make-btn { width: 100%; }
 .print-notes { display: none; }
 @media print {
   .bar, .side, .notes-panel, .note-layer { display: none !important; } .layout { display: block; }
@@ -378,8 +355,6 @@ span.ev-chip { cursor: default; }
 @media print { .ev-panel, .ev-lightbox { display: none; } body.coverage .reqs li.unproven > :not(.pin) { opacity: 1; } }
 body.coverage .reqs li.unproven:has(.ev-chip.failed) > :not(.pin) { opacity: 1; }
 .bar-group[hidden] { display: none; }
-.np-i-el code { font: 12px var(--mono); color: var(--accent); overflow-wrap: anywhere; }
-.np-i-el span { color: var(--muted); }
 
 /* the build banner: under the bar while a build runs, then the way into the review of its calls */
 .build-banner { display: grid; gap: 2px; padding: 8px max(16px, 2vw); background: #221d2e; border-bottom: 1px solid var(--line); font-size: 14px; }
@@ -478,7 +453,7 @@ body.coverage .reqs li.unproven:has(.ev-chip.failed) > :not(.pin) { opacity: 1; 
 
 /* A shared book (app/share.js): a guest reads and keeps their own notes; Claude's controls, Accept, stages and edits are
    the owner's alone, so they are not drawn. The server refuses them for guests anyway. */
-body.guest .bar-group.claude, body.guest #np-send, body.guest .rv-acts, body.guest .stage-btn, body.guest .edit-ctl,
+body.guest .bar-group.claude, body.guest .rv-acts, body.guest .stage-btn, body.guest .edit-ctl,
 body.guest .add-req, body.guest .req-form, body.guest .build-banner button, body.guest #review-panel { display: none !important; }
 
 /* Live sharing: someone else's note as they write it (read-only, over or instead of the saved sticky). */
@@ -526,7 +501,16 @@ body.followed::after { content: ""; position: fixed; inset: 0; border: 3px solid
 .bar-menu[hidden] { display: none; }
 .bar-menu-head { margin: 0; font: 600 12px var(--sans); color: var(--muted); }
 .bar-menu .bar-hint { margin: 4px 0 0; font-size: 12px; }
-.tools { display: flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 3px; }
+/* The review toolbar sits at the bottom on every screen: on a wide one it floats, centered under the book. */
+.tools { position: fixed; z-index: 70; display: flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 3px; }
+@media (min-width: 701px) {
+  .tools { bottom: 16px; left: 50%; transform: translateX(-50%); border-radius: 12px; padding: 4px; box-shadow: 0 10px 30px rgba(0, 0, 0, .5); }
+  .bar-msg, .share-chip { bottom: 80px; }
+}
+@media (min-width: 861px) {
+  .tools { left: calc(50% + 135px); }
+  body.toc-hidden .tools { left: 50%; }
+}
 .tool { position: relative; width: 34px; height: 32px; display: grid; place-items: center; border: 0; background: transparent; color: var(--ink); border-radius: 7px; cursor: pointer; padding: 0; }
 .tool:hover { background: #2c2f34; }
 .tool:disabled { opacity: .4; cursor: default; background: transparent; }
@@ -539,8 +523,15 @@ body.followed::after { content: ""; position: fixed; inset: 0; border: 3px solid
 .tool-badge { position: absolute; top: -5px; right: -6px; font: 700 10px var(--sans); background: var(--note); color: #222; border-radius: 8px; padding: 0 5px; border: 2px solid var(--surface); }
 .tool-badge[hidden] { display: none; }
 #share-slot { display: flex; align-items: center; }
-.claude-btn { font: 700 14px var(--sans); color: var(--claude, #d97757); background: #2a1c16; border: 1px solid #5c3a2c; border-radius: 9px; padding: 6px 12px; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 7px; }
+/* Every dropdown in the header ends in the toolbar's chevron: muted in View and Share, Claude's color in Claude. */
+.chev { display: inline-flex; flex: none; color: var(--muted); }
+.chev svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#view-btn, .share-start, .share-more { display: inline-flex; align-items: center; gap: 4px; }
+.claude-btn .chev { color: inherit; }
+.claude-btn .chev svg { fill: none; }
+.claude-btn { position: relative; font: 700 14px var(--sans); color: var(--claude, #d97757); background: #2a1c16; border: 1px solid #5c3a2c; border-radius: 9px; padding: 6px 12px; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 7px; }
 .claude-btn svg { fill: currentColor; }
+.claude-count { top: -7px; right: -7px; font-size: 11px; line-height: 1.5; border-color: var(--side); }
 .claude-btn.busy svg { animation: claude-pulse 1.2s infinite; }
 .claude-busy { color: #f3c1ac; font-weight: 600; }
 @keyframes claude-pulse { 50% { opacity: .3; } }
@@ -552,20 +543,47 @@ body.followed::after { content: ""; position: fixed; inset: 0; border: 3px solid
 .claude-act:disabled { opacity: .5; cursor: default; }
 .claude-pop #claude-status { margin: 0; padding: 0 8px 4px; }
 .claude-pop #claude-status:empty { display: none; }
-.make-btn.claude-send { background: #3a2318; color: #fff; border: 1px solid #6b3f2c; }
-.np-tabs { display: flex; gap: 4px; margin: -4px 0 12px; }
-.np-tabs button { font: 600 13px var(--sans); color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 3px 9px; cursor: pointer; }
-.np-tabs button[aria-selected="true"] { color: var(--ink); background: var(--surface); border-color: var(--line); }
-.notes-panel.tab-changes #np-list, .notes-panel.tab-changes #np-empty, .notes-panel.tab-changes #np-send { display: none; }
-.np-changes { list-style: none; padding: 0; }
-.np-chg-sec { color: var(--muted); font: 600 12px var(--sans); margin: 10px 0 4px; }
-.np-chg button { display: block; width: 100%; text-align: left; font: 13px/1.4 var(--sans); color: var(--ink); background: var(--surface); border: 0; border-left: 3px solid var(--proposed); border-radius: 0 6px 6px 0; padding: 6px 8px; margin-bottom: 6px; cursor: pointer; }
-.np-chg button:hover { background: #2a2c31; }
 body.guest #claude-menu { display: none; }
 
-/* Phone: the review strip sits at the bottom; the Requests pane fills the screen above it. */
+/* The screen before Claude acts (book.js openConfirm): a dialog over the book on a wide screen, a sheet from the bottom
+   on a phone. Its list scrolls inside; the header and the buttons stay put. */
+.cc-backdrop { position: fixed; inset: 0; z-index: 95; background: rgba(0, 0, 0, .55); }
+.cc { position: fixed; z-index: 96; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 32px)); max-height: min(80vh, 640px);
+  display: flex; flex-direction: column; background: var(--side); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 24px 60px rgba(0, 0, 0, .6); }
+.cc[hidden], .cc-backdrop[hidden] { display: none; }
+.cc-head { padding: 16px 18px 10px; border-bottom: 1px solid var(--line); }
+.cc-head h2 { margin: 0; font-size: 17px; }
+.cc-sub { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.cc-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 6px 18px 12px; }
+.cc-group { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.cc-group:last-child { border-bottom: 0; }
+.cc-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.cc-sec { margin: 0; font-size: 14px; min-width: 0; overflow-wrap: anywhere; }
+.cc-num { font: 500 12px var(--mono); color: var(--muted); }
+.cc-go { flex: none; }
+.cc-item { margin: 8px 0 0; }
+.cc-req { margin: 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.cc-id { font: 600 12px var(--mono); color: var(--accent); margin-right: 6px; }
+.cc-tag { font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .04em; border: 1px solid currentColor; border-radius: 8px; padding: 0 6px; margin-left: 6px; color: var(--accent); }
+.cc-tag.cc-new { color: var(--built); }
+.cc-note { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0 0; font-size: 14px; overflow-wrap: anywhere; }
+.cc-n { flex: none; width: 20px; height: 20px; border-radius: 50% 50% 50% 0; background: var(--note); color: #222; font: 700 11px/20px var(--mono); text-align: center; }
+.cc-note-text { white-space: pre-wrap; min-width: 0; }
+.cc-by { flex: none; color: var(--muted); font-size: 13px; }
+.cc-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--line); }
+.cc-send { font: 700 14px var(--sans); color: #fff; background: #3a2318; border: 1px solid #6b3f2c; border-radius: 8px; padding: 7px 14px; cursor: pointer; }
+.cc-send:disabled { opacity: .45; cursor: default; }
+body.confirm-open { overflow: hidden; }
 @media (max-width: 700px) {
-  .bar { gap: 8px; padding: 8px 10px; backdrop-filter: none; background: var(--side); } /* a filter would pin .tools to the bar */
+  .cc { left: 0; right: 0; top: 56px; bottom: 0; transform: none; width: auto; max-height: none; border-radius: 14px 14px 0 0; border-width: 1px 0 0; }
+  .cc-foot { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .cc-foot button { flex: 1; min-height: 44px; }
+}
+@media print { .cc, .cc-backdrop { display: none !important; } }
+
+/* Phone: the review strip is a full-width bar at the bottom. */
+@media (max-width: 700px) {
+  .bar { gap: 8px; padding: 8px 10px; backdrop-filter: none; background: var(--side); } 
   .bar .view-wrap #view-btn { padding: 6px 8px; }
   /* The review strip is the phone's bottom toolbar: full width, every button a 44 by 44 point target (Apple's
      minimum), spread evenly, clear of the home indicator. */
@@ -582,7 +600,7 @@ body.guest #claude-menu { display: none; }
   /* Every menu in the bar hangs from the bar (sticky, so positioned), full width less a margin, never off the screen. */
   .share-pill, .bar .menu-wrap { position: static; }
   .share-menu, .bar .bar-menu { top: 100%; left: 8px; right: 8px; width: auto; min-width: 0; max-width: none; max-height: calc(100dvh - 140px); overflow-y: auto; }
-  .claude-btn span:not(.claude-busy) { display: none; }
+  .claude-btn span:not(.claude-busy):not(.chev):not(.claude-count) { display: none; }
   main { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
   /* A shared book's status chip sits above the toolbar, not under it. */
   body .share-chip { bottom: calc(63px + env(safe-area-inset-bottom)); }

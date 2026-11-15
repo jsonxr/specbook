@@ -270,6 +270,29 @@ try {
     }
   });
 
+  await check('a guest has the bottom toolbar and no Claude', async () => {
+    const seen = await guest.evaluate(() => {
+      const t = document.getElementById('review-tools');
+      const r = t ? t.getBoundingClientRect() : null;
+      const shows = id => { const e = document.getElementById(id); return !!(e && e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden'); };
+      return {
+        tools: !!r && shows('review-tools') && innerHeight - r.bottom >= 0 && innerHeight - r.bottom <= 40,
+        buttons: ['mode', 'prev-chg', 'next-chg', 'changes-btn', 'toc-btn'].filter(id => !shows(id)),
+        claude: ['claude-btn', 'claude-count', 'claude-confirm'].filter(shows),
+      };
+    });
+    if (!seen.tools || seen.buttons.length || seen.claude.length) {
+      throw new Error(`the guest's toolbar or Claude is wrong: ${JSON.stringify(seen)}`);
+    }
+    // The toolbar works for a guest: the filter toggles.
+    await guest.locator('#changes-btn').click();
+    const on = await guest.evaluate(() => document.body.classList.contains('diff-on'));
+    await guest.locator('#changes-btn').click();
+    if (!on) {
+      throw new Error('the filter does nothing for a guest');
+    }
+  });
+
   await check('a mockup\'s script and onerror never run on the link', async () => {
     // The hostile mockup is drawn (cleaned) on the link, and nothing in it ran.
     await guest.waitForFunction(() => [...document.querySelectorAll('[data-mockup]')].some(h => h.dataset.mockup.endsWith('pwn.html') && h.shadowRoot?.querySelector('.phone')), null, { timeout: 8000 });
