@@ -1305,14 +1305,21 @@
   function authorOf(n) {
     if (!n) { return ''; }
     var v = viewer();
-    if (v.guest) { return n.mine ? '' : (n.author || 'Host'); }
+    if (v.guest) { return n.mine ? '' : (n.author || (state.owner && state.owner.name) || 'Owner'); }
     return n.author || '';
+  }
+  // On the reader's own note, who else changed it last (the owner may edit a guest's note): their name, or ''.
+  function changedByOther(n) {
+    if (!n || !n.lastBy) { return ''; }
+    var mine = viewer().guest ? !!n.mine : !n.authorKey;
+    var myName = viewer().guest ? viewer().name : (state.owner && state.owner.name);
+    return mine && n.lastBy !== myName ? n.lastBy : '';
   }
   function saveNotes() {
     if (notesLocked()) { return; }
     notesDirty = true;
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(flushNotes, 300);
+    saveTimer = setTimeout(flushNotes, 150);
   }
   // Sends any change still waiting; resolves once every save so far has been answered, with true when the last one
   // was saved.
@@ -1363,6 +1370,7 @@
     if (n.author) { o.author = n.author; }
     if (n.authorKey) { o.authorKey = n.authorKey; }
     if (n.mine) { o.mine = true; }
+    if (n.lastBy) { o.lastBy = n.lastBy; }
     return o;
   }
   function draftsOf(review) {
@@ -1408,11 +1416,18 @@
     }, 0);
   }
   // Resolves true only when the server saved the notes; false on a conflict or when the server is unreachable.
+  // Only the notes changed here since the server last had them are sent (null deletes one), so a save never undoes
+  // what someone else saved meanwhile (live sharing).
   function putNotes(keepalive) {
     var sent = savedNotes();
-    var wire = {};
-    Object.keys(sent).forEach(function (id) { wire[id] = toServer(sent[id]); });
-    var body = JSON.stringify({ rev: state.notesRev, notes: wire });
+    var changes = {};
+    var any = false;
+    Object.keys(sent).forEach(function (id) {
+      if (JSON.stringify(sent[id]) !== synced[id]) { changes[id] = toServer(sent[id]); any = true; }
+    });
+    Object.keys(synced).forEach(function (id) { if (!hasOwn(sent, id)) { changes[id] = null; any = true; } });
+    if (!any) { return Promise.resolve(true); }
+    var body = JSON.stringify({ changes: changes });
     return fetch('/api/notes', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: body, keepalive: !!keepalive })
       .then(function (r) { return r.json().then(function (j) { return { status: r.status, j: j }; }); })
       .then(function (res) {
@@ -1728,9 +1743,10 @@
     var ta = box.querySelector('textarea');
     var del = box.querySelector('.st-del');
     var by = authorOf(state.notes[id]);
-    if (by) {
+    var changedBy = changedByOther(state.notes[id]);
+    if (by || changedBy) {
       var tag = el('span', { class: 'st-by' });
-      tag.textContent = by;
+      tag.textContent = changedBy ? (by ? by + ' · ' : '') + changedBy + ' changed this note' : by;
       box.appendChild(tag);
     }
     if (viewer().guest && noteLocked(id) && !notesLocked()) { box.classList.add('not-mine'); }
@@ -1749,6 +1765,7 @@
       fitSticky(id);
       if (n && ta.value.trim()) { n.text = ta.value; saveNotes(); refreshSoon(); }
       drawStickies();
+      noteInput(id, ta.value);
     });
     ta.addEventListener('keydown', function (e) {
       if ((e.key === 'Enter' && !e.shiftKey && !e.isComposing) || e.key === 'Escape') {
@@ -1783,6 +1800,8 @@
         box.style.left = (ox + ev.clientX - sx) + 'px';
         box.style.top = (oy + ev.clientY - sy) + 'px';
         drawArrow(id);
+        var dn = state.notes[id], dp = dn ? pointOf(dn) : null;
+        if (dp) { noteInput(id, dn.text, { dx: (parseFloat(box.style.left) || 0) - dp.x, dy: (parseFloat(box.style.top) || 0) - dp.y }); }
       }
       function up() {
         box.removeEventListener('pointermove', move);
@@ -1868,7 +1887,7 @@
       var s = stickies[id] || buildSticky(id);
       if (document.activeElement !== s.ta && s.ta.value !== n.text) { s.ta.value = n.text; }
       fitSticky(id);
-      var hide = !p;
+      var hide = !p || hasOwn(ghosts, id);
       s.box.hidden = hide;
       if (hide) { s.line.setAttribute('d', ''); return; }
       s.box.setAttribute('aria-label', 'Note ' + (k + 1) + ' on ' + labelFor(n));
@@ -1889,6 +1908,7 @@
       drawArrow(id);
     });
     if (changed) { saveNotes(); }
+    drawGhosts();
   }
   // From the nearest point of the sticky's edge to the pin, which is turned to make the arrowhead: its head sits on
   // the line and its point is on the spot the note is about.
@@ -1945,6 +1965,7 @@
     ta.addEventListener('input', function () {
       grow(ta);
       placePop();
+      noteInput(id, ta.value);
     });
     ta.addEventListener('keydown', function (e) {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -2347,7 +2368,24 @@
       });
   }
   // guest.js asks for a poll at once when the host says the book or its notes changed.
-  window.SpecBook = { poll: pollClaude };
+  window.SpecBook = {
+    poll: pollClaude,
+    // Notes changed on disk (someone saved): loaded now, unless a note is being written here, which waits.
+    reloadNotes: function () {
+      if (writingNote()) { refetchWaiting = true; return; }
+      if (!notesDirty && !saveTimer) { reloadNotes(''); }
+    },
+    me: function () { var v = viewer(); return { guest: !!v.guest, name: v.name || (state.owner && state.owner.name) || 'Owner' }; },
+    noteOf: function (id) { return hasOwn(state.notes, id) ? state.notes[id] : null; },
+    onNoteInput: function (fn) { inputWatchers.push(fn); },
+    showDraft: showDraft,
+    clearDraft: clearDraft,
+    anchor: function () { return liveAnchor(); },
+    scrollTo: function (a, smooth) { scrollToAnchor(a, smooth); },
+    view: function () { return currentView(); },
+    setView: function (v, transient) { applyView(v, transient); },
+    onUserScroll: function (fn) { scrollWatchers.push(fn); },
+  };
   function postJson(path, body) {
     return fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) })
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); });
@@ -2671,6 +2709,9 @@
       window.scrollTo(0, y);
     });
   });
+  function syncViewControls() {
+    document.querySelectorAll('.seg3 button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.view === state.view)); });
+  }
   var cover = document.getElementById('show-coverage');
   cover.addEventListener('change', function () { document.body.classList.toggle('coverage', cover.checked); store('spec-book-coverage', cover.checked ? '1' : '0'); });
   var vid = document.getElementById('show-videos');
@@ -2718,6 +2759,7 @@
         state.changelog = data.changelog || [];
         state.noteKey = 'spec-book-notes:' + (data.book.title || 'book');
         state.viewer = data.viewer || { guest: false };
+        state.owner = data.owner || { name: 'Owner' };
         document.body.classList.toggle('guest', !!state.viewer.guest);
         if (merge) { mergeNotes(review); } else { setNotes(review); }
         // The book's copy of Claude's state has no calls: the last poll's stand until the next one.
@@ -2861,6 +2903,115 @@
     void at.offsetWidth;
     at.classList.add('chg-flash');
   }
+  // Live sharing (live.js) ----------------------------------------------------------------------------
+  // Where the reader is: the item at the top of the screen, and how far down it the bar's edge falls (0 to 1).
+  function liveAnchor() {
+    var a = readingAnchor();
+    if (!a) { return null; }
+    var e = placeEl(a.key);
+    if (!e) { return null; }
+    var r = e.getBoundingClientRect();
+    return { key: a.key, ry: Math.min(1, Math.max(0, (barBottom() - r.top) / Math.max(1, r.height))) };
+  }
+  function placeEl(key) {
+    var all = main.querySelectorAll(PLACES);
+    for (var i = 0; i < all.length; i++) { if (placeKey(all[i]) === key && all[i].getClientRects().length) { return all[i]; } }
+    return null;
+  }
+  // Puts that point of that item at the bar's edge: the same place in the book on any screen size.
+  function scrollToAnchor(a, smooth) {
+    var e = a && placeEl(a.key);
+    if (!e) { return; }
+    var r = e.getBoundingClientRect();
+    var top = r.top + window.scrollY + (Number(a.ry) || 0) * r.height - barBottom();
+    window.scrollTo({ top: Math.max(0, top), behavior: smooth ? 'smooth' : 'instant' });
+  }
+  function currentView() {
+    return { view: state.view, diff: !!state.diff, videos: !!vid.checked, coverage: !!cover.checked };
+  }
+  // Takes another reader's view (following them); `transient` keeps it out of this browser's saved settings.
+  function applyView(v, transient) {
+    if (!v) { return; }
+    if (typeof v.videos === 'boolean' && v.videos !== vid.checked) { vid.checked = v.videos; document.body.classList.toggle('hide-videos', !vid.checked); if (!transient) { store('spec-book-videos', vid.checked ? '1' : '0'); } }
+    if (typeof v.coverage === 'boolean' && v.coverage !== cover.checked) { cover.checked = v.coverage; document.body.classList.toggle('coverage', cover.checked); if (!transient) { store('spec-book-coverage', cover.checked ? '1' : '0'); } }
+    var redraw = false;
+    if ((v.view === 'mockup' || v.view === 'shot' || v.view === 'both') && v.view !== state.view) {
+      state.view = v.view;
+      if (!transient) { store('spec-book-view', state.view); }
+      syncViewControls();
+      redraw = true;
+    }
+    if (typeof v.diff === 'boolean' && v.diff !== state.diff) {
+      state.diff = v.diff;
+      if (!transient) { store('spec-book-diff', v.diff ? '1' : '0'); }
+      updateChangesBar();
+      drawSentPins();
+      redraw = true;
+    }
+    if (redraw) { render(); }
+  }
+  // Someone typing or moving a note: live.js tells the others (`move` carries the sticky's new offset).
+  var inputWatchers = [];
+  function noteInput(id, text, move) {
+    var n = state.notes[id];
+    if (!n) { return; }
+    var d = { note: id, item: n.item, target: n.target, rx: n.rx, ry: n.ry, text: String(text || '') };
+    if (move) { d.dx = move.dx; d.dy = move.dy; } else if (isNum(n.dx)) { d.dx = n.dx; d.dy = n.dy; }
+    inputWatchers.forEach(function (fn) { try { fn(id, d); } catch (e) { /* live.js's problem */ } });
+  }
+  // Someone else's note as they write it: drawn over (or instead of) the saved one, read-only, until it is saved or
+  // they stop.
+  var ghosts = {}; // note id -> { d, by, box }
+  function showDraft(id, d, by) {
+    if (!d || typeof id !== 'string') { return; }
+    var g = ghosts[id];
+    if (!g) {
+      var box = el('div', { class: 'sticky ghost', role: 'status' });
+      box.innerHTML = '<div class="gh-text"></div><span class="st-by gh-by"></span><span class="gh-pin" aria-hidden="true"></span>';
+      layer.appendChild(box);
+      g = ghosts[id] = { box: box };
+    }
+    g.d = d;
+    g.by = by || '';
+    g.box.querySelector('.gh-text').textContent = d.text || '\u200b';
+    g.box.querySelector('.gh-by').textContent = (by || 'Someone') + ' is typing\u2026';
+    drawStickies();
+  }
+  function clearDraft(id) {
+    var g = ghosts[id];
+    if (!g) { return; }
+    g.box.remove();
+    delete ghosts[id];
+    drawStickies();
+  }
+  function drawGhosts() {
+    var vw = document.documentElement.clientWidth;
+    Object.keys(ghosts).forEach(function (id) {
+      var g = ghosts[id], d = g.d;
+      var p = pointOf({ target: d.target, item: d.item, rx: d.rx, ry: d.ry });
+      g.box.hidden = !p;
+      if (!p) { return; }
+      var dx = isNum(d.dx) ? d.dx : 24, dy = isNum(d.dy) ? d.dy : 24;
+      var w = g.box.offsetWidth;
+      g.box.style.left = Math.max(8, Math.min(p.x + dx, vw - w - 8)) + 'px';
+      g.box.style.top = Math.max(0, p.y + dy) + 'px';
+      var pin = g.box.querySelector('.gh-pin');
+      pin.style.left = (p.x - (parseFloat(g.box.style.left) || 0) - 6) + 'px';
+      pin.style.top = (p.y - (parseFloat(g.box.style.top) || 0) - 6) + 'px';
+    });
+  }
+  // The reader moving through the book themselves (not a scroll this page made): following someone stops.
+  var scrollWatchers = [];
+  function userMoved() { scrollWatchers.forEach(function (fn) { try { fn(); } catch (e) { /* live.js's problem */ } }); }
+  window.addEventListener('wheel', userMoved, { passive: true });
+  window.addEventListener('touchmove', userMoved, { passive: true });
+  document.addEventListener('keydown', function (e) {
+    var t = e.target;
+    if (t && t.closest && t.closest('input, textarea, select, [contenteditable]')) { return; }
+    if (/^(PageUp|PageDown|Home|End|ArrowUp|ArrowDown| )$/.test(e.key)) { userMoved(); }
+  });
+  document.addEventListener('pointerdown', function (e) { if (inBook(e) || (e.target && e.target.closest && e.target.closest('.side'))) { userMoved(); } }, true);
+
   changesBtn.addEventListener('click', function () { setDiff(!state.diff); });
   nextBtn.addEventListener('click', function () { nextChange(false); });
   if (store('spec-book-diff') === '1') { state.diff = true; }

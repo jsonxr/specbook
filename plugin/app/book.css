@@ -457,3 +457,9 @@ body.guest .add-req, body.guest .req-form, body.guest .build-banner button, body
 .share-host .share-dot { width: 8px; height: 8px; border-radius: 50%; background: #2fa36b; box-shadow: 0 0 0 3px rgba(47,163,107,.25); }
 .share-host .share-count { font: 600 12px/1 var(--sans, 'IBM Plex Sans', sans-serif); }
 @media (hover: none) { .st-del { opacity: 1; } }
+
+/* Live sharing: someone else's note as they write it (read-only, over or instead of the saved sticky). */
+.sticky.ghost { pointer-events: none; outline: 2px dashed rgba(0, 0, 0, .35); outline-offset: -4px; }
+.sticky.ghost .gh-text { white-space: pre-wrap; word-break: break-word; min-height: 1.4em; }
+.sticky.ghost .gh-by { font-style: italic; }
+.sticky.ghost .gh-pin { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: var(--note); box-shadow: 0 0 0 2px #222; }

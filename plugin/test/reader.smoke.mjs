@@ -26,6 +26,13 @@ const URL = `http://localhost:${PORT}/`;
 
 const data = mkdtempSync(join(tmpdir(), 'specbook-smoke-'));
 cpSync(join(PLUGIN, 'starter'), data, { recursive: true });
+// The book does not share itself here: no tab may reach a real share server from a test.
+{
+  const bookFile = join(data, 'book.json');
+  const b = JSON.parse(readFileSync(bookFile, 'utf8'));
+  b.settings = { ...(b.settings ?? {}), share: false };
+  writeFileSync(bookFile, JSON.stringify(b, null, 2));
+}
 
 const server = spawn(process.execPath, [join(PLUGIN, 'server', 'serve.mjs'), '--data', data, '--port', String(PORT)], { stdio: 'ignore' });
 
