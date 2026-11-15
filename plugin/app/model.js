@@ -533,6 +533,56 @@
     return out;
   }
 
+  // Reviews a section's Accept gate covers (gateKeys) that the section cannot draw itself: everything but the states it
+  // shows directly (the screen headings of those states, states drawn through sameAs, component states placed in its
+  // pictures). `rv` is reviews(); `keys` are those under review there, in gate order. `uncounted` is how many of them
+  // rv.bySection leaves out: it counts the states a section shows and the headings of their screens, nothing else.
+  function offPageKeys(book, mockups, fullId, rv) {
+    var shown = {};
+    var shownScreens = {};
+    eachSection(book, function (ch, s, id) {
+      if (id !== fullId) { return; }
+      (s.shows || []).forEach(function (sh) {
+        if (sh && typeof sh.state === 'string') { shown[sh.state] = true; shownScreens[sh.state.split('.')[0]] = true; }
+      });
+    });
+    var byKey = (rv && rv.byKey) || {};
+    var keys = gateKeys(book, mockups, fullId).filter(function (k) { return !has(shown, k) && has(byKey, k); });
+    var uncounted = keys.filter(function (k) { return k.indexOf('.') >= 0 || !has(shownScreens, k); }).length;
+    return { keys: keys, uncounted: uncounted };
+  }
+
+  // Screen and component ids in book order of first appearance (what each section shows, then what those pictures
+  // place, then what its requirements name), then any the book never reaches, in catalog order.
+  function screenOrder(book, mockups) {
+    var ix = screenIndex(book);
+    var out = [];
+    var add = function (id) { if (has(ix.screens, id)) { pushOnce(out, id); } };
+    eachSection(book, function (ch, s, fullId) {
+      gateKeys(book, mockups, fullId).forEach(function (k) { add(k.split('.')[0]); });
+      (s.requirements || []).forEach(function (r) {
+        (r && Array.isArray(r.screens) ? r.screens : []).forEach(function (e) { if (e && typeof e.screen === 'string') { add(e.screen); } });
+      });
+    });
+    screensOf(book).forEach(function (sc) { if (sc && sc.id) { add(sc.id); } });
+    return out;
+  }
+
+  // A screen's states laid out by role: "anyone" first, then the book's roles in order, then roles the book does not
+  // define, then states with no role; each group keeps the states' own order.
+  function byRole(book, states) {
+    var roles = ((book && book.roles) || []).map(function (r) { return r.id; });
+    var rank = function (st) {
+      var r = st && st.when && st.when.role;
+      if (!r) { return roles.length + 1; }
+      if (r === 'anyone') { return -1; }
+      return roles.indexOf(r) < 0 ? roles.length : roles.indexOf(r);
+    };
+    return (states || []).map(function (st, i) { return { st: st, i: i }; })
+      .sort(function (a, b) { return rank(a.st) - rank(b.st) || a.i - b.i; })
+      .map(function (x) { return x.st; });
+  }
+
   // Book roles that no state of a screen covers. Components, and screens with an "anyone" state, miss none.
   function missingRoles(book, screenId) {
     var screen = screenIndex(book).screens[screenId];
@@ -660,6 +710,9 @@
     gateKeys: gateKeys,
     requirementsFor: requirementsFor,
     missingRoles: missingRoles,
+    offPageKeys: offPageKeys,
+    screenOrder: screenOrder,
+    byRole: byRole,
     screenProblem: screenProblem,
     rekeySkipped: rekeySkipped,
     isProven: isProven,

@@ -189,8 +189,7 @@
         .then(function (res) {
           if (!res.ok) {
             if (res.j.error === 'unreviewed') {
-              var s0 = findSection(fullId);
-              var off = s0 ? offPageReviews(s0, fullId).keys : [];
+              var off = window.SpecModel.offPageKeys(state.book, state.mockups, fullId, state.reviews).keys;
               stageMessage(btn, READY_GATE, off.length ? elsewhereLinks(off) : null);
             } else {
               msgEl.textContent = res.j.error === 'locked' ? 'Claude is busy; the book is locked until it is done.' :
@@ -1048,36 +1047,6 @@
     });
     return span;
   }
-  // Reviews a section's Accept gate covers (SpecModel.gateKeys) that its chapter view has no stack for: the screen
-  // headings of the states it shows, states drawn through sameAs, and component states placed in its pictures.
-  // `uncounted` is how many of them reviews().bySection leaves out: it counts the states a section shows and their
-  // screens' headings, not what those pictures place.
-  function offPageReviews(s, fullId) {
-    var shown = {}, shownScreens = {};
-    (s.shows || []).forEach(function (sh) {
-      if (sh && typeof sh.state === 'string') { shown[sh.state] = true; shownScreens[sh.state.split('.')[0]] = true; }
-    });
-    var keys = window.SpecModel.gateKeys(state.book, state.mockups, fullId).filter(function (k) { return !hasOwn(shown, k) && !!reviewOf(k); });
-    var uncounted = keys.filter(function (k) { return k.indexOf('.') >= 0 || !hasOwn(shownScreens, k); }).length;
-    return { keys: keys, uncounted: uncounted };
-  }
-  // Screen ids in book order of first appearance (what the sections show, then what those pictures place, then what
-  // their requirements name), then any the book never reaches, in catalog order.
-  function screenOrder() {
-    var ix = screens();
-    var out = [];
-    var add = function (id) { if (hasOwn(ix.screens, id) && out.indexOf(id) < 0) { out.push(id); } };
-    (state.book.chapters || []).forEach(function (ch) {
-      (ch.sections || []).forEach(function (s) {
-        window.SpecModel.gateKeys(state.book, state.mockups, ch.id + '-' + s.id).forEach(function (k) { add(k.split('.')[0]); });
-        (s.requirements || []).forEach(function (r) {
-          (r && Array.isArray(r.screens) ? r.screens : []).forEach(function (e) { if (e && typeof e.screen === 'string') { add(e.screen); } });
-        });
-      });
-    });
-    (state.book.screens || []).forEach(function (sc) { if (sc && sc.id) { add(sc.id); } });
-    return out;
-  }
   function isComponent(sc) { return sc.kind === 'component'; }
   function fileHtml(sc) {
     return sc.file ? '<code class="sv-file">' + esc(sc.file) + '</code>' : '<span class="sv-file sv-nofile">No file yet</span>';
@@ -1088,7 +1057,7 @@
   }
   function renderScreens(route, rv, toc) {
     var ix = screens();
-    var order = screenOrder();
+    var order = window.SpecModel.screenOrder(state.book, state.mockups);
     var groups = [['screen', 'Screens'], ['component', 'Components']].map(function (g) {
       return { kind: g[0], title: g[1], ids: order.filter(function (id) { return isComponent(ix.screens[id]) === (g[0] === 'component'); }) };
     });
@@ -1131,18 +1100,6 @@
       return r.status === 'removed' && !r.orphan && (k === id || k.indexOf(id + '.') === 0) && !hasOwn(ix.states, k) && !hasOwn(ix.screens, k);
     });
   }
-  // States by role, in the book's order of roles; those with no role keep their place after them.
-  function byRole(states) {
-    var roles = (state.book.roles || []).map(function (r) { return r.id; });
-    var rank = function (st) {
-      var r = st.when && st.when.role;
-      if (!r) { return roles.length + 1; }
-      return r === 'anyone' ? -1 : roles.indexOf(r) < 0 ? roles.length : roles.indexOf(r);
-    };
-    return states.map(function (st, i) { return { st: st, i: i }; })
-      .sort(function (a, b) { return rank(a.st) - rank(b.st) || a.i - b.i; })
-      .map(function (x) { return x.st; });
-  }
   function screenPage(route, rv) {
     var ix = screens();
     var id = route.id;
@@ -1151,7 +1108,7 @@
     page.appendChild(el('p', { class: 'sv-back' }, '<a href="#screens">‹ All screens</a>'));
     var gone = removedStates(rv, id);
     if (!sc) {
-      page.appendChild(el('p', { class: 'state-missing' }, 'There is no screen ' + esc(id) + ' in the book.'));
+      page.appendChild(el('p', { class: 'state-missing' }, id ? 'There is no screen ' + esc(id) + ' in the book.' : 'There is no screen with that id.'));
       if (gone.length) { page.appendChild(removedList(gone)); }
       return page;
     }
@@ -1168,7 +1125,7 @@
 
     page.appendChild(el('h3', { class: 'sv-h' }, 'States'));
     var row = el('div', { class: 'states sv-states' });
-    byRole(sc.states || []).forEach(function (st) {
+    window.SpecModel.byRole(state.book, sc.states).forEach(function (st) {
       var key = window.SpecModel.stateKey(id, st.id);
       var wrap = el('div', { class: 'state-item' });
       var fig = stateFigureFor(key, st.name || st.id, null, null);
@@ -1541,7 +1498,7 @@
     // Reviews a section's Accept gate covers that its chapter view cannot draw: linked to the Screens view, and counted.
     var offPage = {};
     (b.chapters || []).forEach(function (ch) {
-      (ch.sections || []).forEach(function (s) { offPage[ch.id + '-' + s.id] = offPageReviews(s, ch.id + '-' + s.id); });
+      (ch.sections || []).forEach(function (s) { offPage[ch.id + '-' + s.id] = window.SpecModel.offPageKeys(b, state.mockups, ch.id + '-' + s.id, rv); });
     });
     (b.chapters || []).forEach(function (ch, ci) {
       var n = ci + 1;

@@ -124,6 +124,13 @@ function writeNotes(notes) {
   const review = readReviewFile();
   writeFileSync(join(data, 'review.json'), JSON.stringify({ ...review, rev: review.rev + 1, notes }));
 }
+// Puts an item's accepted copy back as it was (gone when it had none), as another writer would, bumping the revision.
+function restoreAccepted(key, value) {
+  const review = readReviewFile();
+  const accepted = { ...review.accepted };
+  if (value === undefined) { delete accepted[key]; } else { accepted[key] = value; }
+  writeFileSync(join(data, 'review.json'), JSON.stringify({ ...review, rev: review.rev + 1, accepted }));
+}
 
 let failures = 0;
 async function check(name, fn) {
@@ -1995,8 +2002,12 @@ try {
       await p.goto(`${URL}#screen/SCR-ZZZZ`);
       await p.waitForSelector('.sv-page');
       const missing = await p.evaluate(() => document.querySelector('.sv-page').textContent);
-      if (JSON.stringify(screenHints) !== JSON.stringify(['No state for Admin: same as another, or doesn\'t see it?']) || compHints !== 0 || !missing.includes('SCR-ZZZZ')) {
-        throw new Error(`hints ${JSON.stringify(screenHints)}, on the component ${compHints}; a missing screen reads ${JSON.stringify(missing)}`);
+      await p.goto(`${URL}#screen/`);
+      await p.waitForSelector('.sv-page');
+      const blank = await p.evaluate(() => document.querySelector('.sv-page .state-missing')?.textContent);
+      if (JSON.stringify(screenHints) !== JSON.stringify(['No state for Admin: same as another, or doesn\'t see it?']) || compHints !== 0 || !missing.includes('SCR-ZZZZ') ||
+        blank !== 'There is no screen with that id.') {
+        throw new Error(`hints ${JSON.stringify(screenHints)}, on the component ${compHints}; a missing screen reads ${JSON.stringify(missing)}, no id ${JSON.stringify(blank)}`);
       }
     } finally {
       await ctx.close();
@@ -2012,50 +2023,99 @@ try {
     const elsewhere = () => page.evaluate(() => [...document.querySelectorAll('#todos-list .sec-elsewhere a')].map(a => [a.textContent, a.getAttribute('href')]));
     await open();
     const before = await count();
+    // The picture and its accepted copy are put back after, so later checks see the starter's filter bar.
     const file = join(data, 'mockups', 'screens', BAR, 'all.html');
-    writeFileSync(file, readFileSync(file, 'utf8').replace('Completed', 'Done'));
-    await open();
-    const after = await count();
-    const links = await elsewhere();
-    if (after !== before + 1 || JSON.stringify(links) !== JSON.stringify([['FiltersBar · All', `#screen/${BAR}.all`]])) {
-      throw new Error(`the section counts ${before} -> ${after} and links ${JSON.stringify(links)}`);
+    const original = readFileSync(file, 'utf8');
+    const was = readReviewFile().accepted[`${BAR}.all`];
+    try {
+      writeFileSync(file, original.replace('Completed', 'Done'));
+      await open();
+      const after = await count();
+      const links = await elsewhere();
+      if (after !== before + 1 || JSON.stringify(links) !== JSON.stringify([['FiltersBar · All', `#screen/${BAR}.all`]])) {
+        throw new Error(`the section counts ${before} -> ${after} and links ${JSON.stringify(links)}`);
+      }
+      await page.locator('#todos-list .sec-elsewhere a').click();
+      await page.waitForSelector(`.sv-page figure.state.sv-target[data-key="${BAR}.all"]`, { timeout: 5000 });
+      // A note can be dropped here too: it goes on the state, and the Revise screen lists it.
+      await dropNoteOn(`figure.state[data-key="${BAR}.all"] figcaption`, 'Keep the word Completed');
+      const note = Object.values(readNotesFile().notes).find(n => n.text === 'Keep the word Completed');
+      if (note.item !== `${BAR}.all` || note.target !== `${BAR}.all`) {
+        throw new Error(`the note is on ${JSON.stringify(note)}`);
+      }
+      await openConfirm('revise');
+      const listed = await page.evaluate(() => document.querySelector('#claude-confirm .cc-list').textContent);
+      await page.keyboard.press('Escape');
+      await confirmShut();
+      if (!listed.includes('Keep the word Completed')) {
+        throw new Error(`the Revise screen lists ${JSON.stringify(listed)}`);
+      }
+      writeNotes(keep);
+      await page.reload();
+      await page.waitForSelector(`.sv-page figure.state.sv-target[data-key="${BAR}.all"]`, { timeout: 5000 });
+      if (!(await page.evaluate(() => document.body.classList.contains('diff-on')))) {
+        await page.locator('#changes-btn').click();
+      }
+      await page.locator(`.rv-acts[data-key="${BAR}.all"] .rv-accept`).click();
+      await page.waitForFunction(k => !document.querySelector(`.rv-stack[data-key="${k}"]`), `${BAR}.all`, { timeout: 5000 });
+      if (!(await page.evaluate(k => location.hash === `#screen/${k}` && !!document.querySelector('.sv-page'), `${BAR}.all`))) {
+        throw new Error('Accept left the Screens view');
+      }
+      if (!JSON.stringify(readReviewFile().accepted[`${BAR}.all`] || {}).includes('Done')) {
+        throw new Error('review.json does not hold the accepted picture of the component state');
+      }
+      await page.locator('#to-book').click();
+      await page.waitForSelector('#todos-list > h3', { timeout: 5000 });
+      const last = await count();
+      const gone = await elsewhere();
+      await filterOff();
+      if (last !== before || gone.length) {
+        throw new Error(`after Accept the section counts ${last} (was ${before}) and links ${JSON.stringify(gone)}`);
+      }
+    } finally {
+      writeFileSync(file, original);
+      restoreAccepted(`${BAR}.all`, was);
     }
-    await page.locator('#todos-list .sec-elsewhere a').click();
-    await page.waitForSelector(`.sv-page figure.state.sv-target[data-key="${BAR}.all"]`, { timeout: 5000 });
-    // A note can be dropped here too: it goes on the state, and the Revise screen lists it.
-    await dropNoteOn(`figure.state[data-key="${BAR}.all"] figcaption`, 'Keep the word Completed');
-    const note = Object.values(readNotesFile().notes).find(n => n.text === 'Keep the word Completed');
-    if (note.item !== `${BAR}.all` || note.target !== `${BAR}.all`) {
-      throw new Error(`the note is on ${JSON.stringify(note)}`);
-    }
-    await openConfirm('revise');
-    const listed = await page.evaluate(() => document.querySelector('#claude-confirm .cc-list').textContent);
-    await page.keyboard.press('Escape');
-    await confirmShut();
-    if (!listed.includes('Keep the word Completed')) {
-      throw new Error(`the Revise screen lists ${JSON.stringify(listed)}`);
-    }
-    writeNotes(keep);
-    await page.reload();
-    await page.waitForSelector(`.sv-page figure.state.sv-target[data-key="${BAR}.all"]`, { timeout: 5000 });
-    if (!(await page.evaluate(() => document.body.classList.contains('diff-on')))) {
-      await page.locator('#changes-btn').click();
-    }
-    await page.locator(`.rv-acts[data-key="${BAR}.all"] .rv-accept`).click();
-    await page.waitForFunction(k => !document.querySelector(`.rv-stack[data-key="${k}"]`), `${BAR}.all`, { timeout: 5000 });
-    if (!(await page.evaluate(k => location.hash === `#screen/${k}` && !!document.querySelector('.sv-page'), `${BAR}.all`))) {
-      throw new Error('Accept left the Screens view');
-    }
-    if (!readReviewFile().accepted[`${BAR}.all`]) {
-      throw new Error('review.json holds no accepted copy of the component state');
-    }
-    await page.locator('#to-book').click();
-    await page.waitForSelector('#todos-list > h3', { timeout: 5000 });
-    const last = await count();
-    const gone = await elsewhere();
-    await filterOff();
-    if (last !== before || gone.length) {
-      throw new Error(`after Accept the section counts ${last} (was ${before}) and links ${JSON.stringify(gone)}`);
+  });
+
+  // A review on a screen's heading (its name, kind, file or intro) has no place in the chapter view: the sections that
+  // show the screen link to its page, whose heading carries the stack and ✓ Accept.
+  await check('a changed screen heading: its stack and ✓ Accept are on the screen\'s page', async () => {
+    await idle();
+    const file = join(data, 'book.json');
+    const original = readFileSync(file, 'utf8');
+    const was = readReviewFile().accepted[TODOS];
+    try {
+      const book = JSON.parse(original);
+      book.screens.find(sc => sc.id === TODOS).intro = 'The one screen of the app.';
+      writeFileSync(file, JSON.stringify(book, null, 2));
+      await open();
+      const link = await page.evaluate(k => [...document.querySelectorAll('#todos-list .sec-elsewhere a')].map(a => a.getAttribute('href')).includes(`#screen/${k}`), TODOS);
+      if (!link) {
+        throw new Error('the section that shows TodosScreen does not link to its changed heading');
+      }
+      await page.locator(`#todos-list .sec-elsewhere a[href="#screen/${TODOS}"]`).click();
+      await page.waitForSelector('.sv-page h2', { timeout: 5000 });
+      if (!(await page.evaluate(() => document.body.classList.contains('diff-on')))) {
+        await page.locator('#changes-btn').click();
+      }
+      const seen = await page.evaluate(k => ({
+        marked: document.querySelector('.sv-page h2')?.classList.contains('has-rv'),
+        stack: document.querySelector(`.sv-page .rv-stack[data-key="${k}"]`)?.textContent || '',
+        intro: document.querySelector('.sv-page .lede')?.textContent,
+      }), TODOS);
+      if (!seen.marked || !seen.stack || seen.intro !== 'The one screen of the app.') {
+        throw new Error(`the heading's review: ${JSON.stringify(seen)}`);
+      }
+      await page.locator(`.sv-page .rv-acts[data-key="${TODOS}"] .rv-accept`).click();
+      await page.waitForFunction(k => !document.querySelector(`.rv-stack[data-key="${k}"]`) && !document.querySelector('.sv-page h2.has-rv'), TODOS, { timeout: 5000 });
+      if (readReviewFile().accepted[TODOS]?.intro !== 'The one screen of the app.') {
+        throw new Error(`review.json holds ${JSON.stringify(readReviewFile().accepted[TODOS])}`);
+      }
+      await filterOff();
+    } finally {
+      writeFileSync(file, original);
+      restoreAccepted(TODOS, was);
     }
   });
 

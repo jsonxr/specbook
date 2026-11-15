@@ -156,3 +156,58 @@ test('a highlight may name a component nested inside a placed component', () => 
   assert.equal(M.screenProblem(book, all, m), null);
   assert.match(M.expandMockup(book, m, m['mockups/home-admin.html'], { highlight: 'SCR-DOT' }), /sb-component sb-hl" data-key="SCR-DOT\.on"/);
 });
+
+test('offPageKeys: what a section gates but cannot draw, and what bySection leaves out of its count', () => {
+  const book = fixture();
+  const m = mockups();
+  const under = (...keys) => ({ byKey: Object.fromEntries(keys.map(k => [k, { key: k }])) });
+  // c-b shows SCR-HOME.admin (which places SCR-CARD.waiting) and SCR-HOME.visitor (sameAs member).
+  // A state it shows is drawn there: not linked.
+  assert.deepEqual(M.offPageKeys(book, m, 'c-b', under('SCR-HOME.admin')), { keys: [], uncounted: 0 });
+  // A component state placed in a shown picture: linked and uncounted.
+  assert.deepEqual(M.offPageKeys(book, m, 'c-b', under('SCR-CARD.waiting')), { keys: ['SCR-CARD.waiting'], uncounted: 1 });
+  // The state a shown state is drawn as (sameAs), not shown here itself: linked and uncounted.
+  assert.deepEqual(M.offPageKeys(book, m, 'c-b', under('SCR-HOME.member')), { keys: ['SCR-HOME.member'], uncounted: 1 });
+  // The heading of a screen the section shows: linked, but bySection counts it already.
+  assert.deepEqual(M.offPageKeys(book, m, 'c-b', under('SCR-HOME')), { keys: ['SCR-HOME'], uncounted: 0 });
+  // The heading of a screen it does not show (the placed component's): linked and uncounted.
+  assert.deepEqual(M.offPageKeys(book, m, 'c-b', under('SCR-CARD')), { keys: ['SCR-CARD'], uncounted: 1 });
+  // A section that shows nothing has nothing off the page.
+  assert.deepEqual(M.offPageKeys(book, m, 'c-x', under('SCR-CARD')), { keys: [], uncounted: 0 });
+});
+
+test('offPageKeys agrees with reviews().bySection: together they count each gated review once', () => {
+  const book = fixture();
+  const m = mockups();
+  const accepted = Object.fromEntries(Object.entries(M.itemsOf(book, m)).map(([k, it]) => [k, JSON.parse(JSON.stringify(it.value))]));
+  // Change the shown state, the sameAs target, the placed component state and both screens' headings.
+  m['mockups/home-admin.html'] += ' ';
+  m['mockups/home-member.html'] += ' ';
+  m['mockups/card-waiting.html'] += ' ';
+  book.screens[0].file = 'Home.tsx';
+  book.screens[1].file = 'Card.tsx';
+  const rv = M.reviews(book, m, { accepted }, null);
+  const off = M.offPageKeys(book, m, 'c-b', rv);
+  assert.deepEqual([...off.keys].sort(), ['SCR-CARD', 'SCR-CARD.waiting', 'SCR-HOME', 'SCR-HOME.member']);
+  const gated = new Set(M.gateKeys(book, m, 'c-b').filter(k => rv.byKey[k]));
+  assert.equal(rv.bySection['c-b'] + off.uncounted, gated.size);
+});
+
+test('screenOrder: book order of first appearance, then the rest in catalog order', () => {
+  const book = fixture();
+  const m = mockups();
+  assert.deepEqual(M.screenOrder(book, m), ['SCR-HOME', 'SCR-CARD']);
+  book.screens.unshift({ id: 'SCR-LOST', name: 'Lost', kind: 'screen', states: [] }, { id: 'SCR-REQ', name: 'Named', kind: 'screen', states: [] });
+  book.chapters[0].sections[0].shows = [];
+  book.chapters[0].sections[0].requirements[0].screens = [{ screen: 'SCR-REQ' }, { screen: 'SCR-GONE' }];
+  // c-a now shows nothing and names SCR-REQ; c-b shows Home, which places the card; Lost is never reached.
+  assert.deepEqual(M.screenOrder(book, m), ['SCR-REQ', 'SCR-HOME', 'SCR-CARD', 'SCR-LOST']);
+});
+
+test('byRole: anyone, then the book\'s roles in order, then unknown roles, then no role; ties keep their order', () => {
+  const book = fixture();
+  const st = (id, role) => ({ id, when: role ? { role } : {} });
+  const states = [st('none1'), st('vis', 'visitor'), st('mem1', 'member'), st('odd', 'guest'), st('all', 'anyone'), st('mem2', 'member'), st('none2'), st('adm', 'admin')];
+  assert.deepEqual(M.byRole(book, states).map(s => s.id), ['all', 'mem1', 'mem2', 'adm', 'vis', 'odd', 'none1', 'none2']);
+  assert.deepEqual(M.byRole(book, undefined), []);
+});
