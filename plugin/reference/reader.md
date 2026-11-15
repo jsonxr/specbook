@@ -2,9 +2,19 @@
 
 The page `serve` opens, in detail. The `specbook` skill points here.
 
-- **Design bar** across the top (sticky): book title; **Screens** switch (Mockups · Screenshots · Both);
-  **Recordings** on/off; on the right **Comment**, **Notes (N)** and the **Claude** group with **Revise** and
-  **Build** (see "The Claude group").
+- **Design bar** across the top (sticky), left to right:
+  - the book's title;
+  - **View ▾**: checkboxes for **Mockups**, **Screenshots** (both checked shows both; one always stays checked),
+    **Recordings**, **Coverage** (when there is evidence) and, in Changes mode, **Show sent notes**, plus the media
+    count;
+  - the review strip, icons with hover text naming each and its key: **Comment** (C), previous change (K), the
+    position "n / N", next change (J), **Show only changes** (F), and **Requests** (R) with a count of open notes;
+  - the share pill (see "Sharing a book");
+  - **✦ Claude ▾**, a menu holding **Revise** and **Build**, each saying what Claude will do (see "The Claude group").
+    While Claude works, the button reads "✦ Claude · Building…".
+
+  On a phone (under 700 px) the review strip sits at the bottom of the screen, and the Requests pane fills the screen
+  above it.
 - **Sidebar** on the left: the table of contents only, chapters and their numbered sections, sticky under the bar.
 - **The book**: a cover, then chapters. A chapter has an eyebrow ("Chapter 03"), a title, a status pill and an
   intro. Each section has a § number, title, a stage pill, intro, a list of requirements, then every screen
@@ -117,10 +127,13 @@ headings and chapter headings; `book-format.md` has the keys and `review.json`. 
 `state` and decisions are not reviewed, and the review is about wording: whether the app does it yet is the
 requirement's `change` marker and the stages.
 
-The bar's **Changes (n)** button counts the open reviews and turns Changes mode on and off (remembered in this
-browser). In Changes mode the page shows only what is under review: chapters and sections with none are hidden, the
-contents list shows each section's count, and **Next ›** scrolls to the next one and flashes it. A **Show sent notes**
-checkbox (Changes mode only, remembered) draws the pins of sent and answered notes again, read-only.
+The review strip's **Show only changes** (F) turns Changes mode on and off (remembered in this browser). In Changes
+mode the page shows only what is under review: chapters and sections with none are hidden, and the contents list shows
+each section's count. Previous (K) and next (J) scroll to the item under review before or after the top of the screen
+and flash it, in either mode; "n / N" says which one is at the top, of how many. **Requests** (R) opens the Requests
+pane: its **Notes** tab is the notes list (with **✦ Send n notes to Claude**, which is Revise), its **Changes** tab lists
+every item under review by section, and clicking one goes to it. A **Show sent notes** checkbox in View ▾ (Changes mode
+only, remembered) draws the pins of sent and answered notes again, read-only.
 
 - **Review stack**, drawn under each item under review, oldest first: the **accepted** version (or **New**, or for a
   removal the accepted version struck through), each **try** with the notes that led to it (older tries sit behind
@@ -155,23 +168,35 @@ checkbox (Changes mode only, remembered) draws the pins of sent and answered not
 
 ## Sharing a book
 
-`/specbook:share` hands out a link to the live book, so others (or you, from a phone) can read it and leave notes from
-anywhere. Your open book tab is the host. It sends the book straight to each guest over WebRTC, encrypted end to end.
+The book is shared whenever your book tab is open, so others (or you, from a phone) can read it and leave notes from
+anywhere. **Copy link** in the bar copies the link; `/specbook:share` prints it. `settings.share: false` in `book.json`
+turns this off: the bar then shows **Share**, which starts a share on click. Your open book tab is the host. It sends the book straight to each guest over WebRTC, encrypted end to end.
 A share server, `https://specbook.jasonrowland.com` unless the book names its own in `settings.shareBroker`, passes the
 handshake and serves the small guest page.
 The handshake is signed with the key after `#` in the link, so a share server running this code can neither read the
 book nor join; the guest page comes from the share server, so use one you run or trust.
 The reader itself reaches the guest from your tab, so a new reader needs no new share server.
 
-- A guest names themself once. Their notes show their name, and yours show **Host** on their page.
+- A guest names themself once. Their notes show their name, and yours show your first name (git's `user.name`).
+- **Live.** Everyone in the book appears as a colored face in the share pill, with a pen while they type. A note's text
+  shows for everyone as it is typed ("Ana is typing…"), and a saved change reaches every screen at once.
+- **Following.** Click a face to follow that person: your window goes where theirs does (the same item, on any screen
+  size) and takes their view (Show only changes, Mockups or Screenshots, Recordings, Coverage). A chip says
+  "Following Ana · scroll or type to stop". Scrolling, clicking into the book, typing, or clicking the face again
+  stops it, and your own view comes back. Your face shows how many follow you, and a colored edge runs round your
+  window while anyone does.
+- The pill's ▾ holds the link and **Copy**, who is here and what each is doing, **New link** (the old link stops
+  working) and **Stop sharing** (until the book is reopened). Guests get only the link.
 - A guest may add, edit, move and delete **their own** notes, and nothing else: no Revise, Build, Accept, stages or
   requirement edits. To ask for new wording, they drop a note saying what it should say; you act on it. Your tab
   (`app/host.js`) and the server both refuse everything else (403 `guest`).
 - You may still edit or delete any note. A Revise carries a collaborator's notes with `by: <name>`.
-- Changes reach guests at once: the server tells the hosting tab when the book or the notes change on disk. A guest's
-  notes reach your page on its next poll (5 s).
-- The hosting tab shows **Sharing · n guests**, **Copy link** and **Stop**. Closing it ends the share, as does
-  `/specbook:share stop` or the share's expiry (8 hours by default, at most 24).
+- **The link lasts as long as the book's server runs**, across reloads: the server remembers the room (in memory,
+  never on disk). Closing your tab pauses the share: guests see "The book isn't open right now" and reconnect by
+  themselves when it is open again. Stopping the server, **New link**, **Stop sharing** or the room's expiry (24 hours)
+  ends the link.
+- Live messages (presence, typing, following) go only between your tab and the guests; your tab passes each guest's on
+  to the others and drops a draft of a note that is not the sender's. The share server never sees them.
 
 ## The API
 
@@ -184,7 +209,8 @@ may only read and `PUT /api/notes`; anything else is 403 `guest`.
 | Endpoint | Does |
 | --- | --- |
 | `GET /api/book` | `{ book, media, evidence, review, changelog, historyCounts, claude, viewer }`; reading stamps `opened`/`where` for new reviews (not while Claude is busy, and never over a write made since it read) |
-| `PUT /api/notes { rev, notes }` | Saves the page's **draft** notes into `review.json`; stored non-draft notes win; from a guest, only that guest's own drafts change; 400 `bad-note`, 409 `stale` or `locked` |
+| `PUT /api/notes { changes }` | Saves only the notes a page changed: `{ id: note }` or `{ id: null }` to delete, applied on the notes stored now, so concurrent saves of different notes all land; the owner may change any draft, a guest only their own (others' ids are ignored); a changed note gets `lastBy` (who made the change); 400 `bad-note`, 409 `locked` |
+| `PUT /api/notes { rev, notes }` | The whole-map save older pages use: the page's **draft** notes replace the stored drafts; stored non-draft notes win; from a guest, only that guest's own drafts change; 400 `bad-note`, 409 `stale` or `locked` |
 | `POST /api/accept { key }` | Writes the history entry, sets the accepted copy to the server's current value, clears the key's tries and notes; 404 `not-under-review`, 400 `bad-accept` |
 | `POST /api/change { key, note }` | Freezes a try and adds the draft note; 400 `note-required` or `bad-change`, 404 `not-under-review` |
 | `GET /api/history/<key>` | `{ entries }` for one item |
@@ -193,10 +219,13 @@ may only read and `PUT /api/notes`; anything else is 403 `guest`.
 | `DELETE /api/requirements/<id>` | Deletes one never accepted; 409 `accepted` otherwise (mark it removed instead) |
 | `POST /api/revise` | Sends the draft notes: sets them `sent`, writes the request |
 | `POST /api/stage { section, stage }` | Ready: 409 `unreviewed` while the section has an open review |
-| `GET /api/share/events?tab=<id>` | Every owner tab listens here; the server sends `start` (host this share), `stop` and `changed` |
-| `POST /api/share { hours }` | Asks the newest listening tab to host a share; 409 `no-broker` (an invalid `settings.shareBroker`) or `no-tab` |
-| `GET /api/share` | `{ state, url, expiresAt, guests, error, tabs }` |
-| `POST /api/share/live\|guests\|failed\|ended { tab, … }`, `POST /api/share/stop` | The hosting tab's reports; stop asks it to end the share |
+| `GET /api/share/events?tab=<id>` | The owner tab that holds the book's lock listens here; on connecting it is sent `start { broker, hours, room }` (the remembered room, or null for a new one) unless `settings.share` is false; later `stop`, `end-room` and `changed` |
+| `POST /api/share` | Asks the newest listening tab to host (a book with `settings.share: false`, or after Stop); 409 `no-broker` (an invalid `settings.shareBroker`) or `no-tab` |
+| `GET /api/share` | `{ state, url, expiresAt, guests, error, tabs, room, stopped }` |
+| `POST /api/share/live { tab, room, hostToken, secret, url, expiresAt }` | The hosting tab's room, which the server remembers |
+| `POST /api/share/guests\|failed\|ended { tab, … }` | The hosting tab's reports |
+| `POST /api/share/new-link` | The tab ends the room and opens a new one (202) |
+| `POST /api/share/stop` | Ends the room; the book shares again when a tab next opens |
 
 The server, not the page, computes current values for Accept and Change, so the page cannot write a stale or forged
 value.

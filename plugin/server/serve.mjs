@@ -600,8 +600,9 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (path === '/api/health') {
-      // `guests`: this server checks shared-book guests (share.mjs will not forward to one that does not).
-      json(res, 200, guest ? { ok: true, guests: true } : { ok: true, data: DATA, guests: true });
+      // `guests`: this server checks shared-book guests; `share: 2`: it remembers the share's room and shares by
+      // itself (share.mjs restarts a server without them).
+      json(res, 200, guest ? { ok: true, guests: true, share: 2 } : { ok: true, data: DATA, guests: true, share: 2 });
       return;
     }
     if (path === '/api/book' && req.method === 'GET') {

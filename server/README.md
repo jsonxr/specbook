@@ -8,8 +8,13 @@ handshake between the host tab and each guest. The book, and the reader itself, 
 the guest, encrypted end to end; this server never sees or stores them. The handshake is signed with the key after
 `#` in the link, which browsers never send to a server, so this server cannot join a share either. (That holds for this code: the
 guest page comes from here, so an altered deployment could read the key. Run your own.) Only a page on the
-owner's machine (an `http://localhost` origin) may open a room from a browser, and a room ends a minute after its host
-tab goes.
+owner's machine (an `http://localhost` origin) may open a room from a browser. A room lasts until it expires (at most
+24 hours) or its host ends it (`POST /api/rooms/<room>/end` with the host token); while the host tab is closed, guests
+wait on their socket and hear `host-online` when it opens again. The host tab and the guests also pass live messages
+(presence, typing, following) over their own connection, never through this server.
+
+Protocol 2 (plugin 1.3) adds those live messages; a room says its protocol (`GET /api/rooms/<room>`), and the guest page
+still speaks protocol 1 to rooms that older plugins open.
 
 One Durable Object holds every room. Its WebSockets hibernate and its keepalive pings are answered without waking
 it, so an idle share costs nothing.
@@ -17,8 +22,8 @@ it, so an idle share costs nothing.
 ## Deploy
 
 From this folder: `wrangler deploy`. It serves at `https://specbook.jasonrowland.com` (the `routes` entry in
-`wrangler.jsonc`; change it to deploy under another domain in your own account). Give `/specbook:share` that address;
-it saves it in the book.
+`wrangler.jsonc`; change it to deploy under another domain in your own account). The plugin uses
+`https://specbook.jasonrowland.com` unless a book names another in `settings.shareBroker`.
 
 On the Workers Free plan this costs nothing at the scale of a few shares: 100,000 requests a day, and Durable Objects
 get 100,000 requests and 13,000 GB-s a day (incoming WebSocket messages count 20 to 1; hibernation accrues no
