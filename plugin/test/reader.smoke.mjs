@@ -1011,6 +1011,97 @@ try {
     }
   });
 
+  await check('the screen before Claude keeps focus inside it, and Go to › finds a section the filter hides', async () => {
+    const file = join(data, 'book.json');
+    const original = readFileSync(file, 'utf8');
+    try {
+      await idle();
+      const book = JSON.parse(original);
+      for (const ch of book.chapters) {
+        for (const s of ch.sections || []) {
+          if (s.stage === 'ready') { s.stage = 'drafting'; }
+          if (ch.id === 'later' && s.id === 'due') { s.stage = 'ready'; }
+        }
+      }
+      writeFileSync(file, JSON.stringify(book, null, 2));
+      await open();
+      // The filter on: a Ready section with nothing to look at is hidden.
+      if ((await page.locator('#changes-btn').getAttribute('aria-pressed')) !== 'true') {
+        await page.locator('#changes-btn').click();
+      }
+      const sec = await page.evaluate(() => [...document.querySelectorAll('#main .bk-sec')].find(s => !s.getClientRects().length && /Ready/.test(s.querySelector('h3')?.textContent || ''))?.id);
+      if (!sec) {
+        throw new Error('no Ready section is hidden by the filter to test with');
+      }
+      await openConfirm('build');
+      // Tab and Shift+Tab stay in the screen.
+      const out = [];
+      for (const key of ['Tab', 'Tab', 'Tab', 'Tab', 'Shift+Tab', 'Shift+Tab', 'Shift+Tab', 'Shift+Tab', 'Shift+Tab']) {
+        await page.keyboard.press(key);
+        if (!(await page.evaluate(() => document.getElementById('claude-confirm').contains(document.activeElement)))) {
+          out.push(`${key} -> ${await page.evaluate(() => document.activeElement?.id || document.activeElement?.className || document.activeElement?.tagName)}`);
+        }
+      }
+      if (out.length) {
+        throw new Error(`focus left the screen: ${out.join(', ')}`);
+      }
+      await page.locator('#claude-confirm .cc-go').first().click();
+      await confirmShut();
+      await page.waitForFunction(id => {
+        const r = document.getElementById(id).getBoundingClientRect();
+        return r.height > 0 && r.top >= 0 && r.top < innerHeight;
+      }, sec, { timeout: 3000 }).catch(async () => {
+        throw new Error(`Go to › did not land on ${sec}: ${JSON.stringify(await page.evaluate(id => [document.body.classList.contains('diff-on'), document.getElementById(id).getBoundingClientRect().top], sec))}`);
+      });
+      if (await page.evaluate(() => [...document.querySelectorAll('[inert]')].length)) {
+        throw new Error('the book is still inert after the screen closed');
+      }
+    } finally {
+      writeFileSync(file, original);
+      await open();
+      if ((await page.locator('#changes-btn').getAttribute('aria-pressed')) === 'true') {
+        await page.locator('#changes-btn').click();
+      }
+    }
+  });
+
+  await check('the toolbar covers neither the toast on a phone nor the review panel on a desktop', async () => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    try {
+      await open();
+      const toast = await page.evaluate(() => {
+        const msg = document.getElementById('make-msg');
+        msg.textContent = 'Claude is busy; try again when it is done.';
+        const a = msg.getBoundingClientRect(), b = document.getElementById('review-tools').getBoundingClientRect();
+        msg.textContent = '';
+        return a.bottom > b.top + 0.5 ? `toast ${Math.round(a.top)}..${Math.round(a.bottom)}, toolbar from ${Math.round(b.top)}` : null;
+      });
+      if (toast) {
+        throw new Error(`on a phone the toast covers the toolbar: ${toast}`);
+      }
+    } finally {
+      await page.setViewportSize({ width: 1400, height: 900 });
+    }
+    await page.setViewportSize({ width: 1100, height: 900 });
+    try {
+      await open();
+      const panel = await page.evaluate(() => {
+        const p = document.getElementById('review-panel');
+        p.hidden = false;
+        const pr = p.getBoundingClientRect(), t = document.getElementById('review-tools').getBoundingClientRect();
+        const pad = parseFloat(getComputedStyle(p).paddingBottom);
+        p.hidden = true;
+        const overlaps = t.right > pr.left && t.left < pr.right;
+        return overlaps && pad < innerHeight - t.top + 8 ? `the toolbar (${Math.round(t.left)}..${Math.round(t.right)}) overlaps the panel (${Math.round(pr.left)}..) with only ${pad}px of padding under its last call` : null;
+      });
+      if (panel) {
+        throw new Error(panel);
+      }
+    } finally {
+      await page.setViewportSize({ width: 1400, height: 900 });
+    }
+  });
+
   await check('Share asks for a pin, Start shares, and the menu then has the link, this computer\'s address, who is here and only Stop sharing', async () => {
     await open();
     // The book does not share itself: the pill offers to.

@@ -2346,6 +2346,7 @@
     if (confirmOpen()) {
       // The screen is modal: Esc closes it, and the book's keys wait until it is gone.
       if (e.key === 'Escape') { e.preventDefault(); closeConfirm(); }
+      if (e.key === 'Tab') { wrapTab(e); }
       return;
     }
     var inField = e.target && e.target.closest && e.target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
@@ -2550,6 +2551,8 @@
     var s = fullId ? findSection(fullId) : null;
     return { num: num ? num.textContent : '', title: s ? s.title : 'Elsewhere', node: node };
   }
+  // Go to › may aim at something the filter hides (a section with nothing to look at): the filter goes off first.
+  function reveal(node) { if (node && !node.getClientRects().length && state.diff) { setDiff(false); } }
   function confirmGroup(fullId, go) {
     var head = sectionHead(fullId);
     var g = el('section', { class: 'cc-group' });
@@ -2587,7 +2590,7 @@
       });
       order.forEach(function (sec) {
         var first = bySec[sec][0].it.noteId;
-        var g = confirmGroup(sec, pins[first] ? function () { goTo(first); } : null);
+        var g = confirmGroup(sec, pins[first] ? function () { reveal(pins[first]); goTo(first); } : null);
         bySec[sec].forEach(function (x) {
           var it = x.it, rv = reviewOf(it.id);
           var item = el('div', { class: 'cc-item' });
@@ -2619,7 +2622,7 @@
       confirmSend.textContent = '✦ Build';
       ready.forEach(function (sec) {
         var node = sectionHead(sec).node;
-        groups.push(confirmGroup(sec, node ? function () { glideTo(node, function () {}); } : null));
+        groups.push(confirmGroup(sec, node ? function () { reveal(node); glideTo(node, function () {}); } : null));
       });
       confirmSend.disabled = buildBtn.disabled;
     }
@@ -2629,6 +2632,27 @@
     groups.forEach(function (g) { confirmList.appendChild(g); });
     confirmList.scrollTop = scroll;
   }
+  // While the screen is open everything else on the page is inert: Tab stays in it, and nothing behind it can be
+  // clicked or typed into.
+  var inerted = [];
+  function setInert(on) {
+    inerted.forEach(function (n) { n.inert = false; });
+    inerted = [];
+    if (!on) { return; }
+    Array.prototype.forEach.call(document.body.children, function (n) {
+      if (n === confirmBox || n === confirmBackdrop || n === msgEl || n.tagName === 'SCRIPT' || n.inert) { return; }
+      n.inert = true;
+      inerted.push(n);
+    });
+  }
+  // Tab past the last control comes back to the first, and Shift+Tab before the first goes to the last.
+  function wrapTab(e) {
+    var all = [].slice.call(confirmBox.querySelectorAll('button:not([disabled])'));
+    if (!all.length) { return; }
+    var first = all[0], last = all[all.length - 1], at = document.activeElement;
+    if (e.shiftKey && (at === first || !confirmBox.contains(at))) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && (at === last || !confirmBox.contains(at))) { e.preventDefault(); first.focus(); }
+  }
   function openConfirm(kind) {
     confirmKind = kind;
     confirmDrawn = '';
@@ -2637,6 +2661,7 @@
     confirmBox.hidden = false;
     confirmBackdrop.hidden = false;
     document.body.classList.add('confirm-open');
+    setInert(true);
     confirmSend.focus({ preventScroll: true });
   }
   function closeConfirm() {
@@ -2645,6 +2670,7 @@
     confirmBox.hidden = true;
     confirmBackdrop.hidden = true;
     document.body.classList.remove('confirm-open');
+    setInert(false);
     if (confirmBox.contains(document.activeElement) || document.activeElement === document.body) {
       document.getElementById('claude-btn').focus({ preventScroll: true });
     }

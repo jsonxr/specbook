@@ -506,6 +506,8 @@ body.followed::after { content: ""; position: fixed; inset: 0; border: 3px solid
 @media (min-width: 701px) {
   .tools { bottom: 16px; left: 50%; transform: translateX(-50%); border-radius: 12px; padding: 4px; box-shadow: 0 10px 30px rgba(0, 0, 0, .5); }
   .bar-msg, .share-chip { bottom: 80px; }
+  /* the review panel scrolls its last call clear of the floating toolbar */
+  .notes-panel { padding-bottom: 88px; }
 }
 @media (min-width: 861px) {
   .tools { left: calc(50% + 135px); }
@@ -602,8 +604,8 @@ body.confirm-open { overflow: hidden; }
   .share-menu, .bar .bar-menu { top: 100%; left: 8px; right: 8px; width: auto; min-width: 0; max-width: none; max-height: calc(100dvh - 140px); overflow-y: auto; }
   .claude-btn span:not(.claude-busy):not(.chev):not(.claude-count) { display: none; }
   main { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
-  /* A shared book's status chip sits above the toolbar, not under it. */
-  body .share-chip { bottom: calc(63px + env(safe-area-inset-bottom)); }
+  /* The toast and a shared book's status chip sit above the toolbar, not under it. */
+  body .share-chip, .bar-msg { bottom: calc(63px + env(safe-area-inset-bottom)); }
   /* A requirement's screenshots go under its text, so the text and its test pills keep the width. */
   .reqs li.has-shot { grid-template-columns: 64px minmax(0, 1fr); }
   .reqs li.has-shot > .ev-shots { grid-column: 2; flex-direction: row; flex-wrap: wrap; }
