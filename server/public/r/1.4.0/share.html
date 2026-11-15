@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="specbook-reader" content="1.4.0">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spec Book</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/r/1.4.0/book.css">
+</head>
+<body>
+<header class="bar" role="toolbar" aria-label="Design bar">
+  <strong id="book-title" class="bar-title">Spec book</strong>
+  <button type="button" id="where" class="bar-where" aria-expanded="false" aria-controls="toc-nav" title="Contents"><span id="where-text">Contents</span><span class="bar-where-caret" aria-hidden="true">▾</span></button>
+  <div class="menu-wrap view-wrap">
+    <button type="button" id="view-btn" class="bar-btn ghost" aria-expanded="false" aria-controls="view-menu" title="What the book shows">View ▾</button>
+    <div id="view-menu" class="bar-menu" hidden>
+      <p class="bar-menu-head">Show in the book</p>
+      <label class="check"><input type="checkbox" id="view-mock" checked> Mockups</label>
+      <label class="check"><input type="checkbox" id="view-shot"> Screenshots</label>
+      <label class="check"><input type="checkbox" id="show-videos" checked> Recordings</label>
+      <label class="check" id="coverage-group" title="Dim requirements with no passing test" hidden><input type="checkbox" id="show-coverage"> Coverage</label>
+      <label class="check" id="sent-toggle" title="Draw the pins of notes already sent to Claude, read-only" hidden><input type="checkbox" id="show-sent"> Show sent notes</label>
+      <p class="bar-hint" id="media-count"></p>
+      <span class="bar-hint" id="since" hidden></span>
+    </div>
+  </div>
+  <div class="tools" role="group" aria-label="Review">
+    <button type="button" id="toc-btn" class="tool toc-tool" aria-expanded="false" aria-controls="toc-nav" title="Contents" aria-label="Contents"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg></button>
+    <span class="tool-sep toc-tool" aria-hidden="true"></span>
+    <button type="button" id="mode" class="tool tool-cmt" aria-pressed="false" aria-keyshortcuts="C" title="Comment · C" aria-label="Comment (C): click the book to drop a note"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M3 21V12a9 9 0 1 1 9 9z"/></svg></button>
+    <span class="tool-sep" aria-hidden="true"></span>
+    <button type="button" id="prev-chg" class="tool" aria-keyshortcuts="K" title="Previous change · K" aria-label="Previous change (K)"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg></button>
+    <span id="chg-pos" class="tool-pos" aria-live="polite">0 / 0</span>
+    <button type="button" id="next-chg" class="tool" aria-keyshortcuts="J" title="Next change · J" aria-label="Next change (J)"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+    <button type="button" id="changes-btn" class="tool" aria-pressed="false" aria-keyshortcuts="F" title="Show only changes · F" aria-label="Show only changes (F)"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4-2v-4z"/></svg></button>
+    <span class="tool-sep" aria-hidden="true"></span>
+    <button type="button" id="notes-btn" class="tool" aria-expanded="false" aria-controls="notes-panel" aria-keyshortcuts="R" title="Requests · R" aria-label="Requests (R): notes and changes"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span id="notes-count" class="tool-badge" hidden>0</span></button>
+  </div>
+  <div class="bar-spacer"></div>
+  <div id="share-slot"></div>
+  <div class="menu-wrap bar-group claude" id="claude-menu">
+    <button type="button" id="claude-btn" class="claude-btn" aria-expanded="false" aria-controls="claude-pop"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8z"/></svg><span>Claude</span><span id="claude-busy" class="claude-busy"></span> ▾</button>
+    <div id="claude-pop" class="bar-menu claude-pop" hidden>
+      <button type="button" id="revise" class="claude-act">Revise<small>Send your notes. Claude revises the book and you review each change.</small></button>
+      <button type="button" id="build" class="claude-act">Build<small>Build the sections marked Ready, with tests as evidence.</small></button>
+      <p id="claude-status" class="bar-hint"></p>
+    </div>
+  </div>
+</header>
+<div id="build-banner" class="build-banner" role="status" hidden></div>
+<div class="layout">
+  <nav class="side" id="toc-nav" aria-label="Contents"><div id="toc"></div></nav>
+  <div id="toc-backdrop" class="toc-backdrop" hidden></div>
+  <main id="main"><p class="loading">Loading the book…</p></main>
+</div>
+<aside id="notes-panel" class="notes-panel" aria-labelledby="np-title" tabindex="-1" hidden>
+  <div class="np-head"><h2 id="np-title">Requests</h2><button type="button" id="np-close" class="np-x" aria-label="Close requests">×</button></div>
+  <div class="np-tabs" role="tablist">
+    <button type="button" role="tab" id="np-tab-notes" aria-selected="true">Notes</button>
+    <button type="button" role="tab" id="np-tab-changes" aria-selected="false">Changes</button>
+  </div>
+  <ol id="np-changes" class="np-list np-changes" hidden></ol>
+  <p id="np-empty" class="np-empty">No notes yet. Press <b>Comment</b> (or C), then click the book where you mean.</p>
+  <ol id="np-list" class="np-list"></ol>
+  <section id="np-send" class="np-send" aria-labelledby="np-send-title" hidden>
+    <h3 id="np-send-title">What Claude will receive</h3>
+    <ol id="np-items" class="np-items"></ol>
+    <details class="np-json"><summary>Show JSON</summary><pre id="np-json"></pre></details>
+    <button type="button" id="np-revise" class="make-btn claude-send">✦ Send notes to Claude</button>
+  </section>
+</aside>
+<aside id="review-panel" class="notes-panel review-panel" aria-labelledby="rp-title" tabindex="-1" hidden>
+  <div class="np-head"><h2 id="rp-title">Review calls</h2><button type="button" id="rp-close" class="np-x" aria-label="Close review">×</button></div>
+  <p class="np-empty">Calls the build made on its own. Accept one to keep it as a decision, or reject it with what you want instead.</p>
+  <ol id="rp-list" class="np-list"></ol>
+</aside>
+<p class="bar-msg" id="make-msg" role="status" title="Click to dismiss"></p>
+<textarea id="out" aria-label="Requests" class="out"></textarea>
+<script src="/r/1.4.0/relay.js"></script>
+<script src="/r/1.4.0/share.js"></script>
+<script src="/r/1.4.0/model.js"></script>
+<script src="/r/1.4.0/book.js"></script>
+<script src="/r/1.4.0/live.js"></script>
+</body>
+</html>

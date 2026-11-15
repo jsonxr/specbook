@@ -38,7 +38,7 @@ them together. The skills point here at the step that needs each part.
   screenshots to the right of a requirement's text (default 100); a requirement without one has no column. `shareBroker` is
   the address of the share server the book shares through, `https://specbook.jasonrowland.com` when absent.
   Set it only to use your own; see `server/` in the plugin's repository. `share: false` keeps the book from sharing
-  itself whenever its tab is open; the bar then offers **Share**.
+  itself whenever its server runs; the bar then offers **Share**.
 - **`stage`** is one of `drafting`, `ready`, `building`, `built`. The user sets only `drafting` and `ready` (and
   `ready` only on a section with at least one requirement carrying a `change`); a build sets `building` and `built`. A chapter has no stage; the reader derives it from its sections. `label` is optional
   words ("Phase 2") shown after the stage on the section's pill.

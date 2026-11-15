@@ -1,19 +1,24 @@
 #!/usr/bin/env node
-// Smoke test for sharing a book: the share server (wrangler dev), the owner's book tab as host, and a guest page,
-// talking over WebRTC: always-on sharing, live typing, following, a lasting link, and New link.
+// Smoke test for sharing a book: the share server (wrangler dev), the book server as the share's host
+// (lib/host.mjs, over WebRTC with node-datachannel), the owner's localhost tab, and readers on the website's link
+// (the reader the share server publishes under /r/<version>/): one link for everyone, the pin for the owner's powers,
+// book HTML that never runs, live typing and following, a link that lasts across restarts, and New link.
 //
-//   GLOBAL_ROOT=$(npm root -g)/playwright node plugins/specbook/test/share.smoke.mjs
+//   GLOBAL_ROOT=$(npm root -g)/playwright node plugin/test/share.smoke.mjs
 //
-// Needs wrangler on the PATH and the share server's code (SHARE_SERVER, by default server/ in this
-// repository). Copies starter/ to a temp folder, serves it on port 4296, runs the share server on 8798, and drives an
-// owner page and a guest page in Chromium.
-// Exits 1 when any check fails.
-import { spawn } from 'node:child_process';
+// Needs wrangler on the PATH and the share server's code (SHARE_SERVER, by default server/ in this repository). The
+// share server is copied to a temp folder and this plugin's reader published into the copy (so server/public/r/ is
+// never touched), then run there with wrangler dev on 8798. The share library (node-datachannel) is installed once
+// into SPECBOOK_DEPS (by default ~/.cache/specbook-test-deps), never ~/.claude/specbook. Copies starter/ to a temp
+// folder, serves it on port 4296 with serve.mjs --detach, reads the two links it prints, and drives the owner's tab
+// and the readers in Chromium. Exits 1 when any check fails.
+import { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CSP } from '../../server/src/rules.mjs';
 
 if (!process.env.GLOBAL_ROOT) {
   console.error('Set GLOBAL_ROOT to the global Playwright install, e.g. GLOBAL_ROOT=$(npm root -g)/playwright');
@@ -31,10 +36,30 @@ if (!existsSync(join(SHARE_SERVER, 'wrangler.jsonc'))) {
   console.error(`No share server at ${SHARE_SERVER}; set SHARE_SERVER.`);
   process.exit(2);
 }
+// The share library goes into a cache outside the repository, kept between runs; never the real ~/.claude/specbook.
+const DEPS = process.env.SPECBOOK_DEPS || join(homedir(), '.cache', 'specbook-test-deps');
+if (resolve(DEPS).startsWith(resolve(homedir(), '.claude'))) {
+  console.error(`SPECBOOK_DEPS must not be under ~/.claude: ${DEPS}`);
+  process.exit(2);
+}
+mkdirSync(DEPS, { recursive: true });
+const VERSION = JSON.parse(readFileSync(join(PLUGIN, '.claude-plugin', 'plugin.json'), 'utf8')).version;
+
+// The share server, copied, with this plugin's reader published into the copy.
+const site = mkdtempSync(join(tmpdir(), 'specbook-share-site-'));
+cpSync(SHARE_SERVER, site, { recursive: true, filter: p => !/[\\/](\.wrangler|node_modules|\.env)$/.test(p) });
+{
+  const pub = spawnSync(process.execPath, [join(SHARE_SERVER, 'publish-reader.mjs'), '--app', join(PLUGIN, 'app'), '--out', join(site, 'public', 'r'), '--version', VERSION, '--force'], { encoding: 'utf8' });
+  if (pub.status !== 0) {
+    console.error(`publish-reader failed: ${pub.stderr || pub.stdout}`);
+    rmSync(site, { recursive: true, force: true });
+    process.exit(2);
+  }
+}
 
 const data = mkdtempSync(join(tmpdir(), 'specbook-share-'));
 cpSync(join(PLUGIN, 'starter'), data, { recursive: true });
-// An image inside a mockup (a shadow root), as a book's logo is: guests load it over the channel.
+// An image inside a mockup (a shadow root), as a book's logo is: readers load it over the channel.
 mkdirSync(join(data, 'mockups', 'assets'), { recursive: true });
 writeFileSync(join(data, 'mockups', 'assets', 'dot.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64'));
 appendFileSync(join(data, 'mockups', 'todos-list-1.html'), '<img class="probe" src="/data/mockups/assets/dot.png" alt="">');
@@ -42,10 +67,12 @@ appendFileSync(join(data, 'mockups', 'todos-list-1.html'), '<img class="probe" s
 const bookFile = join(data, 'book.json');
 const bookJson = JSON.parse(readFileSync(bookFile, 'utf8'));
 bookJson.settings = { ...(bookJson.settings ?? {}), shareBroker: BROKER };
-// More mockups than the host answers for one guest at once, as a real book has.
+// More mockups than the host answers for one reader at once, as a real book has; and one whose HTML tries to run.
 const due = bookJson.chapters.flatMap(c => c.sections).find(s => s.id === 'due');
 due.frames = Array.from({ length: 30 }, (_, i) => ({ id: `later-due-${i + 1}`, caption: `Extra ${i + 1}`, mockup: `mockups/extra-${i + 1}.html` }));
 due.frames.forEach((f, i) => writeFileSync(join(data, f.mockup), `<div class="phone"><p>Extra ${i + 1}</p></div>`));
+due.frames.push({ id: 'later-due-pwn', caption: 'Hostile', mockup: 'mockups/pwn.html' });
+writeFileSync(join(data, 'mockups', 'pwn.html'), '<div class="phone"><p>Hostile</p><script>window.__pwned=1</script><img src=x onerror="window.__pwned=2"></div>');
 writeFileSync(bookFile, JSON.stringify(bookJson, null, 2));
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -63,6 +90,7 @@ async function waitFor(fn, ms, what) {
   }
 }
 const up = url => fetch(url).then(r => r.status < 500, () => false);
+const shareOf = () => fetch(`${OWNER}api/share`).then(r => r.json());
 function review() {
   const file = join(data, 'review.json');
   return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : { notes: {} };
@@ -78,6 +106,9 @@ async function check(name, fn) {
     console.log(`FAIL ${name}\n     ${e && e.message ? e.message : e}`);
   }
 }
+function skip(name, why) {
+  console.log(`skip ${name} (${why})`);
+}
 
 const children = [];
 function run(cmd, args, opts) {
@@ -86,59 +117,175 @@ function run(cmd, args, opts) {
   return p;
 }
 
-// Detached, the way /specbook:open starts it; stopped at the end.
-const serve = (...args) => new Promise(done => spawn(process.execPath, [join(PLUGIN, 'server', 'serve.mjs'), '--data', data, ...args], { stdio: 'ignore' }).on('exit', done));
-await serve('--port', String(PORT), '--detach');
+// serve.mjs, as /specbook:open runs it (detached), with the share library from DEPS. Resolves with what it printed.
+const serve = (...args) => new Promise(done => {
+  const p = spawn(process.execPath, [join(PLUGIN, 'server', 'serve.mjs'), '--data', data, ...args], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, SPECBOOK_DEPS: DEPS } });
+  let out = '';
+  p.stdout.on('data', d => { out += d; });
+  p.stderr.on('data', d => { out += d; });
+  p.on('exit', () => done(out));
+});
+// The two links serve.mjs --detach prints.
+function linksOf(out) {
+  const url = /^Share link: (\S+)$/m.exec(out)?.[1];
+  const pinUrl = /^Your pin link \(opens with your powers; never send it to anyone\): (\S+)$/m.exec(out)?.[1];
+  if (!url || !pinUrl) {
+    throw new Error(`serve.mjs --detach printed no links:\n${out}`);
+  }
+  return { url, pinUrl };
+}
+
 // Its own state each run, so earlier runs' rooms do not count against the rate limit.
 const brokerState = mkdtempSync(join(tmpdir(), 'specbook-share-state-'));
-const broker = run('wrangler', ['dev', '--port', '8798', '--ip', '127.0.0.1', '--show-interactive-dev-session=false', '--persist-to', brokerState], { cwd: SHARE_SERVER });
 let brokerLog = '';
-broker.stdout.on('data', d => { brokerLog += d; });
-broker.stderr.on('data', d => { brokerLog += d; });
 let browser;
 const errors = [];
+// A reader's page, with its errors collected.
+async function pageIn(ctx, who) {
+  const page = await ctx.newPage();
+  page.on('pageerror', e => errors.push(`${who}: ${e.message}`));
+  page.on('console', m => {
+    // The hostile mockup's broken image, on localhost (where book HTML is the owner's own and is not cleaned).
+    if (m.type() === 'error' && !(/Failed to load resource/.test(m.text()) && /\/x$/.test(m.location()?.url ?? ''))) {
+      errors.push(`${who}: ${m.text()}`);
+    }
+  });
+  return page;
+}
+const newCtx = (opts = {}) => browser.newContext({ viewport: { width: 1280, height: 900 }, ...opts });
+const chipOf = page => page.evaluate(() => document.querySelector('.share-chip')?.textContent ?? '');
+const isOwnerPage = page => page.evaluate(() => !!window.SpecShare && window.SpecShare.role === 'owner' && !document.body.classList.contains('guest') && getComputedStyle(document.getElementById('claude-menu')).display !== 'none');
+const isGuestPage = page => page.evaluate(() => !!window.SpecShare && window.SpecShare.role === 'guest' && document.body.classList.contains('guest') && getComputedStyle(document.getElementById('claude-menu')).display === 'none');
+const pinKeyOf = url => `specbook-pin:${new URL(url).pathname.split('/')[2]}`;
 try {
-  await waitFor(() => up(`${OWNER}api/health`), 5000, 'the book server');
+  const broker = run('wrangler', ['dev', '--port', '8798', '--ip', '127.0.0.1', '--show-interactive-dev-session=false', '--persist-to', brokerState], { cwd: site });
+  broker.stdout.on('data', d => { brokerLog += d; });
+  broker.stderr.on('data', d => { brokerLog += d; });
   await waitFor(() => up(`${BROKER}/`), 60000, 'the broker (wrangler dev)').catch(e => {
     throw new Error(`${e.message}\n${brokerLog}`);
   });
+  const started = await serve('--port', String(PORT), '--detach');
+  let { url: link, pinUrl } = linksOf(started);
+  await waitFor(() => up(`${OWNER}api/health`), 5000, 'the book server');
+  if (!link.startsWith(`${BROKER}/s/`) || pinUrl !== `${link}#pin=${pinUrl.split('#pin=')[1]}` || !/^[A-Za-z0-9]{22}$/.test(pinUrl.split('#pin=')[1])) {
+    throw new Error(`unexpected links: ${link} ${pinUrl}`);
+  }
+
   // Both pages run in one headless browser, which cannot resolve the mDNS names Chrome hides local addresses behind.
   browser = await chromium.launch({ args: ['--disable-features=WebRtcHideLocalIpsWithMdns'] });
-  const guestCtx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const guest = await guestCtx.newPage();
-  guest.on('pageerror', e => errors.push(`guest: ${e.message}`));
-  guest.on('console', m => { if (m.type() === 'error') { errors.push(`guest: ${m.text()}`); } });
-  const owner = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
-  owner.on('pageerror', e => errors.push(`owner: ${e.message}`));
-  owner.on('console', m => { if (m.type() === 'error') { errors.push(`owner: ${m.text()}`); } });
-  // The owner's open tab hosts the share.
+  const guestCtx = await newCtx();
+  const guest = await pageIn(guestCtx, 'guest');
+  let owner = await pageIn(await newCtx(), 'owner');
+  // The owner's localhost tab follows the share the server hosts.
   await owner.goto(OWNER);
   await owner.waitForSelector('#todos-list');
-  await waitFor(async () => (await (await fetch(`${OWNER}api/share`)).json()).tabs > 0, 5000, 'the owner tab to listen');
-  // The tab shares by itself, with nothing run in the terminal.
-  const link = await waitFor(async () => {
-    const v = await (await fetch(`${OWNER}api/share`)).json();
-    return v.state === 'live' && v.url;
-  }, 15000, 'the share link').catch(async e => {
-    throw new Error(`${e.message}\nshare: ${JSON.stringify(await (await fetch(`${OWNER}api/share`)).json())}\nerrors: ${errors.join('\n')}`);
-  });
-  await owner.waitForFunction(() => document.querySelector('.share-pill .share-solo')?.textContent === 'Only you', null, { timeout: 5000 });
+  await owner.waitForFunction(() => document.querySelector('.share-pill .share-solo')?.textContent === 'Only you', null, { timeout: 8000 });
   const ownerName = await owner.evaluate(() => window.SpecBook.me().name);
+  if (await owner.evaluate(() => window.SpecHost.link()) !== link || await owner.evaluate(() => window.SpecHost.pinLink()) !== pinUrl) {
+    throw new Error('the owner tab\'s links are not the ones serve.mjs printed');
+  }
 
-  await check('a guest names themself, connects, and reads the live book', async () => {
+  const spot = page => page.evaluate(() => {
+    const h = document.querySelector('#todos-list > h3');
+    h.scrollIntoView({ block: 'center', behavior: 'instant' });
+    const r = h.getBoundingClientRect();
+    return { x: r.left + Math.min(200, r.width / 2), y: r.top + r.height / 2 };
+  });
+  // `dx` moves the click along the heading, off a pin already there.
+  const comment = async (page, text, dx = 0) => {
+    await page.keyboard.press('c');
+    await page.waitForSelector('body.commenting');
+    const at = await spot(page);
+    await page.mouse.click(at.x + dx, at.y);
+    await page.waitForSelector('.sticky.editing textarea');
+    await page.keyboard.type(text);
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Escape');
+  };
+
+  await check('a guest on the plain link reads the book and saves a note', async () => {
     await guest.goto(link);
-    await guest.waitForSelector('.share-join input', { timeout: 5000 });
+    await guest.waitForSelector('.share-join input', { timeout: 8000 });
     await guest.fill('.share-join input', 'Ann');
     await guest.click('.share-join button');
     await guest.waitForSelector('#todos-list', { timeout: 20000 }).catch(async e => {
-      throw new Error(`${e.message}\nchip: ${await guest.evaluate(() => document.querySelector('.share-chip')?.textContent)}\nbody: ${(await guest.evaluate(() => document.body.innerHTML)).slice(0, 400)}`);
+      throw new Error(`${e.message}\nchip: ${await chipOf(guest)}\nbody: ${(await guest.evaluate(() => document.body.innerHTML)).slice(0, 400)}`);
     });
     await guest.waitForFunction(() => /Live · Ann/.test(document.querySelector('.share-chip')?.textContent ?? ''), null, { timeout: 5000 });
     if (await guest.locator('.share-chip').isVisible()) {
       throw new Error('the status chip still shows once the guest is live');
     }
-    if (await guest.evaluate(() => location.hash) !== '') {
-      throw new Error('the link key stayed in the address');
+    // The page is the website's reader, not anything the host sent.
+    const reader = await guest.evaluate(() => [...document.scripts].map(s => s.getAttribute('src')));
+    if (!reader.length || reader.some(s => !s || !s.startsWith(`/r/`))) {
+      throw new Error(`scripts not from /r/: ${JSON.stringify(reader)}`);
+    }
+    await comment(guest, 'From Ann over WebRTC');
+    const saved = await waitFor(() => Object.values(review().notes).find(n => n.text === 'From Ann over WebRTC'), 5000, 'review.json to hold the guest note');
+    if (saved.author !== 'Ann' || !saved.authorKey) {
+      throw new Error(`the note is not Ann's: ${JSON.stringify(saved)}`);
+    }
+    const seen = await guest.evaluate(async () => Object.values((await (await fetch('/api/book')).json()).review.notes));
+    if (seen.some(n => 'authorKey' in n) || !seen.some(n => n.mine && n.author === 'Ann')) {
+      throw new Error(`a guest sees note keys, or not their own: ${JSON.stringify(seen)}`);
+    }
+    await owner.waitForFunction(() => document.querySelectorAll('.share-pill .face').length === 2, null, { timeout: 5000 }).catch(async e => {
+      throw new Error(`${e.message}: ${await owner.evaluate(() => document.querySelector('.share-pill')?.outerHTML)}`);
+    });
+    await owner.waitForFunction(() => [...document.querySelectorAll('.sticky:not([hidden]) textarea')].some(t => t.value === 'From Ann over WebRTC'), null, { timeout: 8000 });
+    if (await owner.locator('.sticky .st-by').count()) {
+      throw new Error('a sticky names who wrote it');
+    }
+  });
+
+  await check('a guest cannot Revise', async () => {
+    if (!(await isGuestPage(guest))) {
+      throw new Error('the guest page shows the Claude group (Revise)');
+    }
+    const shown = await guest.evaluate(() => [...document.querySelectorAll('#revise, .bar-group.claude, .rv-acts, .stage-btn')].some(e => e.offsetParent !== null));
+    if (shown) {
+      throw new Error('an owner-only control is showing');
+    }
+    const statuses = await guest.evaluate(async () => Promise.all([
+      fetch('/api/requests', { method: 'POST' }).then(r => r.status),
+      fetch('/api/revise', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"items":[{"note":"x"}]}' }).then(r => r.status),
+      fetch('/api/accept', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"key":"x"}' }).then(r => r.status),
+      fetch('/api/build', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).then(r => r.status),
+      fetch('/api/share/new-pin', { method: 'POST' }).then(r => r.status),
+    ]));
+    if (statuses.some(s => s !== 403)) {
+      throw new Error(`expected 403s, got ${statuses}`);
+    }
+    if (existsSync(join(data, 'requests'))) {
+      throw new Error('a guest wrote a request');
+    }
+    // A path that would turn into another host in the host's fetch is refused there.
+    const tricks = await guest.evaluate(async () => Promise.all(['/\\127.0.0.1:9/app/x', '/\t/127.0.0.1:9/app/x', '//127.0.0.1:9/app/x', '/\n/127.0.0.1:9/data/x']
+      .map(p => window.SpecShare.request('GET', p).then(r => r.status))));
+    if (tricks.some(s => s !== 403)) {
+      throw new Error(`a host-changing path was not refused: ${tricks}`);
+    }
+  });
+
+  await check('a mockup\'s script and onerror never run on the link', async () => {
+    // The hostile mockup is drawn (cleaned) on the link, and nothing in it ran.
+    await guest.waitForFunction(() => [...document.querySelectorAll('[data-mockup]')].some(h => h.dataset.mockup.endsWith('pwn.html') && h.shadowRoot?.querySelector('.phone')), null, { timeout: 8000 });
+    await sleep(500);
+    const got = await guest.evaluate(() => {
+      const h = [...document.querySelectorAll('[data-mockup]')].find(x => x.dataset.mockup.endsWith('pwn.html'));
+      return { pwned: window.__pwned, scripts: h.shadowRoot.querySelectorAll('script').length, handlers: [...h.shadowRoot.querySelectorAll('*')].filter(e => [...e.attributes].some(a => /^on/i.test(a.name))).length };
+    });
+    if (got.pwned !== undefined || got.scripts || got.handlers) {
+      throw new Error(`the mockup's code got through: ${JSON.stringify(got)}`);
+    }
+  });
+
+  await check('the page has the CSP header', async () => {
+    for (const u of [link, `${BROKER}/r/${VERSION}/share.html`, `${BROKER}/r/${VERSION}/book.js`]) {
+      const r = await fetch(u);
+      if (r.status !== 200 || r.headers.get('content-security-policy') !== CSP) {
+        throw new Error(`${u}: ${r.status}, CSP ${r.headers.get('content-security-policy')}`);
+      }
     }
   });
 
@@ -168,67 +315,6 @@ try {
       document.body.appendChild(img);
     });
     await guest.waitForFunction(() => document.getElementById('page-probe').naturalWidth === 1, null, { timeout: 5000 });
-  });
-
-  await check('a guest sees no Claude controls, and the host refuses Revise and Accept', async () => {
-    const shown = await guest.evaluate(() => [...document.querySelectorAll('.bar-group.claude, .rv-acts, .stage-btn')].some(e => e.offsetParent !== null));
-    if (shown) {
-      throw new Error('an owner-only control is showing');
-    }
-    const statuses = await guest.evaluate(async () => Promise.all([
-      fetch('/api/revise', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"items":[{"note":"x"}]}' }).then(r => r.status),
-      fetch('/api/accept', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"key":"x"}' }).then(r => r.status),
-      fetch('/api/build', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).then(r => r.status),
-    ]));
-    if (statuses.some(s => s !== 403)) {
-      throw new Error(`expected 403s, got ${statuses}`);
-    }
-    if (existsSync(join(data, 'requests'))) {
-      throw new Error('a guest wrote a request');
-    }
-    // A path that would turn into another host in the host tab's fetch is refused there.
-    const tricks = await guest.evaluate(async () => Promise.all(['/\\127.0.0.1:9/app/x', '/\t/127.0.0.1:9/app/x', '//127.0.0.1:9/app/x', '/\n/127.0.0.1:9/data/x']
-      .map(p => window.SpecShare.request('GET', p).then(r => r.status))));
-    if (tricks.some(s => s !== 403)) {
-      throw new Error(`a host-changing path was not refused: ${tricks}`);
-    }
-  });
-
-  const spot = page => page.evaluate(() => {
-    const h = document.querySelector('#todos-list > h3');
-    h.scrollIntoView({ block: 'center', behavior: 'instant' });
-    const r = h.getBoundingClientRect();
-    return { x: r.left + Math.min(200, r.width / 2), y: r.top + r.height / 2 };
-  });
-  // `dx` moves the click along the heading, off a pin already there.
-  const comment = async (page, text, dx = 0) => {
-    await page.keyboard.press('c');
-    await page.waitForSelector('body.commenting');
-    const at = await spot(page);
-    await page.mouse.click(at.x + dx, at.y);
-    await page.waitForSelector('.sticky.editing textarea');
-    await page.keyboard.type(text);
-    await page.keyboard.press('Enter');
-    await page.keyboard.press('Escape');
-  };
-
-  await check('a guest\'s note is saved as theirs, and the owner sees it, with no name on it', async () => {
-    await comment(guest, 'From Ann over WebRTC');
-    const saved = await waitFor(() => Object.values(review().notes).find(n => n.text === 'From Ann over WebRTC'), 5000, 'review.json to hold the guest note');
-    if (saved.author !== 'Ann' || !saved.authorKey) {
-      throw new Error(`the note is not Ann's: ${JSON.stringify(saved)}`);
-    }
-    const seen = await guest.evaluate(async () => Object.values((await (await fetch('/api/book')).json()).review.notes));
-    if (seen.some(n => 'authorKey' in n) || !seen.some(n => n.mine && n.author === 'Ann')) {
-      throw new Error(`a guest sees note keys, or not their own: ${JSON.stringify(seen)}`);
-    }
-    await owner.waitForFunction(() => document.querySelectorAll('.share-pill .face').length === 2, null, { timeout: 5000 }).catch(async e => {
-      throw new Error(`${e.message}: ${await owner.evaluate(() => document.querySelector('.share-pill')?.outerHTML)}`);
-    });
-    await owner.waitForFunction(() => [...document.querySelectorAll('.sticky:not([hidden]) textarea')].some(t => t.value === 'From Ann over WebRTC'), null, { timeout: 8000 });
-    if (await owner.locator('.sticky .st-by').count()) {
-      throw new Error('a sticky names who wrote it');
-    }
   });
 
   // The sticky with this text on a page: where it is, whether it shows, and whether its pin is turned by its arrow.
@@ -417,18 +503,6 @@ try {
     }
   });
 
-  await check('reloading the owner\'s tab keeps the link, and the guest reconnects', async () => {
-    await owner.reload();
-    await owner.waitForSelector('#todos-list');
-    await waitFor(async () => (await (await fetch(`${OWNER}api/share`)).json()).state === 'live', 8000, 'the share to be live again');
-    const now = (await (await fetch(`${OWNER}api/share`)).json()).url;
-    if (now !== link) {
-      throw new Error(`the link changed on reload: ${link} -> ${now}`);
-    }
-    await guest.waitForFunction(() => /Live · Ann/.test(document.querySelector('.share-chip')?.textContent ?? ''), null, { timeout: 20000 });
-    await owner.waitForFunction(() => document.querySelectorAll('.share-pill .face').length === 2, null, { timeout: 8000 });
-  });
-
   await check('the same guest in a second tab is not asked their name, both tabs stay live, and they are one face', async () => {
     const second = await guestCtx.newPage();
     second.on('pageerror', e => errors.push(`guest2: ${e.message}`));
@@ -487,56 +561,180 @@ try {
     await owner.waitForFunction(() => window.SpecHost.people().length === 2, null, { timeout: 8000 });
   });
 
-  await check('a link with the wrong key does not connect', async () => {
-    const bad = await (await browser.newContext()).newPage();
-    await bad.addInitScript(() => localStorage.setItem('specbook-guest-name', 'Eve'));
-    await bad.goto(link.replace(/#.*/, `#${'A'.repeat(43)}`));
-    await bad.waitForFunction(() => /not valid/.test(document.querySelector('.share-chip')?.textContent ?? ''), null, { timeout: 15000 });
-    if (await bad.locator('#todos-list').count()) {
-      throw new Error('the book loaded with a forged key');
-    }
-  });
-
   await check('the book\'s server hears who the guests are', async () => {
-    const guests = (await (await fetch(`${OWNER}api/share`)).json()).guests;
+    const guests = (await shareOf()).guests;
     if (!guests?.includes('Ann')) {
       throw new Error(`guests: ${JSON.stringify(guests)}`);
     }
   });
 
-  let owner2;
-  await check('closing the owner\'s tab pauses the share (a follower hears the owner left); reopening reconnects the guest without a reload', async () => {
-    await guest.locator('.share-pill .face:not(.me)').first().click();
-    await guest.waitForFunction(() => !document.querySelector('.follow-chip').hidden, null, { timeout: 3000 });
-    await owner.close();
-    await guest.waitForFunction(name => (document.querySelector('.follow-chip')?.textContent ?? '') === `${name} left`, ownerName, { timeout: 3000 });
-    await guest.waitForFunction(() => /isn.t open right now/.test(document.querySelector('.share-chip')?.textContent ?? ''), null, { timeout: 10000 });
-    await waitFor(async () => (await (await fetch(`${OWNER}api/share`)).json()).state === 'idle', 5000, 'the server to hear the tab go');
-    owner2 = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
-    owner2.on('pageerror', e => errors.push(`owner: ${e.message}`));
-    await guest.evaluate(() => { window.__noReload = true; });
-    await owner2.goto(OWNER);
-    await owner2.waitForSelector('#todos-list');
-    await guest.waitForFunction(() => /Live · Ann/.test(document.querySelector('.share-chip')?.textContent ?? ''), null, { timeout: 20000 });
-    if (!(await guest.evaluate(() => window.__noReload))) {
-      throw new Error('the guest page reloaded');
+  // The owner's other device: opens the pin link.
+  const phoneCtx = await newCtx();
+  const phone = await pageIn(phoneCtx, 'phone');
+  await check('the pin leaves the address and is remembered', async () => {
+    await phone.goto(pinUrl);
+    await phone.waitForSelector('#todos-list', { timeout: 20000 });
+    await phone.waitForFunction(() => window.SpecShare.role === 'owner', null, { timeout: 5000 });
+    const where = await phone.evaluate(() => ({ hash: location.hash, href: location.href, asked: !!document.querySelector('.share-join') }));
+    if (/pin/.test(where.hash) || /pin=/.test(where.href) || where.href !== link) {
+      throw new Error(`the address after the pin link: ${JSON.stringify(where)}`);
     }
-    if ((await (await fetch(`${OWNER}api/share`)).json()).url !== link) {
-      throw new Error('the link changed when the tab was reopened');
+    if (where.asked) {
+      throw new Error('the pin link asked for a name');
+    }
+    if (!(await isOwnerPage(phone))) {
+      throw new Error('the pin link did not open the book with the owner\'s powers');
+    }
+    if (await phone.evaluate(k => localStorage.getItem(k), pinKeyOf(link)) !== pinUrl.split('#pin=')[1]) {
+      throw new Error('the pin was not saved for this room');
+    }
+    await phone.reload();
+    await phone.waitForSelector('#todos-list', { timeout: 20000 });
+    await phone.waitForFunction(() => window.SpecShare.role === 'owner', null, { timeout: 5000 });
+    if (!(await isOwnerPage(phone))) {
+      throw new Error('after a reload the plain link lost the owner\'s powers (Revise is missing)');
+    }
+    // A pinned reader is the owner, in the host's people too.
+    const roles = await owner.evaluate(() => window.SpecHost.people().map(p => `${p.name}:${p.role}`));
+    if (!roles.includes(`${ownerName}:owner`) || roles.filter(r => r.endsWith(':owner')).length < 2) {
+      throw new Error(`people: ${JSON.stringify(roles)}`);
     }
   });
 
-  await check('restarting the book\'s server keeps the link, and the guest reconnects', async () => {
-    await serve('--stop');
-    await serve('--port', String(PORT), '--detach');
-    await waitFor(async () => {
-      const v = await fetch(`${OWNER}api/share`).then(r => r.json(), () => null);
-      return v && v.state === 'live';
-    }, 20000, 'the share to be live again');
-    if ((await (await fetch(`${OWNER}api/share`)).json()).url !== link) {
-      throw new Error('the link changed when the server restarted');
+  await check('Forget pin on this device', async () => {
+    await phone.click('.share-pill .share-more');
+    await phone.waitForSelector('.share-menu .share-forget-pin', { timeout: 3000 });
+    if (await phone.locator('.share-menu .share-pin-copy, .share-menu .share-new-pin').count()) {
+      throw new Error('the website\'s menu offers Copy pin link or New pin');
     }
-    await guest.waitForFunction(() => /Live · Ann/.test(document.querySelector('.share-chip')?.textContent ?? ''), null, { timeout: 20000 });
+    await Promise.all([phone.waitForNavigation(), phone.click('.share-menu .share-forget-pin')]);
+    // Reloaded as a guest: asked for a name, then the book with a guest's rights.
+    await phone.waitForSelector('.share-join input', { timeout: 8000 });
+    await phone.fill('.share-join input', 'Phone');
+    await phone.click('.share-join button');
+    await phone.waitForSelector('#todos-list', { timeout: 20000 });
+    await phone.waitForFunction(() => window.SpecShare.role === 'guest', null, { timeout: 5000 });
+    if (!(await isGuestPage(phone))) {
+      throw new Error('after Forget pin the page still has the owner\'s powers');
+    }
+    if (await phone.evaluate(k => localStorage.getItem(k), pinKeyOf(link)) !== null) {
+      throw new Error('the pin is still saved');
+    }
+    if (await phone.evaluate(() => fetch('/api/requests', { method: 'POST' }).then(r => r.status)) !== 403) {
+      throw new Error('a reader who forgot the pin may still call owner routes');
+    }
+  });
+
+  await check('New pin makes the old pin say: This pin no longer works.', async () => {
+    // The phone takes the pin again, then the owner makes a new one from the localhost tab's menu.
+    // The same tab, already on the link: only the address's # changes, and the page takes the pin from there too.
+    await phone.goto(pinUrl);
+    await phone.waitForFunction(() => window.SpecShare && window.SpecShare.role === 'owner' && !/pin=/.test(location.href), null, { timeout: 20000 }).catch(async e => {
+      throw new Error(`${e.message}: the phone at ${await phone.evaluate(() => location.href)}, chip ${await chipOf(phone)}`);
+    });
+    const old = pinUrl;
+    await owner.click('.share-pill .share-more');
+    await owner.waitForSelector('.share-menu .share-new-pin', { timeout: 3000 });
+    if (!(await owner.locator('.share-menu .share-pin-copy').count())) {
+      throw new Error('the owner tab\'s menu has no Copy pin link');
+    }
+    await owner.click('.share-menu .share-new-pin');
+    pinUrl = await waitFor(async () => {
+      const v = await shareOf();
+      return v.pinUrl && v.pinUrl !== old && v.pinUrl;
+    }, 5000, 'a new pin link');
+    if (!pinUrl.startsWith(`${link}#pin=`)) {
+      throw new Error(`the new pin link is not on the same link: ${pinUrl}`);
+    }
+    await owner.keyboard.press('Escape');
+    await owner.mouse.click(5, 300);
+    // The phone, connected with the old pin, is let go, reconnects, and hears that the pin no longer works.
+    await phone.waitForFunction(() => document.querySelector('.share-join-bad')?.textContent === 'This pin no longer works.', null, { timeout: 20000 }).catch(async e => {
+      throw new Error(`${e.message}: chip ${await chipOf(phone)}`);
+    });
+    if (await phone.evaluate(k => localStorage.getItem(k), pinKeyOf(link)) !== null) {
+      throw new Error('the old pin is still saved');
+    }
+    await Promise.all([phone.waitForNavigation(), phone.click('.share-join button')]);
+    await phone.waitForSelector('#todos-list', { timeout: 20000 });
+    await phone.waitForFunction(() => window.SpecShare.role === 'guest', null, { timeout: 5000 });
+    // The old pin link, opened fresh, says the same and gives a guest's rights.
+    const late = await pageIn(await newCtx(), 'late');
+    try {
+      await late.goto(old);
+      await late.waitForFunction(() => document.querySelector('.share-join-bad')?.textContent === 'This pin no longer works.', null, { timeout: 20000 });
+      if (await late.evaluate(() => location.href) !== link) {
+        throw new Error('the old pin stayed in the address');
+      }
+    } finally {
+      await late.context().close();
+    }
+  });
+
+  // The owner's phone with the new pin, for the restart.
+  const pinned = await pageIn(await newCtx(), 'pinned');
+  await pinned.goto(pinUrl);
+  await pinned.waitForFunction(() => window.SpecShare && window.SpecShare.role === 'owner', null, { timeout: 20000 });
+
+  await check('the owner tab can close and the guest stays connected', async () => {
+    await guest.locator('.share-pill .face:not(.me)').first().click();
+    await guest.waitForFunction(() => !document.querySelector('.follow-chip').hidden, null, { timeout: 3000 });
+    await guest.evaluate(() => { window.__noReload = true; });
+    await owner.close({ runBeforeUnload: true });
+    await sleep(3000);
+    const after = await guest.evaluate(async () => ({
+      chip: document.querySelector('.share-chip')?.textContent ?? '',
+      book: await fetch('/api/book').then(r => r.status, () => 0),
+      stayed: !!window.__noReload,
+    }));
+    if (!/Live · Ann/.test(after.chip) || after.book !== 200 || !after.stayed) {
+      throw new Error(`the guest after the owner's tab closed: ${JSON.stringify(after)}`);
+    }
+    if ((await shareOf()).state !== 'live') {
+      throw new Error('the share stopped with the owner\'s tab');
+    }
+    // A note still reaches the book.
+    await comment(guest, 'With the tab closed', 160);
+    await waitFor(() => Object.values(review().notes).some(n => n.text === 'With the tab closed'), 5000, 'the note to be saved');
+    // The owner opens the book again.
+    owner = await pageIn(await newCtx(), 'owner');
+    await owner.goto(OWNER);
+    await owner.waitForSelector('#todos-list');
+    await owner.waitForFunction(() => window.SpecHost.state() === 'live', null, { timeout: 8000 });
+    await owner.waitForFunction(() => window.SpecHost.people().some(p => p.name === 'Ann'), null, { timeout: 8000 });
+  });
+
+  await check('a restart keeps the link and the pin', async () => {
+    await guest.evaluate(() => { window.__noReload = true; });
+    await pinned.evaluate(() => { window.__noReload = true; });
+    const before = errors.length;
+    await serve('--stop');
+    // The owner tab's event stream is cut by the stop, as it should be: not a page error.
+    await sleep(500);
+    for (let i = errors.length - 1; i >= before; i--) {
+      if (/^owner: Failed to load resource: net::ERR_INCOMPLETE_CHUNKED_ENCODING/.test(errors[i])) { errors.splice(i, 1); }
+    }
+    const again = linksOf(await serve('--port', String(PORT), '--detach'));
+    if (again.url !== link || again.pinUrl !== pinUrl) {
+      throw new Error(`the links changed: ${link} ${pinUrl} -> ${again.url} ${again.pinUrl}`);
+    }
+    await guest.waitForFunction(() => /Live · Ann/.test(document.querySelector('.share-chip')?.textContent ?? '') && window.SpecShare.role === 'guest', null, { timeout: 30000 }).catch(async e => {
+      throw new Error(`${e.message}: guest chip ${await chipOf(guest)}`);
+    });
+    await pinned.waitForFunction(() => /^Live/.test(document.querySelector('.share-chip')?.textContent ?? '') && window.SpecShare.role === 'owner', null, { timeout: 30000 }).catch(async e => {
+      throw new Error(`${e.message}: pinned chip ${await chipOf(pinned)}`);
+    });
+    // Connected again, not reloaded, and with the same rights.
+    await waitFor(async () => (await guest.evaluate(() => fetch('/api/book').then(r => r.status, () => 0))) === 200, 10000, 'the guest to read again');
+    if (!(await guest.evaluate(() => window.__noReload)) || !(await pinned.evaluate(() => window.__noReload))) {
+      throw new Error('a reader page reloaded');
+    }
+    if (!(await isOwnerPage(pinned)) || !(await isGuestPage(guest))) {
+      throw new Error('a reader came back with other rights');
+    }
+    if (await guest.evaluate(() => fetch('/api/requests', { method: 'POST' }).then(r => r.status)) !== 403) {
+      throw new Error('the guest may call owner routes after the restart');
+    }
   });
 
   await check('a room\'s token renews it; another token cannot take it; once ended it stays ended', async () => {
@@ -569,19 +767,28 @@ try {
     }
   });
 
-  await check('New link ends the old link', async () => {
+  await check('New link ends the old link: This share has ended', async () => {
     const before = errors.length;
-    await owner2.evaluate(() => window.SpecHost.newLink());
+    await owner.waitForFunction(() => window.SpecHost.state() === 'live', null, { timeout: 15000 });
+    await owner.evaluate(() => window.SpecHost.newLink());
     await guest.waitForFunction(() => /This share has ended/.test(document.querySelector('.share-chip')?.textContent ?? ''), null, { timeout: 15000 });
-    await waitFor(async () => {
-      const v = await (await fetch(`${OWNER}api/share`)).json();
-      return v.state === 'live' && v.url && v.url !== link;
+    await pinned.waitForFunction(() => /This share has ended/.test(document.querySelector('.share-chip')?.textContent ?? ''), null, { timeout: 15000 });
+    const now = await waitFor(async () => {
+      const v = await shareOf();
+      return v.state === 'live' && v.url && v.url !== link && v;
     }, 10000, 'a new link');
-    // The guest asking for its ended room is answered 410, as it should be: not a page error.
+    if (!now.pinUrl.startsWith(`${now.url}#pin=`) || now.pinUrl === `${now.url}#pin=${pinUrl.split('#pin=')[1]}`) {
+      throw new Error('New link kept the old pin');
+    }
+    // A reader asking for its ended room is answered 410, as it should be: not a page error.
     for (let i = errors.length - 1; i >= before; i--) {
-      if (/^guest: Failed to load resource: .*(404|410)/.test(errors[i])) { errors.splice(i, 1); }
+      if (/^(guest|pinned|phone): Failed to load resource: .*(404|410)/.test(errors[i])) { errors.splice(i, 1); }
     }
   });
+
+  // Tab-hosted (protocol 2) rooms keep today's guest page: checked by the rules unit tests (pageFor). Driving a 1.3.0
+  // host tab here would need that plugin's whole app from git history, which this smoke does not set up.
+  skip('a protocol 2 host still works', 'needs the 1.3.0 host tab from git history; pageFor({ protocol: 2 }) is covered by server/src/rules.test.mjs');
 
   await check('no page errors', async () => {
     if (errors.length) {
@@ -593,12 +800,13 @@ try {
   console.log(`FAIL setup\n     ${e && e.message ? e.message : e}`);
 } finally {
   await browser?.close();
+  await serve('--stop');
   for (const p of children) {
     p.kill();
   }
-  await serve('--stop');
   await sleep(300);
   rmSync(data, { recursive: true, force: true });
   rmSync(brokerState, { recursive: true, force: true });
+  rmSync(site, { recursive: true, force: true });
 }
 process.exit(failures ? 1 : 0);

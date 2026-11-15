@@ -178,23 +178,39 @@ only, remembered) draws the pins of sent and answered notes again, read-only.
 
 ## Sharing a book
 
-The book is shared whenever your book tab is open, so others (or you, from a phone) can read it and leave notes from
-anywhere. **Copy link** in the bar copies the link; the same menu has **New link** and **Stop sharing**. `settings.share: false` in `book.json`
-turns this off: the bar then shows **Share**, which starts a share on click. Your open book tab is the host. It sends the book straight to each guest over WebRTC, encrypted end to end.
-A share server, `https://specbook.jasonrowland.com` unless the book names its own in `settings.shareBroker`, passes the
-handshake and serves the small guest page.
-The handshake is signed with the key after `#` in the link, so a share server running this code can neither read the
-book nor join; the guest page comes from the share server, so use one you run or trust.
-The reader itself reaches the guest from your tab, so a new reader needs no new share server.
+The book is shared whenever its book server runs, so others (or you, from a phone) can read it and leave notes from
+anywhere. The book server is the share's host (`server/lib/host.mjs`): it sends the book straight to each reader over
+WebRTC, encrypted end to end, and no tab needs to stay open. `settings.share: false` in `book.json` turns this off: the
+bar then shows **Share**, which starts a share on click. A share server, `https://specbook.jasonrowland.com` unless the
+book names its own in `settings.shareBroker`, passes the handshake and serves the reader's interface.
 
-- A guest names themself once; the guest page remembers the name, and an id for the device, in that browser. The
-  name shows on their face in the share pill; notes carry no names.
+- **One link.** Everyone, you included, opens the same `https://specbook.jasonrowland.com/s/<room>`. The address bar
+  is always a link that can be sent as it is (a `#section` after it still works). `/specbook:open` prints it, and
+  **Copy link** in the bar copies it.
+- **The interface comes from the website, the book from your machine.** The page loads the reader published for your
+  plugin's version under `/r/<version>/` on the share server; your book server sends only data: the book's JSON, its
+  notes, and the bytes of its images and recordings. Nothing it sends runs as code there: the book's HTML (text and
+  mockups) loses `<script>`, `<iframe>`, `<object>`, `<embed>`, `<base>`, every `on…` attribute and `javascript:`
+  URLs before it is drawn, and a strict Content-Security-Policy lets only the site's own scripts run. **SVG files in
+  the book's media show only on localhost, not on the link** (a security choice: an SVG is a document that can hold
+  script). A reader left open while you update the plugin says "This book was updated. Reload this page."; a share
+  server that does not have your version yet says "This book needs a newer share server. Ask its owner to deploy it."
+- **The pin gives your powers on the link.** Without it a reader is a guest. Your pin link is the link with
+  `#pin=<pin>` after it: `/specbook:open` prints it on its own line, and **Copy pin link** in the bar's ▾ (on
+  `localhost` only) copies it. **Never send it to anyone.** Opened, the page saves the pin in that browser
+  (`localStorage`, which never leaves it) and takes it out of the address at once, so the address bar is again the
+  plain link; from then on that browser opens the plain link with your powers, and no name is asked. A reader with the
+  pin is you: their notes are yours and their face carries your name. On the website the ▾ then has **Forget pin on
+  this device**, which removes it from that browser and reloads the page as a guest. **New pin** (in the ▾ on
+  `localhost`) makes a new pin and keeps the link: guests keep reading, and every saved pin stops working; a browser
+  that had the old one says "This pin no longer works." and goes on as a guest. `localhost` needs no pin.
+- A guest names themself once; the page remembers the name, and an id for the device, in that browser. The name shows
+  on their face in the share pill; notes carry no names.
 - **Everyone edits every note.** A guest can write, edit, move and delete any draft note, yours included, as you can
   theirs; a note sent to Claude stays read-only for everyone. A pin points at the same letters for every reader, on any
   screen size.
-- **One tab per person and device.** A guest who opens the link again in another tab of the same browser is the same
-  person: the newer tab takes over, and the older one shows **Disconnected**, with **Use this tab instead** (which
-  takes it back). It never reconnects by itself. Another device is another face.
+- **One face per person and device.** A guest who opens the link again in another tab of the same browser is the same
+  person: both tabs stay live, as one face. Another device is another face.
 - **Live.** Everyone in the book appears as a colored face in the share pill, with a pen while they type. A note being
   typed or moved shows on everyone's screen as it happens, on the note's own sticky with its arrow, and a saved change
   reaches every screen at once.
@@ -203,22 +219,29 @@ The reader itself reaches the guest from your tab, so a new reader needs no new 
   "Following Ana · scroll or type to stop". Scrolling, clicking into the book, typing, or clicking the face again
   stops it, and your own view comes back. Your face shows how many follow you, and a colored edge runs round your
   window while anyone does.
-- The pill's ▾ holds the link and **Copy**, who is here and what each is doing, **New link** (the old link stops
-  working) and **Stop sharing** (until the book is reopened). Guests get only the link.
+- The pill's ▾ on `localhost` holds the link and **Copy**, who is here and what each is doing, **Copy pin link**,
+  **New pin**, **New link** (the old link and pin link stop working; the new link has a new pin) and **Stop sharing**
+  (until the book is next opened). On the website a guest gets only the link; a reader with the pin also gets
+  **Forget pin on this device**.
 - A guest may add, edit, move and delete **their own** notes, and nothing else: no Revise, Build, Accept, stages or
-  requirement edits. To ask for new wording, they drop a note saying what it should say; you act on it. The share's
-  host (`server/lib/host.mjs`) and the server both refuse everything else (403 `guest`).
+  requirement edits. To ask for new wording, they drop a note saying what it should say; you act on it. The host and
+  the book server both refuse everything else (403 `guest`).
 - You may still edit or delete any note. A Revise carries a collaborator's notes with `by: <name>`.
-- **The link stays the same until you ask for a new one**, across reloads, server restarts and days: the server keeps
-  the room in `.share.json` in the data folder (git-ignored; it holds the link's key), and your tab renews it at the
-  share server while it is open. A room expires there 24 hours after its last renewal; the next time you open the
-  book, your tab opens it again under the same id, so the old link works again. Closing your tab pauses the share:
-  guests see "The book isn't open right now" and reconnect by themselves when it is open again within an hour (after
-  that, a reload). Only **New link** and **Stop sharing** end the link: use **New link** to cut off anyone who should
-  no longer have it. An ended link says so ("This share has ended") and is never opened again.
-- Live messages (presence, typing, following) go only between your tab and the guests; your tab passes each guest's on
-  to the others and drops a draft (or a typing signal) for a note that is not the sender's, and any frame over 16 KB or past 40 a
-  second. The share server never sees them.
+- **The link and the pin stay the same until you ask for new ones**, across reloads, server restarts and days: the
+  book server keeps the room, its host token and your pin in `.share.json` in the data folder (git-ignored, never
+  served), and renews the room at the share server while it runs. A room expires there 24 hours after its last renewal;
+  the next time the book server starts, it opens the room again under the same id, so the old link works again. Your
+  book tab may close: readers stay connected. While the book server is stopped, readers see "The book isn't open right
+  now" and reconnect by themselves, with the same rights, when it starts again within an hour (after that, a reload).
+  Only **New link** and **Stop sharing** end the link: use **New link** to cut off anyone who should no longer have
+  it, and **New pin** when only the pin got out. An ended link says so ("This share has ended") and is never opened
+  again.
+- The share library (`node-datachannel`) is installed by `serve.mjs --detach`, once per plugin version, into
+  `~/.claude/specbook/deps/<version>/`. When that fails (offline, or a platform it has no build for), the book is
+  still served on `localhost`, only not shared, and the next `--detach` tries again.
+- Live messages (presence, typing, following) go only between the readers, your localhost tab and the book server,
+  which passes each reader's on to the others and drops a draft (or a typing signal) for a note that is not the
+  sender's, and any frame over 16 KB or past 40 a second. The share server never sees them.
 - A save that does not get through (the connection dropped, or the server did not answer) is sent again a few seconds
   later; the note stays on the page meanwhile. A note the server will not take (another's, or one already sent to
   Claude) keeps its text as a new note.
@@ -228,7 +251,7 @@ The reader itself reaches the guest from your tab, so a new reader needs no new 
 The writes that change the book or the review (Accept, Change, `/api/requirements`, `/api/stage`, a build-call review,
 and notes while Claude revises) are refused with 409 `locked` while Claude is busy; `/api/revise` and `/api/build` answer
 409 `busy` instead. Notes stay writable during a build, and stopping or canceling a build is allowed while it runs. A
-POST or PUT that is not JSON gets 415. A call carrying `x-specbook-guest` (a shared book's guest, sent by the hosting tab)
+POST or PUT that is not JSON gets 415. A call carrying `x-specbook-guest` (a shared book's guest, sent by the share's host)
 may only read and `PUT /api/notes`; anything else is 403 `guest`.
 
 | Endpoint | Does |
@@ -244,12 +267,12 @@ may only read and `PUT /api/notes`; anything else is 403 `guest`.
 | `DELETE /api/requirements/<id>` | Deletes one never accepted; 409 `accepted` otherwise (mark it removed instead) |
 | `POST /api/revise` | Sends the draft notes: sets them `sent`, writes the request |
 | `POST /api/stage { section, stage }` | Ready: 409 `unreviewed` while the section has an open review |
-| `GET /api/share/events?tab=<id>` | The owner tab that holds the book's lock listens here; on connecting it is sent `start { broker, hours, room }` (the remembered room, or null for a new one) unless `settings.share` is false; later `stop`, `end-room` and `changed` |
-| `POST /api/share` | Asks the newest listening tab to host (a book with `settings.share: false`, or after Stop); 409 `no-broker` (an invalid `settings.shareBroker`) or `no-tab` |
-| `GET /api/share` | `{ state, url, expiresAt, guests, error, tabs, room, stopped }` |
-| `POST /api/share/live { tab, room, hostToken, secret, url, expiresAt }` | The hosting tab's room, which the server remembers (in `.share.json`) |
-| `POST /api/share/guests\|failed\|ended { tab, … }` | The hosting tab's reports |
-| `POST /api/share/new-link` | The tab ends the room and opens a new one (202) |
+| `GET /api/share/events?tab=<id>` | The owner tab that holds the book's lock listens here (opening it starts the share unless `settings.share` is false): `state` (as `GET /api/share`), `live` (the readers' live messages, and a `roster` of who is reading) and `changed` |
+| `GET /api/share` | `{ state, url, pinUrl, expiresAt, guests, error, stopped }`; `state` is `off`, `starting`, `live` or `failed` |
+| `POST /api/share` | Starts the share (a book with `settings.share: false`, or after Stop) (202); 409 `no-broker` (an invalid `settings.shareBroker`) |
+| `POST /api/live { msg }` | A live message from the owner's tab, passed to every reader as the host's |
+| `POST /api/share/new-link` | Ends the room and opens a new one, with a new pin (202) |
+| `POST /api/share/new-pin` | A new pin; the room and its link stay |
 | `POST /api/share/stop` | Ends the room; the book shares again when a tab next opens |
 
 The server, not the page, computes current values for Accept and Change, so the page cannot write a stale or forged

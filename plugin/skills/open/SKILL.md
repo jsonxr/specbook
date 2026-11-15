@@ -1,6 +1,6 @@
 ---
 name: open
-description: Use when the user types /specbook:open, or asks to open, see, view or show the spec book, share it, or get a link to it for someone else or a phone (the open book is shared; Copy link in its bar gives the link). Opens the project's spec book in the browser, starting its server first if it is not running, and offers to create a book when the project has none.
+description: Use when the user types /specbook:open, or asks to open, see, view or show the spec book, share it, or get a link to it for someone else or a phone (a served book is shared: this prints its link and the owner's pin link). Opens the project's spec book in the browser, starting its server first if it is not running, and offers to create a book when the project has none.
 ---
 
 # Open the spec book
@@ -27,4 +27,11 @@ docs README it points to) put it elsewhere. `${CLAUDE_PLUGIN_ROOT}` is this plug
    `serve` in the `specbook` skill (a `revise` goes to `specbook:revise`, a `build` to `specbook:build`).
 5. **Tell the user** the URL the server printed, in one line, and that **Changes (n)** in the bar shows every change
    still under review. Each has **✓ Accept** to keep it; to say "not yet", drop a note on it for the next Revise;
-   **History (n) ▸** on an item shows what was accepted before. The book is shared while its tab is open: **Copy link** in the bar gives others a link to read it and leave notes.
+   **History (n) ▸** on an item shows what was accepted before.
+   The book is shared while its server runs. Pass on, exactly as printed, the two link lines `serve.mjs` prints:
+   `Share link: <url>`, the link to give others so they can read the book and leave notes, and
+   `Your pin link (opens with your powers; never send it to anyone): <pinUrl>`, the owner's own link for another
+   device of theirs. Say plainly, with the pin link, that it must never be sent to anyone: whoever opens it gets the
+   owner's powers (Revise, Build, Accept), until **New pin** in the bar's ▾ replaces it. If it printed
+   `Sharing is starting; …` or `Sharing could not start: …` (or that the share library could not be installed) instead,
+   pass that line on; **Copy link** and **Copy pin link** in the bar give the links once the share is live.

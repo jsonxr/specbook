@@ -3,33 +3,52 @@
 A Cloudflare Worker that lets the specbook plugin hand out a link to a live spec book. It is
 deployed on its own; the plugin only uses it, by the address in a book's `settings.shareBroker`.
 
-The owner's open book tab is the host. This server serves a small guest page (`public/`), and passes the WebRTC
-handshake between the host tab and each guest. The book, and the reader itself, then go from the host tab straight to
-the guest, encrypted end to end; this server never sees or stores them. The handshake is signed with the key after
-`#` in the link, which browsers never send to a server, so this server cannot join a share either. (That holds for this code: the
-guest page comes from here, so an altered deployment could read the key. Run your own.) Only a page on the
-owner's machine (an `http://localhost` origin) may open a room from a browser. A room lasts until it expires (at most
-24 hours) or its host ends it (`POST /api/rooms/<room>/end` with the host token). Its host keeps the link by opening
-the room again with `{ room, hostToken }`: a live room is renewed, and one that expired is opened again under the same
-id. An ended room never is: for a week its address answers 410, so its guests are told it ended; while the host tab is closed, guests
-wait on their socket and hear `host-online` when it opens again: only in a room a host has opened, three at most from
-one address, and for an hour at most (then the socket closes with 4408 and the guest page asks for a reload). The host tab and the guests also pass live messages
-(presence, typing, following) over their own connection, never through this server.
+The owner's book server (the plugin's `serve.mjs`, through `plugin/server/lib/host.mjs` with `node-datachannel`) is the
+host. This server serves the reader's interface and passes the WebRTC handshake between the host and each reader. The
+book then goes from the host straight to the reader, encrypted end to end; this server never sees or stores it. Only
+data comes from the host (the book's JSON, notes, images and recordings); no byte of it runs as code on the website.
 
-Protocol 2 (plugin 1.3) adds those live messages; a room says its protocol (`GET /api/rooms/<room>`), and the guest page
-still speaks protocol 1 to rooms that older plugins open.
+- **`/s/<room>`** is the one link, for the owner and guests alike. It asks the room which reader version its host
+  named when it opened the room, and serves that version's `share.html` from `/r/<version>/`, with a strict
+  Content-Security-Policy (only this site's scripts run). A version this site does not have gets "This book needs a
+  newer share server. Ask its owner to deploy it." The owner's pin, after `#pin=`, never reaches this server: the page
+  saves it in the browser and takes it out of the address.
+- **`/r/<version>/`** holds every published reader (`share.html`, `book.js`, `book.css`, `model.js`, `live.js`,
+  `relay.js`, `share.js`), and `/r/versions.json` lists them. A published folder never changes, so it is cached for
+  good. Each plugin version's reader stays, so a book served by an older plugin keeps working.
+- **Protocol 1 and 2 rooms** (opened by plugins before 1.4, whose open book tab is the host) still get `guest.html`
+  and `guest.js`, kept as they were, with their signed handshake. Protocol 3 rooms (plugin 1.4 on) drop the signature: this server
+  serves the interface, so it is trusted either way.
+
+The book server opens its room (`POST /api/rooms`) directly; of browser pages, only one on the owner's machine (an
+`http://localhost` origin) may, by CORS. A room lasts until it expires (at most 24 hours) or its host ends it (`POST /api/rooms/<room>/end` with the host
+token). Its host keeps the link by opening the room again with `{ room, hostToken }`: a live room is renewed, and one
+that expired is opened again under the same id. An ended room never is: for a week its address answers 410, so its
+readers are told it ended. While the host is away (its book server stopped), readers wait on their socket and hear
+`host-online` when it comes back: only in a room a host has opened, three at most from one address, and for an hour
+at most (then the socket closes with 4408 and the page asks for a reload). The host and the readers also pass live
+messages (presence, typing, following) over their own connection, never through this server.
 
 One Durable Object holds every room. Its WebSockets hibernate and its keepalive pings are answered without waking
 it, so an idle share costs nothing.
 
 ## Deploy
 
-To release a new reader: bump `version` in `plugin/.claude-plugin/plugin.json`, run `node server/publish-reader.mjs`
-(from the repository root; it copies `plugin/app/` into `server/public/r/<version>/` and rewrites
-`server/public/r/versions.json`), and commit `server/public/r/<version>/`. A published version is never overwritten with
-different bytes. Then, from this folder, `./wrangler.sh deploy`. It serves at `https://specbook.jasonrowland.com` (the `routes` entry in
-`wrangler.jsonc`; change it to deploy under another domain in your own account). The plugin uses
-`https://specbook.jasonrowland.com` unless a book names another in `settings.shareBroker`.
+Every plugin version that changes the reader is a new reader, and the site must have it before books served by that
+plugin can be read on their link:
+
+1. Bump `version` in `plugin/.claude-plugin/plugin.json`.
+2. From the repository root, `node server/publish-reader.mjs`. It copies `plugin/app/` into
+   `server/public/r/<version>/` (with `share.html`, the reader's page for the website) and rewrites
+   `server/public/r/versions.json`. A published version is never overwritten with different bytes: a changed reader
+   needs a new version.
+3. Commit `server/public/r/<version>/` and `server/public/r/versions.json`, so a deploy from any checkout carries
+   every version.
+4. From this folder, `./wrangler.sh deploy`.
+
+It serves at `https://specbook.jasonrowland.com` (the `routes` entry in `wrangler.jsonc`; change it to deploy under
+another domain in your own account). The plugin uses `https://specbook.jasonrowland.com` unless a book names another in
+`settings.shareBroker`.
 
 `wrangler.sh` runs wrangler with a Cloudflare token from LastPass. It asks for your LastPass master password on every
 run. The first time, it mints a `specbook-provision` token with the master token in `Cloudflare/cloudflare-master`
@@ -59,5 +78,6 @@ TURN costs $0.05 a GB after the first 1,000 GB a month (shared with the Realtime
 
 ## Develop
 
-`wrangler dev --port 8798` runs it locally; `node --test src/` runs the unit tests; `plugin/test/share.smoke.mjs`
-(from the repository root) drives a host tab and a guest through it end to end.
+`wrangler dev --port 8798` runs it locally; `node --test src/ publish-reader.test.mjs` runs the unit tests;
+`plugin/test/share.smoke.mjs` (from the repository root) runs a copy of this folder with the current reader published
+into it, a book server as the host, and readers on the link, end to end.

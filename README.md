@@ -10,8 +10,8 @@ claude plugin install specbook@jsonxr
 ```
 
 In a session the commands are `/specbook`, `/specbook:open`, `/specbook:design`, `/specbook:revise` and `/specbook:build`.
-Each also starts on its own when what you ask for matches it. The open book is shared too: **Copy link** in its bar
-gives others a link to read it and leave notes.
+Each also starts on its own when what you ask for matches it. A served book is shared too: `/specbook:open` prints
+the link that lets others read it and leave notes, and your own pin link (never send that one to anyone).
 
 ## This repository
 

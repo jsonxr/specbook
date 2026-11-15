@@ -1,11 +1,13 @@
 // The specbook share server. One Durable Object holds every room; its sockets hibernate, so an idle share costs
-// nothing. It never sees a book: only signed handshake messages pass through it. The host is the owner's open book
-// tab (the specbook plugin's app/host.js); the reader itself comes to each guest from that tab, over the connection.
+// nothing. It never sees a book: only handshake messages pass through it. The host is the owner's book server (the
+// specbook plugin's server/lib/host.mjs); for protocol 1 and 2 rooms, the owner's open book tab (plugin 1.3 and older).
 //
 //   GET  /                         the plugin's front page (public/index.html)
-//   GET  /s/<room>                 the guest page (public/guest.html): asks a name, connects, loads the reader
-//   GET  /guest.js                 its script
-//   POST /api/rooms                { hours, protocol, reader } -> { room, hostToken, expiresAt }   (the host tab; CORS for localhost)
+//   GET  /s/<room>                 the reader: public/r/<version>/share.html for a protocol 3 room (the version its host
+//                                  named), with the CSP; public/guest.html, as it was, for protocol 1 and 2 rooms
+//   GET  /r/<version>/...          the published readers, and /r/versions.json
+//   GET  /guest.js                 the protocol 1 and 2 guest page's script
+//   POST /api/rooms                { hours, protocol, reader } -> { room, hostToken, expiresAt }   (the host; CORS for localhost)
 //                                  { ..., room, hostToken }: renews that room, or opens it again under its id
 //   GET  /api/rooms/<room>          { host, protocol, reader, keeps }: whether the room exists, its host is there, its protocol,
 //                                  and that this server renews and reopens rooms (open() with { room, hostToken })
