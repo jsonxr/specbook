@@ -29,7 +29,10 @@ The page `serve` opens, in detail. The `specbook` skill points here.
   Every picture is the one drawing of that state, so it reads the same wherever it is shown. A state drawn as
   another (`sameAs`) says "Same as <that state's caption>" and a role that never sees the screen (`absent`) shows its words
   where the picture would be. A component named by `highlight` is outlined in its picture; a component placed in a
-  picture is drawn in place, or as a red placeholder naming it when it, its state or its picture is missing.
+  picture is drawn in place, or as a red placeholder naming it when it, its state or its picture is missing. A
+  component's state shown on its own (in a section, on its page, in the Screens list) is drawn in its own box, a
+  phone's width on the app's white background; one whose picture opens a sheet (phone.css's `.dim` and `.sheet`)
+  gets a phone's height, so the whole sheet shows.
   Recordings play under their section. At the end: **Decisions and what was rejected**, the full list.
 - **Stages.** Each section's pill says Drafting, Ready, Building or Built, plus its `label` after a dot
   ("Drafting · Phase 2"). A Built section with changes shows `Built · 1 change drafting` or
@@ -169,17 +172,20 @@ drawn once per state, with every requirement about it. Pressing **Book** goes ba
   created it). The contents sidebar lists the same names; on a phone it is the usual sheet.
 - **A page** (`#screen/<screen-id>`, or `#screen/<screen-id>.<state-id>` to scroll to a state and outline it):
   the name and id, its kind, its `file`, its `intro`, then
-  - **Variables**: one line naming each variable the screen uses (role included) with its values, the default first.
+  - **Variables**: one line naming each variable the screen uses (role included; a component has no role) with its
+    values, the default first.
   - **States**, in a row laid out by role (`anyone` first, then the book's roles in order, then states with no
-    role), each captioned with its computed caption (role pill, then the non-default values' labels) and its `also`
-    words; on a phone they stack. They follow the View menu's Mockups and Screenshots, and a state with a `change`
-    draws **Today** and **Proposed** panes as in the chapter view.
+    role), each captioned with its computed caption (role pill, then the non-default values' labels; a component's
+    caption is every value's label, defaults included, with no pill) and its `also` words; on a phone they stack.
+    They follow the View menu's Mockups and Screenshots, and a state with a `change` draws **Today** and
+    **Proposed** panes as in the chapter view.
   - **Coverage**: one row per combination the screen accounts for. Each row starts with the caption (role pill, then
-    the non-default values' labels; "Any" when it is empty), then says **Drawn** (a link to the state), **Same as
-    <caption>** (a link to the state it copies), **Never shown: <words>** (an `absent` state) or **Not drawn** (an
-    `undrawn` entry) followed by `: <note>` and links to the requirement ids it is about. It is a list, not a
-    review, and opens none. Components list their states the same way. Review panels write a `when` in words
-    ("Role: User, Data: No todos") instead.
+    the non-default values' labels; for a component every value's label; a not-drawn row with neither reads "Any"),
+    then says **Drawn** (a link to the state), **Same as <caption>** (a link to the state it copies), **Never shown:
+    <words>** (an `absent` state) or **Not drawn** (an `undrawn` entry) followed by `: <note>` and links to the
+    requirement ids it is about. It is a list, not a review, and opens none. Components list their states the same
+    way. Review panels write a `when` in words instead, with the labels of the item's own screen in its variable
+    order ("Role: User, Data: No todos").
   - **Requirements**, grouped under "<chapter> › <section>" in book order, each with its id, its text, the state it
     narrows to, and "via <component>" when it reached the screen through a component the screen places.
   - For a component, **Used on**: a small picture of every state that places it, the component outlined, each

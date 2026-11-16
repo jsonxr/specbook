@@ -88,8 +88,10 @@ is an entry, and so is every piece placed on several screens. Draw each once; se
   ones several screens share once in the book's `variables` (`id`, `label`, `values`; the first value is the
   default), and list the ones a screen uses in its `variables`, in caption order (`["role", "data", "filter"]`); a
   variable only one screen has is declared inline there. A screen that lists none is held to `["role"]`; a
-  component lists its own and has no role. A variable left out of a `when` means any value. Use a variable for what
-  changes the picture, not as a way to write code: no flags for internals a person cannot see.
+  component lists its own and has no role. **A variable left out of a `when` means any: pin every value the picture
+  depends on, defaults included** (the list with some todos and the All filter is `{ "role": "user", "data": "some",
+  "filter": "all", … }`, though its caption is the pill alone). Use a variable for what changes the picture, not as
+  a way to write code: no flags for internals a person cannot see.
 - **Never type a state's name.** The caption is computed: the role pill, then the labels of the values that are not
   defaults ("User · No todos"). Do not add a `name` that repeats the role ("Member: Member") or invents a word
   ("Header", "Default"); `name` is only for the rare caption that reads badly. If the caption is wrong, fix the
@@ -101,7 +103,10 @@ is an entry, and so is every piece placed on several screens. Draw each once; se
   picture (the Completed filter, an empty list for a visitor), add `{ "when": {…}, "about": ["<requirement id>"],
   "note": "…" }` to the screen's `undrawn`. The Screens view lists it under Coverage as not drawn.
 - **Components own their variables.** A component lists the variables it uses (`["filter"]`) and has no role; its
-  caption is its values' labels. The screens that place it never repeat its variables.
+  caption is its values' labels. A screen lists a component's variable only when the screen's own picture depends on
+  it, that is when it places a different state of the component (TodosScreen lists `filter`, which FiltersBar also
+  lists); the component's own details (an open sheet) stay on the component. A component that opens a sheet draws
+  it with phone.css's `.dim` and `.sheet`, so the reader gives its box a phone's height.
 - **Read the Coverage list** for every screen you draw: each combination its requirements imply is a state, a
   `sameAs`, an `absent` or an `undrawn` entry.
 - **A section shows states**, in order, as `shows: [{ "state": "SCR-….admin", "highlight": "SCR-…" }]`; `highlight`

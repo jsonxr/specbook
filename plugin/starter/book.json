@@ -373,7 +373,11 @@
         {
           "id": "list",
           "when": {
-            "role": "user"
+            "role": "user",
+            "data": "some",
+            "filter": "all",
+            "field": "idle",
+            "edit": "none"
           },
           "mockup": "mockups/screens/SCR-3WRX/list.html",
           "change": "change",
@@ -383,7 +387,8 @@
           "id": "empty",
           "when": {
             "role": "user",
-            "data": "empty"
+            "data": "empty",
+            "field": "idle"
           },
           "mockup": "mockups/screens/SCR-3WRX/empty.html"
         },
@@ -391,7 +396,10 @@
           "id": "typing",
           "when": {
             "role": "user",
-            "field": "typing"
+            "data": "some",
+            "filter": "all",
+            "field": "typing",
+            "edit": "none"
           },
           "mockup": "mockups/screens/SCR-3WRX/typing.html"
         },
@@ -399,7 +407,10 @@
           "id": "alldone",
           "when": {
             "role": "user",
-            "data": "alldone"
+            "data": "alldone",
+            "filter": "all",
+            "field": "idle",
+            "edit": "none"
           },
           "mockup": "mockups/screens/SCR-3WRX/alldone.html"
         },
@@ -407,6 +418,9 @@
           "id": "editing",
           "when": {
             "role": "user",
+            "data": "some",
+            "filter": "all",
+            "field": "idle",
             "edit": "editing"
           },
           "mockup": "mockups/screens/SCR-3WRX/editing.html"
@@ -415,6 +429,9 @@
           "id": "swiped",
           "when": {
             "role": "user",
+            "data": "some",
+            "filter": "all",
+            "field": "idle",
             "edit": "swiped"
           },
           "mockup": "mockups/screens/SCR-3WRX/swiped.html"
@@ -423,7 +440,10 @@
           "id": "activeonly",
           "when": {
             "role": "user",
-            "filter": "active"
+            "data": "some",
+            "filter": "active",
+            "field": "idle",
+            "edit": "none"
           },
           "mockup": "mockups/screens/SCR-3WRX/activeonly.html",
           "change": "add"

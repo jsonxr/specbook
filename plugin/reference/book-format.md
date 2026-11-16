@@ -105,7 +105,10 @@ banner, header) is listed once and drawn once per state. A section does not copy
   with no `variables` list uses `["role"]`; a component with none uses none (it has no role).
 - **A state** is one picture and the conditions behind it. Its key is `<screen-id>.<state-id>` (`SCR-3WRX.empty`),
   unique in the book; state ids are unique within the screen and never change. **`when`** sets some of the screen's
-  variables, `{ "role": "user", "data": "empty" }`; a variable left out means **any** value. `when.role` may be
+  variables, `{ "role": "user", "data": "empty" }`; a variable left out means **any** value, so **pin every value
+  the picture depends on, defaults included** (a list drawn with some todos, the All filter and an empty field is
+  `{ "role": "user", "data": "some", "filter": "all", "field": "idle" }`; its caption is still the pill alone, since
+  defaults are not shown). `when.role` may be
   a list (`["visitor", "guest"]`) on an `absent` or `sameAs` state only. A state with no role and only default
   values has an empty caption and is captioned by its id, so give it a non-default value or a `name`.
 - **The caption is computed**, never typed: the role pill (from `when.role`; "Anyone" for `anyone`; one pill each for
@@ -144,7 +147,9 @@ banner, header) is listed once and drawn once per state. A section does not copy
   with `"state": "admin"`. A requirement on a component reaches every screen that places it (the Screens view says
   "via <component>"); name a screen only when the rule is about that screen. The requirement still lives in one
   section.
-- **Valid** means: screen ids and names are unique; state ids are unique within a screen; each state has exactly one
+- **Valid** means: the book's `variables`, when present, is a list of declarations with different ids, none named
+  `role`; every declaration (the book's or a screen's inline one) has an `id` and a non-empty `values` list whose
+  entries are objects with different ids; screen ids and names are unique; state ids are unique within a screen; each state has exactly one
   of `mockup`, `sameAs` and `absent`; `change`, when present, is `add`, `change` or `remove`; every `mockup` and
   `today` file exists; `sameAs` targets exist and are not themselves `sameAs`; a screen's `variables` is a list in
   which every entry is declared (a book variable, `role`, or an inline declaration with `id` and `values`) and none
