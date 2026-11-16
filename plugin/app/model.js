@@ -596,6 +596,43 @@
   // that lists no variables uses only role; a component that lists none has none.
   function rolesOf(book) { return ((book && book.roles) || []).filter(function (r) { return r && r.id; }); }
 
+  // The book's variables; [] when it has none or they are not a list (screenProblem says so).
+  function bookVariables(book) { return book && Array.isArray(book.variables) ? book.variables : []; }
+
+  // What is wrong with one variable's declaration (the book's or a screen's inline one), in words after `who`, or null:
+  // it is an object with an id, not "role" (role is built in), with a list of values, each an object with its own id.
+  function declarationProblem(d, who) {
+    if (!d || typeof d !== 'object' || typeof d.id !== 'string' || !d.id) { return who + ' is not an object with an id'; }
+    var named = who + ' ' + d.id;
+    if (d.id === 'role') { return named + ' cannot be declared: role is built in, and its values are the book\'s roles'; }
+    if (!Array.isArray(d.values) || !d.values.length) { return named + ' has no values'; }
+    var seen = {};
+    for (var i = 0; i < d.values.length; i++) {
+      var x = d.values[i];
+      if (!x || typeof x !== 'object' || typeof x.id !== 'string' || !x.id) {
+        return named + '\'s value ' + (i + 1) + ' is not an object with an id';
+      }
+      if (has(seen, x.id)) { return named + ' lists the value ' + x.id + ' twice'; }
+      seen[x.id] = true;
+    }
+    return null;
+  }
+
+  // What is wrong with the book's variables, or null: a list of declarations with different ids.
+  function bookVariablesProblem(book) {
+    if (book.variables === undefined) { return null; }
+    if (!Array.isArray(book.variables)) { return 'The book\'s variables is not a list'; }
+    var ids = {};
+    for (var i = 0; i < book.variables.length; i++) {
+      var d = book.variables[i];
+      var p = declarationProblem(d, 'Book variable' + (d && typeof d === 'object' && typeof d.id === 'string' && d.id ? '' : ' ' + (i + 1)));
+      if (p) { return p; }
+      if (has(ids, d.id)) { return 'Two book variables share the id ' + d.id; }
+      ids[d.id] = true;
+    }
+    return null;
+  }
+
   function variableIds(screen) {
     if (Array.isArray(screen.variables)) { return screen.variables; }
     return screen.kind === 'component' ? [] : ['role'];
@@ -608,7 +645,7 @@
     }
     var v = null;
     if (typeof entry === 'string') {
-      ((book && book.variables) || []).forEach(function (d) { if (!v && d && d.id === entry) { v = d; } });
+      bookVariables(book).forEach(function (d) { if (!v && d && d.id === entry) { v = d; } });
     } else if (entry && typeof entry === 'object') {
       v = entry;
     }
@@ -711,11 +748,21 @@
     return found;
   }
 
-  // A `when` in words: "Role: User, Data: No todos"; a list of roles reads "Visitor / Admin". screenId may be null (a
-  // reviewed value does not say its screen).
+  // A `when` in words: "Role: User, Data: No todos"; a list of roles reads "Visitor / Admin". screenId may be null when
+  // the screen is not known; a reviewed value's screen is in its key.
+  // On a known screen the words follow the screen's variable order, then any key it does not list.
   function whenText(book, screenId, when) {
     var w = when && typeof when === 'object' ? when : {};
-    return Object.keys(w).map(function (k) {
+    var keys = Object.keys(w);
+    var screen = screenId ? screenIndex(book).screens[screenId] : null;
+    if (screen) {
+      var order = variablesIn(book, screen).map(function (v) { return v.id; });
+      var rank = function (k) { return order.indexOf(k) < 0 ? order.length : order.indexOf(k); };
+      keys = keys.map(function (k, i) { return { k: k, i: i }; })
+        .sort(function (a, b) { return rank(a.k) - rank(b.k) || a.i - b.i; })
+        .map(function (x) { return x.k; });
+    }
+    return keys.map(function (k) {
       var v = variableFor(book, screenId, k);
       var value = function (x) { return k === 'role' ? roleLabel(book, x) : v ? valueLabel(v, x) : String(x); };
       return (v ? v.label : k) + ': ' + (Array.isArray(w[k]) ? w[k].map(value).join(' / ') : value(w[k]));
@@ -795,10 +842,17 @@
     var list = variableIds(screen);
     for (var i = 0; i < list.length; i++) {
       var e = list[i];
+      if (e && typeof e === 'object' && e.id === 'role') {
+        return 'Screen ' + screen.id + ' declares its own variable role, which is built in: list "role" instead';
+      }
       var v = resolveVariable(book, e);
       if (!v) {
         var id = e && typeof e === 'object' ? e.id : e;
         return 'Screen ' + screen.id + ' uses the variable ' + id + ', which is not declared';
+      }
+      if (e && typeof e === 'object') {
+        var dp = declarationProblem(e, 'Screen ' + screen.id + '\'s variable');
+        if (dp) { return dp; }
       }
       for (var o = 0; o < vars.length; o++) {
         if (vars[o].id === v.id) { return 'Screen ' + screen.id + ' lists the variable ' + v.id + ' twice'; }
@@ -839,6 +893,8 @@
   // The first way the screens in a book are invalid, in words; null when valid (the spec's "Validity" list).
   // `exists(path)` says whether a mockup file is there; `mockups` holds the text of those that are.
   function screenProblem(book, exists, mockups) {
+    var bookVars = book ? bookVariablesProblem(book) : null;
+    if (bookVars) { return bookVars; }
     var screens = screensOf(book);
     var ix = screenIndex(book);
     var ids = {};

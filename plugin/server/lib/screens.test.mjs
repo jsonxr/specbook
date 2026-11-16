@@ -237,6 +237,29 @@ test('whenText, variablesText and undrawnText put variables in words, the screen
   assert.equal(M.undrawnText(book, 'SCR-HOME', book.screens[0].undrawn), 'Role: Admin, Sharing: Not shared yet (R1): No groups yet; Role: Visitor');
 });
 
+test('whenText words a when with the named screen\'s own inline variable, though another screen declares one of the same id first', () => {
+  const book = varBook();
+  // Two screens each declare an inline `sheet`; without a screen the first declaration is used.
+  book.screens[0].variables.push({ id: 'sheet', label: 'Sheet', values: [{ id: 'none', label: 'No sheet' }, { id: 'open', label: 'Sheet open' }] });
+  book.screens.push({
+    id: 'SCR-PANEL', name: 'Panel', kind: 'screen',
+    variables: ['role', { id: 'sheet', label: 'Panel', values: [{ id: 'none', label: 'No panel' }, { id: 'open', label: 'Panel open' }] }],
+    states: [{ id: 'admin', when: { role: 'admin', sheet: 'none' }, mockup: 'mockups/panel.html' }]
+  });
+  assert.equal(M.whenText(book, 'SCR-PANEL', { role: 'admin', sheet: 'none' }), 'Role: Admin, Panel: No panel');
+  assert.equal(M.whenText(book, 'SCR-HOME', { sheet: 'open' }), 'Sheet: Sheet open');
+  assert.equal(M.whenText(book, null, { sheet: 'none' }), 'Sheet: No sheet');
+  assert.equal(M.undrawnText(book, 'SCR-PANEL', [{ when: { sheet: 'open' } }]), 'Panel: Panel open');
+});
+
+test('whenText follows the screen\'s variable order, whatever the order of the when\'s keys; unlisted keys come last', () => {
+  const book = varBook();
+  assert.equal(M.whenText(book, 'SCR-HOME', { connection: 'offline', mood: 'odd', sharing: 'shared', role: 'admin' }),
+    'Role: Admin, Sharing: Shared, Connection: Offline, mood: odd');
+  // Without the screen the when's own order is kept.
+  assert.equal(M.whenText(book, null, { connection: 'offline', role: 'admin' }), 'Connection: Offline, Role: Admin');
+});
+
 test('coverage: one entry per state, then per undrawn entry, in order', () => {
   const book = varBook();
   const rows = M.coverage(book, 'SCR-HOME');
@@ -285,6 +308,39 @@ test('screenProblem checks state variables', () => {
   bad(b => { home(b).undrawn[1].when.role = 'wizard'; }, /Screen SCR-HOME's undrawn entry 2 names the role wizard/);
   bad(b => { home(b).undrawn[0].when.sharing = 'maybe'; }, /Screen SCR-HOME's undrawn entry 1 sets sharing to maybe, which is not a value of sharing/);
   bad(b => { home(b).undrawn = [7]; }, /Screen SCR-HOME's undrawn entry 1 is not an object/);
+});
+
+test('screenProblem checks the book\'s variables and inline declarations, and nothing throws on bad ones', () => {
+  const bad = (mutate, re) => {
+    const b = varBook();
+    mutate(b);
+    let p;
+    assert.doesNotThrow(() => { p = M.screenProblem(b, all, {}); });
+    assert.ok(p && re.test(p), String(p));
+    // Captions and words never throw on a book that is invalid this way.
+    assert.doesNotThrow(() => {
+      M.stateCaption(b, 'SCR-HOME.offline');
+      M.stateLabel(b, 'SCR-HOME.offline');
+      M.whenText(b, null, { connection: 'offline', data: 'empty' });
+      M.whenText(b, 'SCR-HOME', { connection: 'offline' });
+      M.variablesOf(b, 'SCR-TABS');
+      M.coverage(b, 'SCR-HOME');
+    });
+  };
+  bad(b => { b.variables = 'connection'; }, /^The book's variables is not a list$/);
+  bad(b => { b.variables = { connection: {} }; }, /^The book's variables is not a list$/);
+  bad(b => { b.variables.push(null); }, /^Book variable 3 is not an object with an id$/);
+  bad(b => { b.variables.push({ label: 'Mood' }); }, /^Book variable 3 is not an object with an id$/);
+  bad(b => { b.variables.push({ id: 'mood', label: 'Mood' }); }, /^Book variable mood has no values$/);
+  bad(b => { b.variables.push({ id: 'mood', label: 'Mood', values: [] }); }, /^Book variable mood has no values$/);
+  bad(b => { b.variables.push({ id: 'mood', values: [{ id: 'up' }, 'down'] }); }, /^Book variable mood's value 2 is not an object with an id$/);
+  bad(b => { b.variables[1].values.push({ id: 'some', label: 'Again' }); }, /^Book variable data lists the value some twice$/);
+  bad(b => { b.variables.push({ id: 'data', label: 'Data again', values: [{ id: 'x' }] }); }, /^Two book variables share the id data$/);
+  bad(b => { b.variables.push({ id: 'role', label: 'Role', values: [{ id: 'member' }] }); }, /^Book variable role cannot be declared: role is built in/);
+  // An inline declaration: never role, and its values as a book variable's.
+  bad(b => { b.screens[0].variables[0] = { id: 'role', label: 'Role', values: [{ id: 'member' }] }; }, /^Screen SCR-HOME declares its own variable role, which is built in/);
+  bad(b => { b.screens[0].variables[1].values.push({ id: 'shared' }); }, /^Screen SCR-HOME's variable sharing lists the value shared twice$/);
+  bad(b => { b.screens[1].variables[0].values = []; }, /^Screen SCR-TABS uses the variable tab, which is not declared|^Screen SCR-TABS's variable tab has no values$/);
 });
 
 test('screenProblem allows the same when on a drawn state and a sameAs or absent one, and a list on sameAs', () => {
