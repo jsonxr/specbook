@@ -4020,10 +4020,16 @@
   changesBtn.addEventListener('click', function () { setDiff(!state.diff); });
   nextBtn.addEventListener('click', function () { nextChange(false); });
   prevBtn.addEventListener('click', prevChange);
-  // The bar's menus: View and Claude. A click elsewhere or Escape closes them.
+  // The bar's menus: View and Claude (and live.js's Share). A click elsewhere or Escape closes them, and opening one
+  // closes the others: each says so with a 'specbook-menu' event naming itself.
   function menuToggle(btnId, popId) {
     var btn = document.getElementById(btnId), pop = document.getElementById(popId);
-    function set(open) { pop.hidden = !open; btn.setAttribute('aria-expanded', String(open)); }
+    function set(open) {
+      pop.hidden = !open;
+      btn.setAttribute('aria-expanded', String(open));
+      if (open) { document.dispatchEvent(new CustomEvent('specbook-menu', { detail: popId })); }
+    }
+    document.addEventListener('specbook-menu', function (e) { if (e.detail !== popId && !pop.hidden) { set(false); } });
     btn.addEventListener('click', function (e) { e.stopPropagation(); set(pop.hidden); });
     pop.addEventListener('click', function (e) { if (!e.target.closest('button')) { e.stopPropagation(); } });
     document.addEventListener('click', function (e) { if (!pop.hidden && !pop.contains(e.target)) { set(false); } });

@@ -710,6 +710,24 @@ try {
     }
   });
 
+  await check('opening a header menu closes the others (View, Claude, Share)', async () => {
+    await open();
+    await page.waitForSelector('.share-pill .share-start', { timeout: 3000 });
+    const shown = () => page.evaluate(() => [
+      !document.getElementById('view-menu').hidden && 'view',
+      !document.getElementById('claude-pop').hidden && 'claude',
+      !!document.querySelector('.share-menu') && 'share',
+    ].filter(Boolean).join());
+    const steps = [['#claude-btn', 'claude'], ['.share-pill .share-start', 'share'], ['#view-btn', 'view'],
+      ['.share-pill .share-start', 'share'], ['#claude-btn', 'claude'], ['#view-btn', 'view']];
+    for (const [sel, want] of steps) {
+      await page.locator(sel).click();
+      const got = await shown();
+      if (got !== want) { throw new Error(`after ${sel}, open menus are "${got}", not "${want}"`); }
+    }
+    await page.keyboard.press('Escape');
+  });
+
   // Drops a note on an element of the book through Comment mode and waits for review.json to hold it.
   const dropNoteOn = async (sel, text) => {
     await page.evaluate(s => document.querySelector(s).scrollIntoView({ block: 'center', behavior: 'instant' }), sel);
