@@ -90,6 +90,9 @@ test('usedOn, shownIn and gateKeys', () => {
   const book = fixture();
   const m = mockups();
   assert.deepEqual(M.usedOn(book, m)['SCR-CARD'], ['SCR-HOME.admin']);
+  // A component's state that places another of its own states is not a use of it.
+  m['mockups/card-none.html'] = '<sb-component id="SCR-CARD" state="waiting"></sb-component><i>none</i>';
+  assert.deepEqual(M.usedOn(book, m)['SCR-CARD'], ['SCR-HOME.admin']);
   assert.deepEqual(M.shownIn(book)['SCR-HOME.admin'], ['c-a', 'c-b']);
   const keys = M.gateKeys(book, m, 'c-b');
   for (const k of ['SCR-HOME.admin', 'SCR-HOME.visitor', 'SCR-HOME.member', 'SCR-CARD.waiting', 'SCR-HOME', 'SCR-CARD']) {

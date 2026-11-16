@@ -435,7 +435,8 @@
     return out;
   }
 
-  // {component id: [state keys whose picture, today's included, places it]}
+  // {component id: [state keys whose picture, today's included, places it]}. A component's own state that places
+  // another of its states (an open sheet over its closed picture) is not where the component is used.
   function usedOn(book, mockups) {
     var out = {};
     screensOf(book).forEach(function (s) {
@@ -443,6 +444,7 @@
         var key = stateKey(s.id, st.id);
         pictureOf(st).forEach(function (p) {
           componentsIn(mockups && mockups[p]).forEach(function (c) {
+            if (c.id === s.id) { return; }
             if (!has(out, c.id)) { out[c.id] = []; }
             pushOnce(out[c.id], key);
           });
