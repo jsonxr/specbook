@@ -1989,6 +1989,74 @@ try {
     }
   });
 
+  await check('a component that draws a sheet shows it whole in its own box: on its page, in the Screens list and in a section; its review words its own variable', async () => {
+    // A test-only component: a pill, a dim and a sheet (phone.css's overlay), with an inline `field` variable that
+    // TodosScreen also declares inline, worded differently. Its accepted copy had another value, so its review is open.
+    const SHEET = 'SCR-SHT1';
+    const html = '<div style="text-align:center"><span class="pill">Offline</span></div><div class="dim"></div>' +
+      '<div class="sheet" style="top:250px"><div style="padding:6px 18px"><b>You are offline</b><p class="help">Showing saved content.</p><div class="cta">Try again</div></div></div>';
+    const ctx = await browser.newContext({ reducedMotion: 'reduce', viewport: { width: 1400, height: 900 } });
+    const pageErrors = [];
+    try {
+      const p = await ctx.newPage();
+      p.on('pageerror', e => pageErrors.push(String(e)));
+      await p.route('**/api/book', async route => {
+        const r = await route.fetch();
+        const j = await r.json();
+        j.book.screens.push({ id: SHEET, name: 'SheetSmoke', kind: 'component',
+          variables: [{ id: 'field', label: 'Sheet', values: [{ id: 'idle', label: 'Sheet closed' }, { id: 'typing', label: 'Sheet open' }] }],
+          states: [{ id: 'open', when: { field: 'typing' }, mockup: `mockups/screens/${SHEET}/open.html` }] });
+        j.book.chapters.find(c => c.id === 'todos').sections.find(s => s.id === 'add').shows.push({ state: `${SHEET}.open` });
+        j.review = j.review || { rev: 0, accepted: {}, notes: {}, tries: {} };
+        j.review.accepted = { ...(j.review.accepted || {}), [`${SHEET}.open`]: { when: { field: 'idle' }, mockup: `mockups/screens/${SHEET}/open.html` } };
+        await route.fulfill({ response: r, json: j });
+      });
+      await p.route(`**/data/mockups/screens/${SHEET}/open.html*`, route => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
+      // Where the sheet's last line (its button) is, against the box it is drawn in.
+      const inside = where => p.evaluate(sel => {
+        const host = document.querySelector(sel);
+        const cta = host?.shadowRoot?.querySelector('.sheet .cta');
+        if (!host || !cta) { return null; }
+        const h = host.getBoundingClientRect();
+        const c = cta.getBoundingClientRect();
+        const sheet = host.shadowRoot.querySelector('.sheet').getBoundingClientRect();
+        return { inside: c.height > 0 && c.top >= h.top - 1 && c.bottom <= h.bottom + 1 && c.right <= h.right + 1, sheetTall: sheet.height > c.height,
+          bg: getComputedStyle(host).backgroundColor, w: Math.round(h.width), color: getComputedStyle(host).color };
+      }, where);
+      const bad = [];
+      for (const width of [1400, 390]) {
+        await p.setViewportSize({ width, height: 900 });
+        await p.goto(`${URL}#screen/${SHEET}`);
+        await p.waitForSelector(`.sv-page figure.state[data-key="${SHEET}.open"] .mock`);
+        const own = await inside(`.sv-page figure.state[data-key="${SHEET}.open"] .mock`);
+        if (!own || !own.inside || !own.sheetTall) { bad.push(`${width}px, its page: ${JSON.stringify(own)}`); }
+        await p.goto(`${URL}#screens`);
+        await p.waitForFunction(k => document.querySelector(`.sv-strip figure.state[data-go="${k}"] .mock`)?.style.zoom, `${SHEET}.open`, { timeout: 5000 });
+        const listed = await inside(`.sv-strip figure.state[data-go="${SHEET}.open"] .mock`);
+        if (!listed || !listed.inside) { bad.push(`${width}px, the Screens list: ${JSON.stringify(listed)}`); }
+        await p.goto(URL);
+        await p.waitForSelector(`#todos-add figure.state[data-key="${SHEET}.open"] .mock`);
+        const shown = await inside(`#todos-add figure.state[data-key="${SHEET}.open"] .mock`);
+        // In a section, the component's own box: the app's white background and dark text, a phone's width at most.
+        if (!shown || !shown.inside || shown.bg !== 'rgb(255, 255, 255)' || shown.color !== 'rgb(17, 17, 17)' || shown.w > 271) {
+          bad.push(`${width}px, in a section: ${JSON.stringify(shown)}`);
+        }
+        const side = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+        if (side > 0) { bad.push(`${width}px: the book scrolls sideways by ${side}px`); }
+      }
+      await p.setViewportSize({ width: 1400, height: 900 });
+      // The review words the accepted `when` with this component's own `field`, not TodosScreen's.
+      if (!(await p.evaluate(() => document.body.classList.contains('diff-on')))) { await p.locator('#changes-btn').click(); }
+      await p.waitForSelector(`.rv-stack[data-key="${SHEET}.open"]`, { state: 'attached', timeout: 5000 });
+      const stack = await p.evaluate(k => document.querySelector(`.rv-stack[data-key="${k}"]`).textContent, `${SHEET}.open`);
+      if (!stack.includes('When: Sheet: Sheet closed') || stack.includes('Field:')) { bad.push(`the review reads ${JSON.stringify(stack)}`); }
+      if (pageErrors.length) { bad.push(`page errors: ${pageErrors.join('; ')}`); }
+      if (bad.length) { throw new Error(bad.join('; ')); }
+    } finally {
+      await ctx.close();
+    }
+  });
+
   await check('a screen\'s page: a state\'s link scrolls to it and outlines it; requirements by chapter and section, with the state or the component', async () => {
     await page.goto(`${URL}#screen/${TODOS}.empty`);
     await page.waitForSelector('.sv-page');

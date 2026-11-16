@@ -298,9 +298,16 @@
     var html = listField(v[f] || [], newer[f] || [], f === 'shows' ? showLabel : screenEntryLabel);
     return '<p class="rv-field rv-mock"><span>' + (f === 'shows' ? 'Shows now:' : 'Screens now:') + '</span> ' + (html || 'none') + '</p>';
   }
-  // A version of an item, compared with the one before it (prev; null for the first version shown).
-  function versionHtml(kind, v, prev) {
+  // The screen an item's key names: the key of a screen, the part before the dot of a state's.
+  function screenOfKey(key) {
+    var k = String(key || '');
+    return k.indexOf('.') < 0 ? k : k.slice(0, k.indexOf('.'));
+  }
+  // A version of an item (key), compared with the one before it (prev; null for the first version shown). A `when` is
+  // worded with the variables of the screen the key names.
+  function versionHtml(kind, v, prev, key) {
     var p = prev || {};
+    var sid = kind === 'state' || kind === 'screen' ? screenOfKey(key) : null;
     var cmp = function (k) { return prev ? p[k] : undefined; };
     var line = function (cls, label, html) { return html ? '<p class="' + cls + '">' + (label ? '<span>' + label + '</span> ' : '') + html + '</p>' : ''; };
     if (kind === 'req') {
@@ -314,7 +321,7 @@
     if (kind === 'state') {
       var stTag = function (m) { return m ? '<span class="tag chg-tag">' + esc(MARKER[m] || m) + '</span>' : ''; };
       return line('rv-text', '', diffField(cmp('name'), v.name, esc)) +
-        line('rv-field', 'When:', diffField(prev ? window.SpecModel.whenText(state.book, null, p.when) : undefined, window.SpecModel.whenText(state.book, null, v.when), esc)) +
+        line('rv-field', 'When:', diffField(prev ? window.SpecModel.whenText(state.book, sid, p.when) : undefined, window.SpecModel.whenText(state.book, sid, v.when), esc)) +
         line('rv-field', 'Also:', diffField(cmp('also'), v.also, esc)) +
         line('rv-field', 'Same as:', diffField(cmp('sameAs'), v.sameAs, esc)) +
         line('rv-field', 'Never shown:', diffField(cmp('absent'), v.absent, esc)) +
@@ -328,7 +335,7 @@
         line('rv-field', 'File:', diffField(cmp('file'), v.file, esc)) +
         line('rv-field', 'Intro:', diffField(cmp('intro'), v.intro)) +
         line('rv-field', 'Variables:', diffField(prev ? window.SpecModel.variablesText(state.book, p.variables) : undefined, window.SpecModel.variablesText(state.book, v.variables), esc)) +
-        line('rv-field', 'Not drawn:', diffField(prev ? window.SpecModel.undrawnText(state.book, null, p.undrawn) : undefined, window.SpecModel.undrawnText(state.book, null, v.undrawn), esc));
+        line('rv-field', 'Not drawn:', diffField(prev ? window.SpecModel.undrawnText(state.book, sid, p.undrawn) : undefined, window.SpecModel.undrawnText(state.book, sid, v.undrawn), esc));
     }
     return line('rv-text', '', diffField(cmp('title'), v.title, esc)) + line('rv-field', 'Intro:', diffField(cmp('intro'), v.intro)) +
       line('rv-field', 'Shows:', listField(prev ? p.shows || [] : undefined, v.shows, showLabel));
@@ -456,7 +463,7 @@
     var oldHtml = function (v) {
       var mock = kind === 'state' ? mockupChanged(v, newer) : listsChanged(kind, v, newer);
       newer = v || newer;
-      return versionHtml(kind, v, null) + mock;
+      return versionHtml(kind, v, null, key) + mock;
     };
     var tryHtml = function (t, i) {
       return '<div class="rv-ver rv-try"><p class="rv-head">Try ' + (i + 1) + ' · ' + esc(shortDate(t.frozenAt)) + '</p>' +
@@ -534,14 +541,14 @@
     var first = (e.notes || []).filter(function (n) { return n && n.text; })[0];
     var line = first ? esc(first.text) : e.kind === 'built' ? 'Built' : 'Edited';
     var detailKey = key + '#' + idx;
-    var body = '<div class="rv-ver"><p class="rv-head">Before</p>' + (e.before ? versionHtml(kind, e.before, null) : '<p class="rv-field"><span class="tag new">New</span></p>') + '</div>';
+    var body = '<div class="rv-ver"><p class="rv-head">Before</p>' + (e.before ? versionHtml(kind, e.before, null, key) : '<p class="rv-field"><span class="tag new">New</span></p>') + '</div>';
     var prev = e.before;
     (e.tries || []).forEach(function (t, i) {
       body += '<div class="rv-ver rv-try"><p class="rv-head">Try ' + (i + 1) + ' · ' + esc(shortDate(t.frozenAt)) + '</p>' +
-        (t.value ? versionHtml(kind, t.value, prev) : '') + notesHtml(t.notes, key, true) + '</div>';
+        (t.value ? versionHtml(kind, t.value, prev, key) : '') + notesHtml(t.notes, key, true) + '</div>';
       prev = t.value || prev;
     });
-    body += '<div class="rv-ver"><p class="rv-head">After</p>' + (e.after ? versionHtml(kind, e.after, prev) : '<p class="rv-field"><span class="tag removed">Removed</span></p>') + '</div>';
+    body += '<div class="rv-ver"><p class="rv-head">After</p>' + (e.after ? versionHtml(kind, e.after, prev, key) : '<p class="rv-field"><span class="tag removed">Removed</span></p>') + '</div>';
     if (e.notes && e.notes.length) { body += '<div class="rv-ver"><p class="rv-head">Notes</p>' + notesHtml(e.notes, key, true) + '</div>'; }
     var li = el('li', { class: 'hi-entry' + (e.kind === 'built' ? ' built' : '') });
     setHtml(li, '<p class="hi-line"><span class="hi-date">' + esc(shortDate(e.acceptedAt)) + '</span> ' + line + '</p>' +
@@ -892,6 +899,17 @@
     });
     return out;
   }
+  // A removed state's words, as a state's label reads (SpecModel.stateLabel), from its last accepted value v:
+  // "<screen name> · <role labels> · <caption>", ending in the state's id when there is neither role nor caption.
+  function removedStateLabel(key, v) {
+    var sid = screenOfKey(key);
+    var ix = screens();
+    var cap = window.SpecModel.whenCaption(state.book, sid, v.when);
+    if (typeof v.name === 'string' && v.name) { cap.text = v.name; }
+    var words = cap.roles.map(function (r) { return roleInfo(r).label || r; }).concat(cap.text ? [cap.text] : []);
+    if (!words.length) { words = [key.slice(sid.length + 1) || key]; }
+    return [hasOwn(ix.screens, sid) ? ix.screens[sid].name || sid : sid].concat(words).join(' · ');
+  }
   // Items gone from the book, each with its review, under the place it left.
   function removedList(keys) {
     var ol = el('ol', { class: 'reqs removed-since' });
@@ -899,7 +917,7 @@
     keys.forEach(function (key) {
       var r = reviewOf(key);
       var v = r.accepted || {};
-      var what = r.kind === 'req' ? v.text : r.kind === 'screen' || r.kind === 'state' ? (r.kind === 'screen' ? 'Screen “' + esc(v.name || key) : 'State “' + esc(v.name || window.SpecModel.whenText(state.book, null, v.when) || key)) + '”' : esc(v.title || key);
+      var what = r.kind === 'req' ? v.text : r.kind === 'screen' || r.kind === 'state' ? (r.kind === 'screen' ? 'Screen “' + esc(v.name || key) : 'State “' + esc(removedStateLabel(key, v))) + '”' : esc(v.title || key);
       var li = el('li', { id: key, class: 'chg-gone' }, '<span class="rid chg">−</span><div><del class="was">' + (what || '') + '</del> <span class="sid">' + esc(key) + '</span></div>');
       markReview(li, key);
       tgtAttrs(li, key, key + ' (removed)', what || '', key);
@@ -944,12 +962,15 @@
     '.sb-missing{margin:6px;padding:8px;border:1px dashed #d33;border-radius:6px;color:#d33;background:#fff;font:600 12px ui-monospace,monospace}';
   // Draws the picture at path into the host's shadow root, with its sb-component tags replaced by the components'
   // pictures (SpecModel.expandMockup); highlight is a component id to outline.
+  // A picture that draws an overlay (phone.css's .dim and .sheet) marks its host has-overlay: a component's box is then
+  // a phone's height, so the sheet has the room it has on a phone.
   function mountMockup(host, path, highlight) {
     host.dataset.mockup = path;
     var root = host.attachShadow({ mode: 'open' });
     var css = '<style>' + (state.mockupCss || '') + MOCKUP_CSS + '</style>';
     var html = hasOwn(state.mockups, path) ? window.SpecModel.expandMockup(state.book, state.mockups, state.mockups[path], { highlight: highlight }) : null;
     setHtml(root, css + (html || '<p style="color:#c00">Missing mockup ' + esc(path) + '</p>'));
+    if (root.querySelector('.dim, .sheet')) { host.classList.add('has-overlay'); }
   }
 
   // One picture of a state: its mockup, its screenshot (media/screens/<key>.<ext>, by the first of shotKeys that has
@@ -1032,6 +1053,8 @@
       cap += '<span class="tag removed">Missing</span> ' + esc(key);
     }
     var fig = el('figure', { class: 'state' });
+    // A component's picture is drawn in its own box (book.css), wherever it is shown.
+    if (hit && isComponent(hit.screen)) { fig.dataset.kind = 'component'; }
     markReview(fig, key);
     fig.appendChild(el('figcaption', {}, cap));
     fig.appendChild(renderStateBody(key, hit, drawn, highlight, section));
