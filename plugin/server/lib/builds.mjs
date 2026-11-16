@@ -7,7 +7,7 @@ import { findRequirement, findSection, listSections } from './book-model.mjs';
 import { addNote, currentSnapshot, recordBuild, setAccepted, readReview, sectionsUnderReview } from './review.mjs';
 import { plain } from './migrate.mjs';
 
-const { isProven, screenIndex, gateKeys, mockupPaths, componentsIn } = createRequire(import.meta.url)('../../app/model.js');
+const { isProven, screenIndex, gateKeys, mockupPaths, componentsIn, stateLabel } = createRequire(import.meta.url)('../../app/model.js');
 
 const REQUIREMENT_STATUSES = ['queued', 'in_progress', 'proven', 'failed'];
 
@@ -234,14 +234,16 @@ function landStates(book, built, land, ctx, at) {
         held.push({ key, by });
         continue;
       }
+      // Labeled while the state is still in the book: its computed caption, never empty.
+      const label = stateLabel(book, key);
       book.decisions = book.decisions ?? [];
-      book.decisions.push({ id: mint('DEC'), date: at.slice(0, 10), about: [key], by: 'build', title: state.name ?? '', body: state.reason ?? '', kind: 'removed' });
+      book.decisions.push({ id: mint('DEC'), date: at.slice(0, 10), about: [key], by: 'build', title: label, body: state.reason ?? '', kind: 'removed' });
       screen.states = screen.states.filter(st => st !== state);
       unreference(book, key, ctx);
       gone.push(state.mockup, state.today);
-      land(state, kind, { key, label: state.name ?? '' });
+      land(state, kind, { key, label });
     } else {
-      land(state, kind, { key, label: state.name ?? '', now: ctx.snap.items[key]?.value });
+      land(state, kind, { key, label: stateLabel(book, key), now: ctx.snap.items[key]?.value });
       if (kind === 'changed') {
         gone.push(state.today);
       }

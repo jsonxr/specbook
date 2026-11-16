@@ -19,7 +19,7 @@ could read it and build things a user would tell apart, it needs more detail.
 | Part | Write | Never write |
 | --- | --- | --- |
 | Requirement | What a person (or another system) can observe: the rule, its numbers ("30 seconds"), its fixed words quoted exactly, who it applies to | Function, variable or type names; the steps the code takes; library calls |
-| Screen, component | Its name and file, how each state looks, the conditions behind each state | Its props, its hooks, how it fetches data |
+| Screen, component | Its name and file, the variables that change its picture (role, data, filter), how each combination looks, the combinations its requirements imply that are not drawn | Its props, its hooks, how it fetches data; a variable that is code state, not something a person sees |
 | Decision | What was settled, why, and what was rejected | The diff that carried it out |
 | Architecture (future) | The layers and what may call what ("the mobile app never talks to the database"), the conventions a newcomer would break | Folder-by-folder structure, class diagrams, anything a tool can draw from the code |
 | Data model (future) | The things the app keeps, what they mean, who owns them, the rules they always obey ("an invite is used once") | Columns, types, indexes, migrations |

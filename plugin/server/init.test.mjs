@@ -42,7 +42,25 @@ test('the starter book has screens, no frames, and valid screens', () => {
   const M = createRequire(import.meta.url)('../app/model.js');
   assert.equal(M.screenProblem(book, exists, mockups), null);
   const bar = book.screens.find(s => s.name === 'FiltersBar');
+  for (const s of book.screens) {
+    assert.ok(Array.isArray(s.variables), s.id);
+    for (const st of s.states) {
+      assert.equal(st.name, undefined, st.id);
+      const cap = M.stateCaption(book, s.id + '.' + st.id);
+      assert.ok(cap.roles.length > 0 || cap.text !== '', st.id);
+    }
+  }
+  assert.equal(book.screens.find(s => s.name === 'TodosScreen').undrawn.length, 1);
   const todos = book.screens.find(s => s.name === 'TodosScreen');
+  // The starter's captions, exactly: the pill alone when only the role differs, a pill and one value, a component's value.
+  const caption = (sc, id) => M.stateCaption(book, sc.id + '.' + id);
+  assert.deepEqual(caption(todos, 'list'), { roles: ['user'], text: '' });
+  assert.deepEqual(caption(todos, 'empty'), { roles: ['user'], text: 'No todos' });
+  assert.deepEqual(caption(todos, 'editing'), { roles: ['user'], text: 'Editing' });
+  assert.deepEqual(caption(todos, 'activeonly'), { roles: ['user'], text: 'Active' });
+  assert.deepEqual(caption(bar, 'all'), { roles: [], text: 'All' });
+  // No starter state sets two values; a combination of two reads in the screen's variable order.
+  assert.deepEqual(M.whenCaption(book, todos.id, { role: 'user', data: 'empty', field: 'typing' }), { roles: ['user'], text: 'No todos, Typing' });
   const list = todos.states.find(s => s.id === 'list');
   assert.equal(list.change, 'change');
   assert.ok(list.today);

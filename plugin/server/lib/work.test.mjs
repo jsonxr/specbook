@@ -14,10 +14,11 @@ const book = () => readJson(join(data, 'book.json'), null);
 beforeEach(() => {
   data = mkdtempSync(join(tmpdir(), 'specbook-work-'));
   writeJsonAtomic(join(data, 'book.json'), {
+    roles: [{ id: 'user' }, { id: 'admin' }],
     chapters: [{ id: 'c', title: 'C', sections: [
       { id: 's', title: 'S', stage: 'drafting', shows: [{ state: 'SCR-S.a' }], requirements: [{ id: 'R0', text: 'a' }] },
     ] }],
-    screens: [{ id: 'SCR-S', name: 'S', kind: 'screen', states: [{ id: 'a', name: 'A', mockup: 'mockups/a.html' }] }],
+    screens: [{ id: 'SCR-S', name: 'S', kind: 'screen', states: [{ id: 'a', name: 'A', when: { role: 'user' }, mockup: 'mockups/a.html' }] }],
     usedIds: ['R0'],
   });
   mkdirSync(join(data, 'mockups'));
@@ -41,7 +42,7 @@ test('landWork writes the working book and mockups in one go while the request i
   const work = startWork(data, file);
   const b = readJson(join(work, 'book.json'), null);
   b.chapters[0].sections[0].requirements[0].text = 'reworded';
-  b.screens[0].states.push({ id: 'b', name: 'B', mockup: 'mockups/b.html' });
+  b.screens[0].states.push({ id: 'b', name: 'B', when: { role: 'admin' }, mockup: 'mockups/b.html' });
   writeJsonAtomic(join(work, 'book.json'), b);
   writeFileSync(join(work, 'mockups', 'b.html'), '<p>b</p>');
   rmSync(join(work, 'mockups', 'gone.html'));

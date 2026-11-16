@@ -11,6 +11,8 @@ them together. The skills point here at the step that needs each part.
   "sources": [{ "label": "Spec", "path": "docs/…" }],
   "roles": [{ "id": "signedout", "label": "Signed out", "color": "#c9ccd2" },
             { "id": "member", "label": "Member", "color": "#9cc3ff" }],
+  "variables": [{ "id": "data", "label": "Data",
+                  "values": [{ "id": "some", "label": "Some to do" }, { "id": "empty", "label": "No todos" }] }],
   "mockupCss": "mockups/phone.css",
   "screens": [ … ],
   "settings": { "screenshotWidth": 100 },
@@ -65,35 +67,60 @@ banner, header) is listed once and drawn once per state. A section does not copy
 
 ```json
 "screens": [
-  { "id": "SCR-4K7M", "name": "HomeScreen", "kind": "screen", "file": "src/features/messages/HomeScreen.tsx",
+  { "id": "SCR-3WRX", "name": "TodosScreen", "kind": "screen", "file": "src/screens/TodosScreen.tsx",
     "intro": "HTML, optional",
+    "variables": ["role", "data", "filter",
+                  { "id": "field", "label": "Field", "values": [{ "id": "idle", "label": "Empty field" },
+                                                                  { "id": "typing", "label": "Typing" }] }],
     "states": [
-      { "id": "member", "name": "Member", "when": { "role": "member" }, "mockup": "mockups/screens/SCR-4K7M/member.html" },
-      { "id": "admin", "name": "Admin", "when": { "role": "admin" }, "mockup": "mockups/screens/SCR-4K7M/admin.html",
-        "change": "change", "today": "mockups/screens/SCR-4K7M/admin.today.html" },
-      { "id": "visitor", "name": "Visitor", "when": { "role": "visitor" }, "sameAs": "member" },
-      { "id": "empty", "name": "Empty", "when": { "role": "member", "also": "no messages yet" },
-        "mockup": "mockups/screens/SCR-4K7M/empty.html", "change": "add" },
-      { "id": "signedout", "name": "Signed out", "when": { "role": "signedout" },
-        "absent": "Signed-out people never reach Home." }
-    ] },
-  { "id": "SCR-9QX2", "name": "VisitorsCard", "kind": "component", "file": "src/features/directory/VisitorsCard.tsx",
-    "states": [{ "id": "waiting", "name": "3 waiting", "when": { "also": "visitors waiting" },
-                 "mockup": "mockups/screens/SCR-9QX2/waiting.html" }] }
+      { "id": "list", "when": { "role": "user" }, "mockup": "mockups/screens/SCR-3WRX/list.html" },
+      { "id": "empty", "when": { "role": "user", "data": "empty" }, "mockup": "mockups/screens/SCR-3WRX/empty.html",
+        "change": "add" },
+      { "id": "active", "when": { "role": "user", "filter": "active" }, "mockup": "mockups/screens/SCR-3WRX/active.html",
+        "change": "change", "today": "mockups/screens/SCR-3WRX/active.today.html" },
+      { "id": "alldone", "when": { "role": "user", "data": "alldone" }, "sameAs": "list" },
+      { "id": "locked", "when": { "role": ["visitor", "guest"] }, "absent": "Only a user can type a todo." }
+    ],
+    "undrawn": [{ "when": { "role": "user", "filter": "completed" }, "about": ["FLT-36VG"],
+                  "note": "The Completed filter is not drawn yet" }] },
+  { "id": "SCR-Y6S2", "name": "FiltersBar", "kind": "component", "file": "src/components/FiltersBar.tsx",
+    "variables": ["filter"],
+    "states": [{ "id": "all", "when": { "filter": "all" }, "mockup": "mockups/screens/SCR-Y6S2/all.html" }] }
 ]
 ```
 
 - **`id`** is a stable id (`SCR-` and four of `23456789ABCDEFGHJKLMNPQRSTUVWXYZ`, minted by
   `assign-ids.mjs`). Requirements, `shows`,
   `sb-component` tags, reviews, notes and media all link to it, so renaming a screen changes only `name` and
-  `file`. **`name`** is the component's name, unique in the book, and the only name the reader shows. **`file`** is
+  `file`. **`name`** is the screen's or component's name, unique in the book. **`file`** is
   optional: a screen with no app component (a lock-screen notification, a system prompt) has none, and a screen not
   built yet has none until the build creates it and fills it in. **`kind`** is `screen` (navigated to) or `component`
   (placed inside screens). `intro` is optional HTML.
-- **A state** is one picture and the conditions behind it. Its key is `<screen-id>.<state-id>` (`SCR-4K7M.admin`),
-  unique in the book; state ids are unique within the screen. **`when.role`** is one of the book's `roles` or
-  `anyone`, which covers every role and is always valid, whether or not `roles` lists it; **`when.also`** is free words for every
-  other condition (data, errors, connection).
+- **State variables.** A screen's states are combinations of named variables; role is one of them. The book's
+  **`variables`** declares the shared ones once: `id`, `label` and `values` (each `id` and `label`), in order;
+  **the first value is the default** (a screen's picture of the default needs no words). **`role`** is built in: its
+  values are the book's `roles` (and `anyone`), it has no default, and it is never declared in `variables`. A
+  screen or component lists the variables it uses in its own **`variables`** list, in caption order: ids of book
+  variables, `"role"`, or an inline declaration `{ "id", "label", "values" }` for one only that screen has. A screen
+  with no `variables` list uses `["role"]`; a component with none uses none (it has no role).
+- **A state** is one picture and the conditions behind it. Its key is `<screen-id>.<state-id>` (`SCR-3WRX.empty`),
+  unique in the book; state ids are unique within the screen and never change. **`when`** sets some of the screen's
+  variables, `{ "role": "user", "data": "empty" }`; a variable left out means **any** value, so **pin every value
+  the picture depends on, defaults included** (a list drawn with some todos, the All filter and an empty field is
+  `{ "role": "user", "data": "some", "filter": "all", "field": "idle" }`; its caption is still the pill alone, since
+  defaults are not shown). `when.role` may be
+  a list (`["visitor", "guest"]`) on an `absent` or `sameAs` state only. A state with no role and only default
+  values has an empty caption and is captioned by its id, so give it a non-default value or a `name`.
+- **The caption is computed**, never typed: the role pill (from `when.role`; "Anyone" for `anyone`; one pill each for
+  a list), then the labels of the values that are not defaults, in the screen's variable order, joined by ", ". When
+  only the role differs, the caption is the pill alone. A component has no pill: its caption is the labels of all its
+  values, defaults included. An optional **`name`** overrides the computed words; leave it out unless the computed
+  caption reads badly, and never type a name that repeats the role. An optional **`also`** (free words, outside
+  `when`) is shown on the screen's page and never in a caption.
+- **`undrawn`** (a screen's, optional) lists combinations its requirements imply that have no picture:
+  `{ "when": {…}, "about": ["FLT-36VG"], "note": "…" }`. `when` uses the screen's variables and values (no list of
+  roles); `about` names requirement ids; `note` is optional words. An undrawn entry is an honest "not drawn yet", not
+  a state: it has no key and cannot be shown.
 - A state has exactly one of `mockup` (a file under the data folder, `mockups/screens/<screen-id>/<state-id>.html`),
   `sameAs` (the id of another state of the same screen that looks exactly like it; no chains, no cycles) and
   `absent` (words saying the role never sees the screen; no picture).
@@ -103,9 +130,9 @@ banner, header) is listed once and drawn once per state. A section does not copy
   builds lands every state its Accept gate covers (the states it shows, the states they are `sameAs`, the
   component states their pictures place): the build drops `change` and `today` (and deletes today's picture file),
   and deletes a removed state, recording a `removed` decision named for its key. This replaces a frame's `"state": "proposed"`.
-- **Missing roles.** A `screen` (not a component) with no state covering one of the book's roles gets a hint in the
-  Screens view: "No state for Visitor: same as another, or doesn't see it?". It is a hint, not a review: resolve it
-  with a `sameAs` or `absent` state.
+- **Coverage.** The Screens view lists, for a screen, every combination it accounts for: each state (drawn, same as
+  another, or absent), then each `undrawn` entry. It is a list to read, not a review and not a check that every
+  combination is there: record a combination a requirement implies as a state or as `undrawn`.
 - **Components placed by name.** A picture places a component with
   `<sb-component id="SCR-9QX2" state="waiting"></sb-component>` instead of copying its markup. The reader swaps the
   tag for that state's picture (components may place components). A cycle, a missing component, state or picture
@@ -115,17 +142,24 @@ banner, header) is listed once and drawn once per state. A section does not copy
   "Used on" for a component is computed by scanning pictures for tags, never stored.
 - **`shows`** (a section's, in order) lists the states the section draws: `state` is a state key and `highlight`
   (optional) is the id of a component placed in that picture, outlined there. The caption is `<screen name> ·
-  <state name>`, from the screen, never typed again. The same state may be shown by several sections.
+  <computed caption>`, from the screen, never typed again. The same state may be shown by several sections.
 - **`screens`** on a requirement (optional) lists what it is about: `{ "screen": "SCR-4K7M" }`, optionally narrowed
   with `"state": "admin"`. A requirement on a component reaches every screen that places it (the Screens view says
   "via <component>"); name a screen only when the rule is about that screen. The requirement still lives in one
   section.
-- **Valid** means: screen ids and names are unique; state ids are unique within a screen; each state has exactly one
+- **Valid** means: the book's `variables`, when present, is a list of declarations with different ids, none named
+  `role`; every declaration (the book's or a screen's inline one) has an `id` and a non-empty `values` list whose
+  entries are objects with different ids; screen ids and names are unique; state ids are unique within a screen; each state has exactly one
   of `mockup`, `sameAs` and `absent`; `change`, when present, is `add`, `change` or `remove`; every `mockup` and
-  `today` file exists; `sameAs` targets exist and are not themselves `sameAs`; `when.role` is a book role or
-  `anyone`; every `sb-component` tag names an existing component state that draws a picture, and no chain of tags
-  is a cycle; every `shows` and requirement `screens` entry names an existing screen, component and state; every
-  `highlight` names a component placed in that state's picture. Only `review.mjs land` checks this (it refuses to
+  `today` file exists; `sameAs` targets exist and are not themselves `sameAs`; a screen's `variables` is a list in
+  which every entry is declared (a book variable, `role`, or an inline declaration with `id` and `values`) and none
+  is listed twice (an inline one shadowing a book variable included); every key in a state's `when` is in the
+  screen's list (`role` included, with the defaults above) and its value is one of that variable's values (a role is
+  a book role or `anyone`); a list-valued `role` only on an `absent` or `sameAs` state; no two drawn states of one
+  screen have the same `when`; every `undrawn` entry is an object using the screen's variables and values and
+  naming existing requirement ids; every `sb-component` tag names an existing component state that draws a
+  picture, and no chain of tags is a cycle; every `shows` and requirement `screens` entry names an existing screen,
+  component and state; every `highlight` names a component placed in that state's picture. Only `review.mjs land` checks this (it refuses to
   land a working book that is not valid); nothing else does.
 
 ## Stable ids
@@ -158,7 +192,7 @@ or from a note).
 {
   "rev": 12,
   "accepted": { "ONB-8KAB": { "text": "…" },
-                "SCR-4K7M.admin": { "name": "Admin", "when": { "role": "admin" }, "mockup": "<div…" } },
+                "SCR-3WRX.empty": { "when": { "role": "user", "data": "empty" }, "mockup": "<div…" } },
   "notes": {
     "n1k2": { "item": "ONB-8KAB", "text": "It doesn't say why…", "status": "draft | sent | answered | frozen",
               "created": "ISO", "reply": "Claude's answer when it made no change", "causes": ["DIR-4K7M"],
@@ -172,8 +206,8 @@ or from a note).
 ```
 
 - **Items and keys.** A requirement is keyed by its stable id (value: `text`, `change`, `today`, `reason`, the fields
-  present, `screens` among them); a screen by its id (`name`, `kind`, `file`, `intro`); a state by its key
-  (`name`, `when`, `sameAs`, `absent`, `change`, `reason`, and `mockup` and `today`, the picture files' text); a
+  present, `screens` among them); a screen by its id (`name`, `kind`, `file`, `intro`, `variables`, `undrawn`); a state by its key
+  (`when`, `sameAs`, `absent`, `change`, `reason`, `also`, `name` when typed, and `mockup` and `today`, the picture files' text); a
   section heading by `<chapter-id>-<section-id>` (`title`, `intro`, `shows`) and a chapter heading by `<chapter-id>`
   (`title`, `intro`). Section stage, `label` and decisions are not reviewed.
 - **`accepted`** is an item's last accepted value. An item with none is new. A key in `accepted` that is gone from the

@@ -82,17 +82,36 @@ is an entry, and so is every piece placed on several screens. Draw each once; se
   its component `name` (unique in the book) and, when the app has one, its `file`; a screen not built yet has no
   `file` (the build fills it in), and a screen with no app component (a system prompt, a notification) never does.
   Run `assign-ids.mjs` for the `SCR-` ids.
-- **Every state is a picture and its conditions.** `when.role` is a book role or `anyone` (it covers every role
-  and is always valid, even when `roles` does not list it); `when.also` is words
-  for the rest (empty, error, offline, a particular data shape). A role whose picture is exactly another's is
-  `"sameAs": "<state id>"` (no picture of its own, no chains); a role that never sees the screen is `"absent":
-  "<words>"`, an honest entry instead of silence. States that are not roles (signed out, no account yet) are entries
-  in `roles` too.
-- **Resolve the missing-role hints** for every screen you draw: the Screens view hints "No state for <role>" for each
-  book role no state covers. Give each a state, a `sameAs` or an `absent`, until none remain. Components get none.
+- **Declare state variables, then express each state as a combination.** A state is one picture and a `when`, a set
+  of variable = value pairs. **`role` is just a specific named state variable that has admin, member, visitor
+  values; a screen can have several such state variables** (data, filter, connection, an open sheet). Declare the
+  ones several screens share once in the book's `variables` (`id`, `label`, `values`; the first value is the
+  default), and list the ones a screen uses in its `variables`, in caption order (`["role", "data", "filter"]`); a
+  variable only one screen has is declared inline there. A screen that lists none is held to `["role"]`; a
+  component lists its own and has no role. **A variable left out of a `when` means any: pin every value the picture
+  depends on, defaults included** (the list with some todos and the All filter is `{ "role": "user", "data": "some",
+  "filter": "all", … }`, though its caption is the pill alone). Use a variable for what changes the picture, not as
+  a way to write code: no flags for internals a person cannot see.
+- **Never type a state's name.** The caption is computed: the role pill, then the labels of the values that are not
+  defaults ("User · No todos"). Do not add a `name` that repeats the role ("Member: Member") or invents a word
+  ("Header", "Default"); `name` is only for the rare caption that reads badly. If the caption is wrong, fix the
+  variables or their labels.
+- **A role whose picture is exactly another's** is `"sameAs": "<state id>"` (no picture of its own, no chains); a role
+  that never sees the screen is `"absent": "<words>"`, an honest entry instead of silence, and its `when.role` may be
+  a list. A "state" that is not a role (signed out, no account yet) is a role in `roles` too.
+- **Record implied combinations you do not draw as `undrawn`.** When a requirement implies a combination with no
+  picture (the Completed filter, an empty list for a visitor), add `{ "when": {…}, "about": ["<requirement id>"],
+  "note": "…" }` to the screen's `undrawn`. The Screens view lists it under Coverage as not drawn.
+- **Components own their variables.** A component lists the variables it uses (`["filter"]`) and has no role; its
+  caption is its values' labels. A screen lists a component's variable only when the screen's own picture depends on
+  it, that is when it places a different state of the component (TodosScreen lists `filter`, which FiltersBar also
+  lists); the component's own details (an open sheet) stay on the component. A component that opens a sheet draws
+  it with phone.css's `.dim` and `.sheet`, so the reader gives its box a phone's height.
+- **Read the Coverage list** for every screen you draw: each combination its requirements imply is a state, a
+  `sameAs`, an `absent` or an `undrawn` entry.
 - **A section shows states**, in order, as `shows: [{ "state": "SCR-….admin", "highlight": "SCR-…" }]`; `highlight`
-  outlines a component placed in that picture. Never type a caption: it is `<screen name> · <state name>`, from the
-  catalog. Show each role that sees something different, side by side.
+  outlines a component placed in that picture. Never type a caption: it is `<screen name> · <computed caption>`, from the
+  catalog. Show each combination that looks different, side by side.
 - **A change to a built screen** goes on its state, like a requirement's: `"change": "change"` with `mockup` the
   proposed picture and `today` the path to a copy of today's picture; `"change": "add"` for a new state; `"change": "remove"` with a `reason` for one going away. Never edit a built picture
   in place without keeping `today`. Build drops `change` and `today` once the section is built.
@@ -128,5 +147,5 @@ same edit.
 
 Reload the served page with the Chrome DevTools tools in an isolated context (the user's notes and reviews are
 untouched there): every `.mock` has a shadow root containing `.phone`, no red placeholder shows, every state has a picture file or
-is `sameAs` or `absent`, the Screens view shows no missing-role hint for the screens you drew, and the changed sections
+is `sameAs` or `absent`, the Coverage list of each screen you drew accounts for every combination its requirements imply, and the changed sections
 read correctly in a screenshot.

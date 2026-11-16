@@ -311,3 +311,19 @@ test('itemsOf: a state value has mockup and today only when the state has that p
   delete book.screens[0].states[1].today;
   assert.ok(M.sameValue(M.itemsOf(book, { 'mockups/b.html': '<b>' })['SCR-X.b'].value, landed));
 });
+
+test('itemsOf: a state value holds when, sameAs, absent, change, reason, also, name and the pictures; a screen adds variables and undrawn', () => {
+  const book = { roles: [{ id: 'member' }], chapters: [], screens: [{
+    id: 'SCR-X', name: 'X', kind: 'screen', variables: ['role', 'connection'],
+    undrawn: [{ when: { role: 'member', connection: 'offline' }, about: ['R1'], note: 'later' }],
+    states: [
+      { id: 'a', when: { role: 'member', connection: 'offline' }, also: 'after a minute', reason: 'why', mockup: 'mockups/a.html' },
+      { id: 'b', name: 'Typed', when: { role: ['member'] }, sameAs: 'a', change: 'add' }
+    ] }] };
+  const items = M.itemsOf(book, { 'mockups/a.html': '<a>' });
+  assert.deepEqual(items['SCR-X'].value, { name: 'X', kind: 'screen', variables: ['role', 'connection'], undrawn: [{ when: { role: 'member', connection: 'offline' }, about: ['R1'], note: 'later' }] });
+  assert.deepEqual(items['SCR-X.a'].value, { when: { role: 'member', connection: 'offline' }, reason: 'why', also: 'after a minute', mockup: '<a>' });
+  assert.deepEqual(items['SCR-X.b'].value, { name: 'Typed', when: { role: ['member'] }, sameAs: 'a', change: 'add' });
+  // A screen that lists no variables and no undrawn keeps the value it had, so accepted copies stay accepted.
+  assert.deepEqual(M.itemsOf(screensBook(), screenTexts())['SCR-HOME'].value, { name: 'HomeScreen', kind: 'screen' });
+});
