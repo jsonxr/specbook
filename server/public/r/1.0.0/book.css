@@ -42,11 +42,24 @@ main { padding: 28px max(20px, 3vw) 140px max(20px, 4vw); max-width: 1500px; min
 .reqs li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; scroll-margin-top: 80px; }
 .rid { font: 600 12px var(--mono); color: #fff; background: var(--req); border-radius: 9px; padding: 2px 7px; height: fit-content; text-align: center; white-space: nowrap; }
 .sid { font: 500 11px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 0 5px; margin-left: 6px; white-space: nowrap; user-select: all; vertical-align: 1px; }
-.frames { display: flex; flex-wrap: wrap; gap: 28px 26px; align-items: flex-start; }
-.frame { margin: 0; }
-.frame figcaption { font: 500 13px var(--mono); color: var(--muted); margin: 0 0 8px; max-width: 300px; }
-.frame-body { display: flex; gap: 14px; align-items: flex-start; }
-.frame-body.stacked { flex-direction: column; gap: 6px; }
+.states { display: flex; flex-wrap: wrap; gap: 28px 26px; align-items: flex-start; }
+figure.state { margin: 0; }
+figure.state figcaption { font: 500 13px var(--mono); color: var(--muted); margin: 0 0 8px; max-width: 300px; }
+.state-body { display: flex; gap: 14px; align-items: flex-start; }
+.state-body.stacked { flex-direction: column; gap: 6px; }
+/* a change to a built screen: today's picture beside the proposed one, one above the other on a phone */
+.state-change { display: flex; gap: 14px; align-items: flex-start; }
+.state-pane { display: flex; flex-direction: column; gap: 6px; }
+.state-pane-label { margin: 0; font: 600 11px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.state-pane + .state-pane .state-pane-label { color: var(--proposed); }
+.state-absent, .state-missing { width: 290px; max-width: 100%; box-sizing: border-box; min-height: 80px; border: 1px dashed var(--line); border-radius: 18px; color: var(--muted); font-size: 13px; display: flex; align-items: center; justify-content: center; text-align: center; padding: 16px; }
+.state-missing { color: var(--req); border-color: var(--req); }
+@media (max-width: 700px) { .state-change, .state-body { flex-direction: column; } }
+/* a requirement's screens: small chips linking to the Screens view */
+.screen-chips { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 6px; }
+.screen-chip { font: 500 11px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; text-decoration: none; overflow-wrap: anywhere; }
+.screen-chip:hover { color: var(--ink); border-color: var(--muted); }
+.screen-chip.missing { color: var(--req); border-color: var(--req); border-style: dashed; }
 .shot-missing { margin: 0; font: 500 12px var(--mono); color: var(--proposed); }
 .role { display: inline-block; font: 600 11px var(--mono); border-radius: 6px; padding: 1px 6px; margin-right: 4px; color: #111; background: #c9ccd2; }
 .shot { width: 290px; border-radius: 34px; border: 9px solid #000; display: block; background: #000; }
@@ -72,7 +85,7 @@ body.hide-videos .videos { display: none; }
 /* The left bar marks an item under review in every mode, as the changed-since marks did; new ones are green. */
 .reqs li.has-rv { box-shadow: -3px 0 0 var(--accent); }
 .reqs li.rv-is-new { box-shadow: -3px 0 0 var(--built); }
-.frame.has-rv { outline: 2px solid var(--accent); outline-offset: 6px; border-radius: 4px; }
+figure.state.has-rv { outline: 2px solid var(--accent); outline-offset: 6px; border-radius: 4px; }
 .chapter > h2.has-rv, .bk-sec > h3.has-rv { box-shadow: -3px 0 0 var(--accent); padding-left: 8px; }
 .tag.chg-tag { color: var(--accent); }
 del.was { color: var(--muted); }
@@ -81,7 +94,7 @@ ins.now { text-decoration: none; background: rgba(106, 168, 255, .18); border-ra
 body.diff-on .diff-summary { display: block; }
 body.diff-on .chapter.no-chg, body.diff-on .bk-sec.no-chg { display: none; }
 body.diff-on .sb-ch:not(.has-chg), body.diff-on .sb-secs a.no-chg { opacity: .35; }
-body.diff-on .reqs li.same, body.diff-on .frame:not(.has-rv), body.diff-on .videos { opacity: .35; }
+body.diff-on .reqs li.same, body.diff-on figure.state:not(.has-rv), body.diff-on .videos { opacity: .35; }
 body.diff-on .reqs li.rv-is-new { background: rgba(62, 207, 142, .12); box-shadow: -3px 0 0 var(--built); }
 body.diff-on .reqs li.rv-is-changed { background: rgba(106, 168, 255, .12); }
 body.diff-on .reqs li.rv-is-noted { box-shadow: -3px 0 0 var(--note); }
@@ -104,8 +117,8 @@ body.diff-on .removed-since { display: grid; }
 /* an empty row takes no room (no grid gap): one with no tools, and no review stack showing */
 .item-row:not(.has-rv-row):has(> .item-tools:empty), body:not(.diff-on) .item-row:has(> .item-tools:empty) { display: none; }
 .item-tools:empty { display: none; }
-/* as wide as its frame (one phone, or two side by side in the Both view); the review stack wraps to that width */
-.frame-item { display: flex; flex-direction: column; gap: 10px; width: min-content; min-width: 300px; }
+/* as wide as its state (one phone, or two side by side in the Both view or for a change); the review stack wraps to that width */
+.state-item { display: flex; flex-direction: column; gap: 10px; width: min-content; min-width: 300px; }
 .rv-stack { display: none; margin: 6px 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; background: rgba(255,255,255,.02); font-size: 14px; }
 body.diff-on .rv-stack { display: block; }
 .rv-stack.rv-new { border-left-color: var(--built); }
@@ -318,7 +331,7 @@ body.commenting main .pin, body.commenting main .pin * { cursor: pointer !import
 .fstate { font: 600 11px var(--mono); color: var(--proposed); border: 1px solid var(--proposed); border-radius: 6px; padding: 0 5px; margin-left: 4px; }
 
 /* evidence: which tests prove a requirement */
-.cov { font: 600 11px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 10px; padding: 2px 8px; vertical-align: middle; margin-left: 4px; }
+.cov { font: 600 11px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 10px; padding: 2px 8px; vertical-align: middle; margin-left: 4px; white-space: nowrap; display: inline-block; }
 .cov.full { color: var(--built); border-color: var(--built); }
 /* dim the requirement's own content, not a note pin inside it */
 body.coverage .reqs li.unproven > :not(.pin) { opacity: .38; }
@@ -649,3 +662,96 @@ body.confirm-open { overflow: hidden; }
 /* Long paths and ids wrap rather than widen the page (on a phone that would zoom the whole book out). */
 main code { overflow-wrap: anywhere; }
 @media print { .tools, #claude-menu, .view-wrap { display: none; } }
+
+/* The Screens view (book.js renderScreens): the bar's Book · Screens switch, the list of screens then components,
+   and a page per screen with its states, its requirements and, for a component, where it is used. */
+.view-switch { flex: none; }
+.view-switch button { padding: 4px 10px; }
+.sv-cover h1 { font-size: 34px; }
+.sv-list { margin-top: 34px; max-width: 900px; }
+.sv-list h2 { font-size: 22px; margin: 0 0 10px; }
+.sv-n { font: 600 15px var(--mono); color: var(--muted); }
+.sv-rows { list-style: none; margin: 0; padding: 6px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.sv-row { padding: 14px 0 22px; border-bottom: 1px solid var(--line); }
+.sv-row:last-child { border-bottom: 0; }
+/* The list's pictures are screenshot-sized (the book's --shot-w); a click opens the state. */
+.sv-strip { gap: 18px 16px; }
+.sv-strip .state-item { min-width: 0; width: auto; }
+/* Captions and pane labels go under the pictures, so a long caption never pushes its picture out of line. */
+.sv-strip figure.state, .sv-strip .state-pane { display: flex; flex-direction: column; }
+.sv-strip figure.state figcaption { order: 2; font-size: 11px; max-width: calc(var(--shot-w, 100px) + 40px); margin: 6px 0 0; }
+.sv-strip .state-pane-label { order: 2; margin-top: 4px; }
+.sv-strip figure.state figcaption .role { font-size: 10px; }
+.sv-strip .state-body, .sv-strip .state-change { gap: 8px; }
+.sv-strip .shot { width: var(--shot-w, 100px); border-width: 3px; border-radius: 12px; }
+.sv-strip .state-pane-label { font-size: 10px; }
+.sv-strip .state-absent, .sv-strip .noshot { width: var(--shot-w, 100px); min-height: 60px; padding: 8px; border-radius: 10px; font-size: 11px; }
+.sv-row-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 14px; }
+body:not(.commenting) [data-go] { cursor: pointer; }
+body:not(.commenting) [data-go]:hover figcaption { color: var(--accent); }
+.sv-name { font-weight: 600; text-decoration: none; }
+.sv-meta, .sv-nofile { color: var(--muted); font-size: 13px; }
+.sv-file { overflow-wrap: anywhere; min-width: 0; }
+.sv-open { font: 600 11px var(--mono); color: #0b1a33; background: var(--accent); border-radius: 8px; padding: 0 6px; }
+.sv-page { padding-bottom: 20px; }
+.sv-back { margin: 0 0 18px; font-size: 14px; }
+.sv-back a { text-decoration: none; }
+.sv-title { font-size: 30px; margin: 0 0 6px; overflow-wrap: anywhere; }
+.sv-title.has-rv { box-shadow: -3px 0 0 var(--accent); padding-left: 8px; }
+.sv-filepath { margin: 0 0 12px; }
+.sv-h { font-size: 19px; margin: 30px 0 12px; }
+.sv-also { color: var(--muted); }
+figure.state.sv-target { outline: 2px solid var(--note); outline-offset: 6px; border-radius: 4px; scroll-margin-top: 80px; }
+/* A screen's variables, one per line, each with its values in order. */
+.sv-vars { margin: 0; display: grid; gap: 4px; font-size: 14px; overflow-wrap: anywhere; }
+.sv-var-name { font-weight: 600; }
+/* Every combination a screen accounts for: its caption, then drawn, same as, never shown or not drawn. */
+.sv-cov { list-style: none; margin: 0; padding: 10px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  display: grid; gap: 8px; max-width: 900px; font-size: 14px; }
+.sv-cov-row { overflow-wrap: anywhere; }
+.sv-cov-row .role { margin-right: 2px; }
+.sv-cov-what { color: var(--muted); }
+.sv-cov-row[data-kind="undrawn"] .sv-cov-what { color: var(--proposed); }
+.sv-cov-go { text-decoration: none; }
+.sv-none { color: var(--muted); font-size: 14px; margin: 0; }
+/* A component's own picture has no phone around it: it is drawn on a phone's width and background. */
+/* The same box wherever the component's state is shown: its page, the Screens list, a section of the book. */
+.sv-comp .sv-states .mock, .sv-list[data-kind="component"] .mock, figure.state[data-kind="component"] .mock { width: 270px; max-width: 100%; background: #fff; color: #111; border-radius: 12px; padding: 8px 0;
+  font: 12.5px -apple-system, system-ui, sans-serif;
+  /* A piece drawn to sit at a phone's edge (a tab bar) stays inside its own box, not the reader's window. */
+  position: relative; contain: paint; min-height: 64px; }
+/* A component that draws an overlay (a dim and a sheet) is drawn a phone's height, so the whole sheet shows. */
+.sv-comp .sv-states .mock.has-overlay, .sv-list[data-kind="component"] .mock.has-overlay, figure.state[data-kind="component"] .mock.has-overlay { min-height: 560px; }
+.sv-reqs { display: grid; gap: 14px; max-width: 900px; }
+.sv-where { margin: 0 0 6px; font: 600 13px var(--mono); }
+.sv-where a { color: var(--muted); text-decoration: none; }
+.sv-req-list { list-style: none; margin: 0; padding: 10px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; display: grid; gap: 8px; }
+.sv-req-list li { overflow-wrap: anywhere; }
+.sv-rid { font: 600 12px var(--mono); margin-right: 4px; }
+.sv-narrow { font: 500 11px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; white-space: nowrap; }
+.sv-used { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
+.sv-thumb { display: flex; flex-direction: column; gap: 6px; max-width: 100%; text-decoration: none; }
+.sv-thumb-cap { font: 500 12px var(--mono); color: var(--muted); }
+.sv-thumb:hover .sv-thumb-cap { color: var(--accent); }
+/* Half size, laid out at that size (zoom, not a transform), so the row wraps on what it really takes. */
+.sv-thumb .mock { zoom: .5; position: relative; contain: paint; }
+/* A section's reviews that only the Screens view draws: linked from under its heading. */
+.sec-elsewhere { margin: 4px 0 10px; font-size: 14px; color: var(--muted); }
+@media (max-width: 700px) {
+  /* On a phone the switch is compact and View drops its chevron, so the book's title keeps some room. */
+  .bar { gap: 5px; }
+  .view-switch { padding: 1px; }
+  .view-switch button { padding: 4px 6px; font-size: 12px; }
+  .bar .view-wrap #view-btn { padding: 6px; }
+  #view-btn .chev { display: none; }
+  .bar .share-start { padding: 6px 8px; }
+  /* While sharing, the readers' faces say what the pill is: its button keeps only the chevron (and its name, unseen). */
+  .share-pill:has(.face) .share-more { font-size: 0; gap: 0; padding: 5px 4px; }
+  .claude-btn { padding: 6px 8px; gap: 4px; }
+  .sv-states { flex-direction: column; }
+  .sv-title { font-size: 25px; }
+}
+
+/* iOS Safari zooms the page in when a field under 16px takes focus (the pin, a name, a note) and leaves it zoomed, so
+   the page looks wider than the screen. Touch screens get 16px fields. */
+@media (pointer: coarse) { input, textarea, select { font-size: 16px !important; } }

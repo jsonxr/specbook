@@ -10,8 +10,11 @@
     review: null, reviews: null, items: {}, history: { items: {} }, historyCounts: {}, changelog: [], diff: false };
   var main = document.getElementById('main');
   if ('scrollRestoration' in history) { history.scrollRestoration = 'manual'; }
+  // The hash says which view is drawn (see routeOf): a change of view or of screen page draws the page again; any
+  // other change only scrolls to its target.
   window.addEventListener('hashchange', function () {
-    var t = document.getElementById(location.hash.slice(1));
+    if (state.book && routeName(routeOf(location.hash)) !== drawnRoute) { showRoute(); return; }
+    var t = hashTarget();
     if (t) { t.scrollIntoView({ behavior: 'instant', block: 'start' }); }
   });
 
@@ -90,10 +93,12 @@
       return exts.indexOf(ext) >= 0;
     });
   }
-  function screenshotFor(frame, section) {
-    if (frame.screenshot) { return frame.screenshot; }
-    var hits = findMedia('media/screens/' + frame.id + '.', ['png', 'jpg', 'jpeg', 'webp']);
-    if (hits[0]) { return hits[0]; }
+  // A state's screenshot is media/screens/<state key>.<ext>; a state drawn as another (sameAs) may use that one's.
+  function screenshotFor(keys, section) {
+    for (var i = 0; i < keys.length; i++) {
+      var hits = findMedia('media/screens/' + keys[i] + '.', ['png', 'jpg', 'jpeg', 'webp']);
+      if (hits[0]) { return hits[0]; }
+    }
     return section ? sectionEvidenceShot(section) : null;
   }
   function videosFor(fullId, section) {
@@ -109,7 +114,47 @@
   function roleInfo(id) {
     var roles = state.book.roles || [];
     for (var i = 0; i < roles.length; i++) { if (roles[i].id === id) { return roles[i]; } }
-    return { id: id, label: id, color: '#c9ccd2' };
+    // "anyone" covers every role, whether or not the book defines it.
+    return { id: id, label: id === 'anyone' ? 'Anyone' : id, color: '#c9ccd2' };
+  }
+
+  // The book's screens and states by id and key (SpecModel.screenIndex), made again when the book is fetched again.
+  var screensBook = null, screensIx = null;
+  function screens() {
+    if (screensBook !== state.book) { screensBook = state.book; screensIx = window.SpecModel.screenIndex(state.book); }
+    return screensIx;
+  }
+  // A state's caption (SpecModel.stateCaption): { roles, text }. With neither (no role, every value a default) the text
+  // is the state's id, so a caption is never blank.
+  function captionOf(key) {
+    var cap = window.SpecModel.stateCaption(state.book, key);
+    if (!cap.roles.length && !cap.text && hasOwn(screens().states, key)) { cap.text = screens().states[key].state.id; }
+    return cap;
+  }
+  // A role's pill, in the role's color.
+  function rolePill(id) {
+    var r = roleInfo(id);
+    var label = r.label || id;
+    return '<span class="role" style="background:' + esc(r.color || '#c9ccd2') + '" title="Who sees it: ' + esc(label) + '">' + esc(label) + '</span>';
+  }
+  // A caption drawn: a pill per role, then the text. withName puts the screen's name before the text (a picture in the
+  // book, a chip, a review label): "[User] TodosScreen · No todos".
+  function captionHtml(cap, name) {
+    var words = [name, cap.text].filter(function (x) { return x; }).join(' · ');
+    return cap.roles.map(rolePill).join(' ') + (cap.roles.length && words ? ' ' : '') + esc(words);
+  }
+  // "<screen name>" for a screen id, "<screen name> · <roles> · <caption>" for a state key (SpecModel.stateLabel); the
+  // key itself when it is gone. Plain text, for titles and note labels.
+  function screenLabel(key) {
+    var ix = screens();
+    if (hasOwn(ix.states, key)) { return window.SpecModel.stateLabel(state.book, key); }
+    return hasOwn(ix.screens, key) ? ix.screens[key].name : key;
+  }
+  // The same drawn, with the state's role pills: "[User] TodosScreen · No todos". HTML.
+  function screenLabelHtml(key) {
+    var ix = screens();
+    if (hasOwn(ix.states, key)) { return captionHtml(captionOf(key), ix.states[key].screen.name); }
+    return esc(hasOwn(ix.screens, key) ? ix.screens[key].name : key);
   }
 
   var STAGE_TEXT = { drafting: 'Drafting', ready: 'Ready', building: 'Building', built: 'Built' };
@@ -126,20 +171,21 @@
   function decisionHtml(d, did) {
     return '<h4>' + esc(d.title) + ' ' + decisionTag(d) + (did ? ' <span class="sid">' + esc(did) + '</span>' : '') + '</h4><p>' + (d.body || '') + '</p>';
   }
-  // The decisions whose about names the section (by its full id), or any of its requirements or frames.
+  // The decisions whose about names the section (by its full id), or any of its requirements or the states it shows.
   function sectionDecisions(s, fullId) {
     var ids = [fullId];
     (s.requirements || []).forEach(function (r) { if (r && r.id) { ids.push(r.id); } });
-    (s.frames || []).forEach(function (f) { if (f && f.id) { ids.push(f.id); } });
+    (s.shows || []).forEach(function (sh) { if (sh && sh.state) { ids.push(sh.state); } });
     return (state.book.decisions || []).filter(function (d) {
       return (d.about || []).some(function (a) { return ids.indexOf(a) !== -1; });
     });
   }
 
   // Ready is gated on review: the server refuses it (409 unreviewed) while the section, any of its requirements or any
-  // of its frames is under review. The reason shows under the section's heading, next to the button.
+  // of the states it shows is under review. The reason shows under the section's heading, next to the button.
   var READY_GATE = 'Accept this section\'s changes before marking it ready.';
-  function stageMessage(btn, text) {
+  // `more`, when given, is a node put after the text (the links to the changes that are in the Screens view).
+  function stageMessage(btn, text, more) {
     var h = btn.closest('h3');
     if (!h) { msgEl.textContent = text; return; }
     var next = h.nextElementSibling;
@@ -150,7 +196,10 @@
       h.parentNode.insertBefore(p, h.nextSibling);
     }
     p.textContent = '';
-    setTimeout(function () { p.textContent = text; }, 50);
+    setTimeout(function () {
+      p.textContent = text;
+      if (more) { p.appendChild(document.createTextNode(' ')); p.appendChild(more); }
+    }, 50);
   }
   // While Claude is idle, a drafting section can be marked ready and a ready one sent back to drafting.
   function stageButton(fullId, stage) {
@@ -166,7 +215,8 @@
         .then(function (res) {
           if (!res.ok) {
             if (res.j.error === 'unreviewed') {
-              stageMessage(btn, READY_GATE);
+              var off = window.SpecModel.offPageKeys(state.book, state.mockups, fullId, state.reviews).keys;
+              stageMessage(btn, READY_GATE, off.length ? elsewhereLinks(off) : null);
             } else {
               msgEl.textContent = res.j.error === 'locked' ? 'Claude is busy; the book is locked until it is done.' :
                 res.j.error === 'nothing-to-build' ? 'Nothing to build: no requirement in this section has a change.' : 'Could not change the stage: ' + (res.j.error || 'failed') + '.';
@@ -211,9 +261,53 @@
     if (was === undefined || was === now || (!hadWas && !hasNow)) { return hasNow ? w(now) : ''; }
     return (hadWas ? '<del class="was">' + w(was) + '</del>' : '') + (hadWas && hasNow ? ' ' : '') + (hasNow ? '<ins class="now">' + w(now) + '</ins>' : '');
   }
-  // A version of an item, compared with the one before it (prev; null for the first version shown).
-  function versionHtml(kind, v, prev) {
+  // A state's value holds its pictures' text: a line says when the picture, or today's, differs from prev's.
+  function mockupChanged(prev, v) {
+    if (!prev || !v) { return ''; }
+    return (prev.mockup !== v.mockup ? '<p class="rv-field rv-mock">Mockup changed</p>' : '') +
+      (prev.today !== v.today ? '<p class="rv-field rv-mock">Today’s mockup changed</p>' : '');
+  }
+  // A list field of a version (a section's shows, a requirement's screens), each entry by its label. Against the
+  // earlier list (was; undefined for none to compare with), an entry that came is highlighted, one that went is
+  // struck through after the rest, and a list that differs only in order says so.
+  function listField(was, now, label) {
+    var w = was || [], n = now || [];
+    var inList = function (list, x) { return list.some(function (y) { return window.SpecModel.sameValue(x, y); }); };
+    var html = n.map(function (x) { return was === undefined || inList(w, x) ? label(x) : '<ins class="now">' + label(x) + '</ins>'; })
+      .concat(w.filter(function (x) { return !inList(n, x); }).map(function (x) { return '<del class="was">' + label(x) + '</del>'; }))
+      .join(', ');
+    if (was !== undefined && html && w.length === n.length && n.every(function (x) { return inList(w, x); }) && !window.SpecModel.sameValue(w, n)) {
+      html += ' (order changed)';
+    }
+    return html;
+  }
+  // A shown state as `<screen name> · <state name>`, with the component it outlines; a requirement's screen entry as
+  // its screen, or its state when it names one.
+  function showLabel(sh) {
+    var html = screenLabelHtml(sh && sh.state);
+    return sh && sh.highlight ? html + ' (outlines ' + screenLabelHtml(sh.highlight) + ')' : html;
+  }
+  function screenEntryLabel(e) {
+    return e && e.state ? screenLabelHtml(e.screen + '.' + e.state) : screenLabelHtml(e && e.screen);
+  }
+  // A section's shows or a requirement's screens, when they differ from the version after (newer): what that version
+  // has, with the entries it added highlighted and those it dropped struck through.
+  function listsChanged(kind, v, newer) {
+    var f = kind === 'req' ? 'screens' : kind === 'section' ? 'shows' : null;
+    if (!f || !v || !newer || window.SpecModel.sameValue(v[f] || [], newer[f] || [])) { return ''; }
+    var html = listField(v[f] || [], newer[f] || [], f === 'shows' ? showLabel : screenEntryLabel);
+    return '<p class="rv-field rv-mock"><span>' + (f === 'shows' ? 'Shows now:' : 'Screens now:') + '</span> ' + (html || 'none') + '</p>';
+  }
+  // The screen an item's key names: the key of a screen, the part before the dot of a state's.
+  function screenOfKey(key) {
+    var k = String(key || '');
+    return k.indexOf('.') < 0 ? k : k.slice(0, k.indexOf('.'));
+  }
+  // A version of an item (key), compared with the one before it (prev; null for the first version shown). A `when` is
+  // worded with the variables of the screen the key names.
+  function versionHtml(kind, v, prev, key) {
     var p = prev || {};
+    var sid = kind === 'state' || kind === 'screen' ? screenOfKey(key) : null;
     var cmp = function (k) { return prev ? p[k] : undefined; };
     var line = function (cls, label, html) { return html ? '<p class="' + cls + '">' + (label ? '<span>' + label + '</span> ' : '') + html + '</p>' : ''; };
     if (kind === 'req') {
@@ -221,15 +315,30 @@
       return line('rv-text', '', diffField(cmp('text'), v.text)) +
         line('rv-field', 'Marker:', prev && p.change !== v.change ? diffField(p.change || '', v.change || '', tag) : tag(v.change)) +
         line('rv-field', 'Today:', diffField(cmp('today'), v.today)) +
-        line('rv-field', 'Why:', diffField(cmp('reason'), v.reason));
+        line('rv-field', 'Why:', diffField(cmp('reason'), v.reason)) +
+        line('rv-field', 'Screens:', listField(prev ? p.screens || [] : undefined, v.screens, screenEntryLabel));
     }
-    if (kind === 'frame') {
-      var role = function (r) { return esc(roleInfo(r).label); };
-      return line('rv-text', '', diffField(cmp('caption'), v.caption, esc)) +
-        line('rv-field', 'Role:', diffField(cmp('role'), v.role, role)) +
-        (prev && p.mockup !== v.mockup ? '<p class="rv-field rv-mock">Mockup changed</p>' : '');
+    if (kind === 'state') {
+      var stTag = function (m) { return m ? '<span class="tag chg-tag">' + esc(MARKER[m] || m) + '</span>' : ''; };
+      return line('rv-text', '', diffField(cmp('name'), v.name, esc)) +
+        line('rv-field', 'When:', diffField(prev ? window.SpecModel.whenText(state.book, sid, p.when) : undefined, window.SpecModel.whenText(state.book, sid, v.when), esc)) +
+        line('rv-field', 'Also:', diffField(cmp('also'), v.also, esc)) +
+        line('rv-field', 'Same as:', diffField(cmp('sameAs'), v.sameAs, esc)) +
+        line('rv-field', 'Never shown:', diffField(cmp('absent'), v.absent, esc)) +
+        line('rv-field', 'Marker:', prev && p.change !== v.change ? diffField(p.change || '', v.change || '', stTag) : stTag(v.change)) +
+        line('rv-field', 'Why:', diffField(cmp('reason'), v.reason)) +
+        mockupChanged(prev, v);
     }
-    return line('rv-text', '', diffField(cmp('title'), v.title, esc)) + line('rv-field', 'Intro:', diffField(cmp('intro'), v.intro));
+    if (kind === 'screen') {
+      return line('rv-text', '', diffField(cmp('name'), v.name, esc)) +
+        line('rv-field', 'Kind:', diffField(cmp('kind'), v.kind, esc)) +
+        line('rv-field', 'File:', diffField(cmp('file'), v.file, esc)) +
+        line('rv-field', 'Intro:', diffField(cmp('intro'), v.intro)) +
+        line('rv-field', 'Variables:', diffField(prev ? window.SpecModel.variablesText(state.book, p.variables) : undefined, window.SpecModel.variablesText(state.book, v.variables), esc)) +
+        line('rv-field', 'Not drawn:', diffField(prev ? window.SpecModel.undrawnText(state.book, sid, p.undrawn) : undefined, window.SpecModel.undrawnText(state.book, sid, v.undrawn), esc));
+    }
+    return line('rv-text', '', diffField(cmp('title'), v.title, esc)) + line('rv-field', 'Intro:', diffField(cmp('intro'), v.intro)) +
+      line('rv-field', 'Shows:', listField(prev ? p.shows || [] : undefined, v.shows, showLabel));
   }
   // What the reader sees of an item a note was dropped on, for a note shown under another item it caused.
   // (From the items, not the page: the stack is drawn before the rest of the book is.)
@@ -238,7 +347,7 @@
     if (!it) { return key; }
     if (it.kind === 'chapter') { return 'chapter “' + it.value.title + '”'; }
     if (it.kind === 'section') { return 'section “' + it.value.title + '”'; }
-    if (it.kind === 'frame') { return 'screen “' + (it.value.caption || key) + '”'; }
+    if (it.kind === 'screen' || it.kind === 'state') { return (it.kind === 'screen' ? 'screen' : 'state') + ' “' + screenLabel(key) + '”'; }
     return key;
   }
   var NOTE_STATUS = { draft: 'Draft', sent: 'Sent', answered: 'Answered', frozen: 'Kept' };
@@ -329,7 +438,7 @@
   }
   // The review stack under an item: the item itself shows the current version, so the stack holds what came
   // before it, newest first: the tries (all but the newest folded away), then the accepted version (or New).
-  var KIND_WORD = { req: 'requirement', frame: 'screen', section: 'section', chapter: 'chapter' };
+  var KIND_WORD = { req: 'requirement', screen: 'screen', state: 'state', section: 'section', chapter: 'chapter' };
   function reviewStack(key) {
     var r = reviewOf(key);
     if (!r) { return null; }
@@ -348,12 +457,13 @@
         (r.reversal.decisions.length ? '<ul>' + r.reversal.decisions.map(decisionRef).join('') + '</ul>' : '') + '</div>';
     }
     var tries = r.tries || [];
-    // Each older version as it was; a frame also says when its mockup differs from the version after it.
+    // Each older version as it was; a state also says when its pictures differ from the version after it, and a
+    // section or requirement what its shows or screens are now.
     var newer = r.current;
     var oldHtml = function (v) {
-      var mock = kind === 'frame' && v && newer && v.mockup !== newer.mockup ? '<p class="rv-field rv-mock">Mockup changed</p>' : '';
+      var mock = kind === 'state' ? mockupChanged(v, newer) : listsChanged(kind, v, newer);
       newer = v || newer;
-      return versionHtml(kind, v, null) + mock;
+      return versionHtml(kind, v, null, key) + mock;
     };
     var tryHtml = function (t, i) {
       return '<div class="rv-ver rv-try"><p class="rv-head">Try ' + (i + 1) + ' · ' + esc(shortDate(t.frozenAt)) + '</p>' +
@@ -431,14 +541,14 @@
     var first = (e.notes || []).filter(function (n) { return n && n.text; })[0];
     var line = first ? esc(first.text) : e.kind === 'built' ? 'Built' : 'Edited';
     var detailKey = key + '#' + idx;
-    var body = '<div class="rv-ver"><p class="rv-head">Before</p>' + (e.before ? versionHtml(kind, e.before, null) : '<p class="rv-field"><span class="tag new">New</span></p>') + '</div>';
+    var body = '<div class="rv-ver"><p class="rv-head">Before</p>' + (e.before ? versionHtml(kind, e.before, null, key) : '<p class="rv-field"><span class="tag new">New</span></p>') + '</div>';
     var prev = e.before;
     (e.tries || []).forEach(function (t, i) {
       body += '<div class="rv-ver rv-try"><p class="rv-head">Try ' + (i + 1) + ' · ' + esc(shortDate(t.frozenAt)) + '</p>' +
-        (t.value ? versionHtml(kind, t.value, prev) : '') + notesHtml(t.notes, key, true) + '</div>';
+        (t.value ? versionHtml(kind, t.value, prev, key) : '') + notesHtml(t.notes, key, true) + '</div>';
       prev = t.value || prev;
     });
-    body += '<div class="rv-ver"><p class="rv-head">After</p>' + (e.after ? versionHtml(kind, e.after, prev) : '<p class="rv-field"><span class="tag removed">Removed</span></p>') + '</div>';
+    body += '<div class="rv-ver"><p class="rv-head">After</p>' + (e.after ? versionHtml(kind, e.after, prev, key) : '<p class="rv-field"><span class="tag removed">Removed</span></p>') + '</div>';
     if (e.notes && e.notes.length) { body += '<div class="rv-ver"><p class="rv-head">Notes</p>' + notesHtml(e.notes, key, true) + '</div>'; }
     var li = el('li', { class: 'hi-entry' + (e.kind === 'built' ? ' built' : '') });
     setHtml(li, '<p class="hi-line"><span class="hi-date">' + esc(shortDate(e.acceptedAt)) + '</span> ' + line + '</p>' +
@@ -789,6 +899,17 @@
     });
     return out;
   }
+  // A removed state's words, as a state's label reads (SpecModel.stateLabel), from its last accepted value v:
+  // "<screen name> · <role labels> · <caption>", ending in the state's id when there is neither role nor caption.
+  function removedStateLabel(key, v) {
+    var sid = screenOfKey(key);
+    var ix = screens();
+    var cap = window.SpecModel.whenCaption(state.book, sid, v.when);
+    if (typeof v.name === 'string' && v.name) { cap.text = v.name; }
+    var words = cap.roles.map(function (r) { return roleInfo(r).label || r; }).concat(cap.text ? [cap.text] : []);
+    if (!words.length) { words = [key.slice(sid.length + 1) || key]; }
+    return [hasOwn(ix.screens, sid) ? ix.screens[sid].name || sid : sid].concat(words).join(' · ');
+  }
   // Items gone from the book, each with its review, under the place it left.
   function removedList(keys) {
     var ol = el('ol', { class: 'reqs removed-since' });
@@ -796,7 +917,7 @@
     keys.forEach(function (key) {
       var r = reviewOf(key);
       var v = r.accepted || {};
-      var what = r.kind === 'req' ? v.text : r.kind === 'frame' ? 'Screen “' + esc(v.caption || key) + '”' : esc(v.title || key);
+      var what = r.kind === 'req' ? v.text : r.kind === 'screen' || r.kind === 'state' ? (r.kind === 'screen' ? 'Screen “' + esc(v.name || key) : 'State “' + esc(removedStateLabel(key, v))) + '”' : esc(v.title || key);
       var li = el('li', { id: key, class: 'chg-gone' }, '<span class="rid chg">−</span><div><del class="was">' + (what || '') + '</del> <span class="sid">' + esc(key) + '</span></div>');
       markReview(li, key);
       tgtAttrs(li, key, key + ' (removed)', what || '', key);
@@ -824,7 +945,7 @@
   }
 
   // A target is anything a note can be dropped on. Its item is the reviewable item the note goes on (a recording's
-  // section, a decision's section); for a requirement, a frame or a heading it is the target itself.
+  // section, a decision's section); for a requirement, a shown state or a heading it is the target itself.
   function tgtAttrs(node, key, label, quote, item) {
     node.classList.add('tgt');
     node.dataset.key = key;
@@ -833,34 +954,432 @@
     node.dataset.quote = quote || '';
   }
 
-  function mountMockup(host, path) {
+  // Every mockup's shadow root: the book's phone.css, then what placed components need: a wrapper that adds no box of
+  // its own (so placing a component never changes the layout), the outline of a highlighted one, and the red
+  // placeholder for one that is missing.
+  var MOCKUP_CSS = '.sb-component{display:contents}' +
+    '.sb-hl>*{outline:2px solid #f5a524;outline-offset:2px;border-radius:4px}' +
+    '.sb-missing{margin:6px;padding:8px;border:1px dashed #d33;border-radius:6px;color:#d33;background:#fff;font:600 12px ui-monospace,monospace}';
+  // Draws the picture at path into the host's shadow root, with its sb-component tags replaced by the components'
+  // pictures (SpecModel.expandMockup); highlight is a component id to outline.
+  // A picture that draws an overlay (phone.css's .dim and .sheet) marks its host has-overlay: a component's box is then
+  // a phone's height, so the sheet has the room it has on a phone.
+  function mountMockup(host, path, highlight) {
     host.dataset.mockup = path;
     var root = host.attachShadow({ mode: 'open' });
-    var css = '<style>' + (state.mockupCss || '') + '</style>';
-    setHtml(root, css + (state.mockups[path] || '<p style="color:#c00">Missing mockup ' + esc(path) + '</p>'));
+    var css = '<style>' + (state.mockupCss || '') + MOCKUP_CSS + '</style>';
+    var html = hasOwn(state.mockups, path) ? window.SpecModel.expandMockup(state.book, state.mockups, state.mockups[path], { highlight: highlight }) : null;
+    setHtml(root, css + (html || '<p style="color:#c00">Missing mockup ' + esc(path) + '</p>'));
+    if (root.querySelector('.dim, .sheet')) { host.classList.add('has-overlay'); }
   }
 
-  function renderFrameBody(frame, section) {
-    var body = el('div', { class: 'frame-body' });
-    var shot = screenshotFor(frame, section);
-    var showMock = state.view === 'mockup' || state.view === 'both' || (state.view === 'shot' && !shot);
-    var showShot = state.view === 'shot' || state.view === 'both';
-    if (showMock && frame.mockup) {
+  // One picture of a state: its mockup, its screenshot (media/screens/<key>.<ext>, by the first of shotKeys that has
+  // one), or both, as the View menu says. Without shotKeys (a proposed picture: the app does not look like it yet)
+  // only the mockup.
+  function renderPicture(path, highlight, shotKeys, section, alt) {
+    var body = el('div', { class: 'state-body' });
+    var shot = shotKeys ? screenshotFor(shotKeys, section) : null;
+    var showShot = !!shotKeys && (state.view === 'shot' || state.view === 'both');
+    var showMock = !showShot || state.view === 'both' || !shot;
+    if (showMock) {
       var host = el('div', { class: 'mock' });
       body.appendChild(host);
-      mountMockup(host, frame.mockup);
+      mountMockup(host, path, highlight);
     }
     if (showShot) {
       if (!shot && state.view === 'shot') {
         body.insertBefore(el('p', { class: 'shot-missing' }, 'No screenshot yet, showing the mockup'), body.firstChild);
         body.classList.add('stacked');
       } else if (shot) {
-        body.appendChild(el('img', { class: 'shot', src: '/data/' + shot, alt: 'Screenshot: ' + (frame.caption || frame.id) }));
+        body.appendChild(el('img', { class: 'shot', src: '/data/' + shot, alt: 'Screenshot: ' + alt }));
       } else {
-        body.appendChild(el('div', { class: 'noshot' }, 'No screenshot yet.<br>Add <code>media/screens/' + esc(frame.id) + '.png</code>'));
+        body.appendChild(el('div', { class: 'noshot' }, 'No screenshot yet.<br>Add <code>media/screens/' + esc(shotKeys[0]) + '.png</code>'));
       }
     }
     return body;
+  }
+  // What a shown state draws: its words when the role never sees it (absent); the picture of the state it is the same
+  // as (sameAs); for a change to a built screen, today's picture beside the proposed one; else its own picture.
+  function renderStateBody(key, hit, drawn, highlight, section) {
+    if (hit && hit.state.absent) { return el('div', { class: 'state-absent' }, esc(hit.state.absent)); }
+    if (!drawn || !drawn.state.mockup) { return el('div', { class: 'state-missing' }, 'Missing state ' + esc(key)); }
+    var st = drawn.state;
+    var drawnKey = window.SpecModel.stateKey(drawn.screen.id, st.id);
+    var keys = drawnKey === key ? [key] : [key, drawnKey];
+    var alt = screenLabel(key);
+    if (st.change === 'change' && st.today) {
+      var pair = el('div', { class: 'state-change' });
+      [['Today', st.today, keys], ['Proposed', st.mockup, null]].forEach(function (x) {
+        var pane = el('div', { class: 'state-pane' });
+        pane.appendChild(el('p', { class: 'state-pane-label' }, x[0]));
+        pane.appendChild(renderPicture(x[1], highlight, x[2], section, alt + ' (' + x[0].toLowerCase() + ')'));
+        pair.appendChild(pane);
+      });
+      return pair;
+    }
+    return renderPicture(st.mockup, highlight, keys, section, alt);
+  }
+  // A shown state: a figure captioned with its role pills, its screen's name and its computed caption, "Same as <its
+  // caption>" when it is drawn as another, and the state's marker (New, Change, Removed). Notes dropped on it go on the
+  // state.
+  function stateFigure(sh, num, s) {
+    var key = sh.state;
+    var label = screenLabel(key);
+    var fig = stateFigureFor(key, true, sh.highlight, s);
+    tgtAttrs(fig, key, num + ' ' + s.title + ' · screen “' + label + '”', 'Screen: ' + label, key);
+    // Outside comment mode a click on the picture opens the screen's page at this state.
+    fig.dataset.go = key;
+    fig.title = 'Open ' + label + ' in Screens';
+    return fig;
+  }
+  // The figure of a state, captioned without its screen's name unless withName (the Screens view is the screen's own),
+  // and without its note target (the chapter view and the Screens view name it differently).
+  function stateFigureFor(key, withName, highlight, section) {
+    var ix = screens();
+    var hit = hasOwn(ix.states, key) ? ix.states[key] : null;
+    var drawn = window.SpecModel.drawnState(state.book, key);
+    var cap = '';
+    if (hit) {
+      cap += captionHtml(captionOf(key), withName ? hit.screen.name : '');
+      if (hit.state.sameAs) {
+        var same = window.SpecModel.stateKey(hit.screen.id, hit.state.sameAs);
+        cap += ' <span class="fstate">Same as ' + (hasOwn(ix.states, same) ? captionHtml(captionOf(same), '') : esc(hit.state.sameAs)) + '</span>';
+      }
+      var m = hit.state.change;
+      if (m === 'add') { cap += ' <span class="tag new">New</span>'; }
+      if (m === 'change') { cap += ' <span class="tag chg-tag">Change</span>'; }
+      if (m === 'remove') { cap += ' <span class="tag removed">Removed</span>'; }
+    } else {
+      cap += '<span class="tag removed">Missing</span> ' + esc(key);
+    }
+    var fig = el('figure', { class: 'state' });
+    // A component's picture is drawn in its own box (book.css), wherever it is shown.
+    if (hit && isComponent(hit.screen)) { fig.dataset.kind = 'component'; }
+    markReview(fig, key);
+    fig.appendChild(el('figcaption', {}, cap));
+    fig.appendChild(renderStateBody(key, hit, drawn, highlight, section));
+    if (hit && hit.state.change === 'remove' && hit.state.reason) {
+      fig.appendChild(el('p', { class: 'today why' }, '<span>Why:</span> ' + esc(hit.state.reason)));
+    }
+    return fig;
+  }
+  // The chips under a requirement for the screens it is about, "<name>" or "<name> · <state name>", each linking to
+  // the Screens view. One naming a screen or state that is not in the book says so.
+  function screenChips(req) {
+    var list = req && Array.isArray(req.screens) ? req.screens : [];
+    if (!list.length) { return ''; }
+    var ix = screens();
+    return '<div class="screen-chips">' + list.map(function (e) {
+      if (!e || typeof e !== 'object' || typeof e.screen !== 'string' || !e.screen) {
+        return '<span class="screen-chip missing">Missing screen</span>';
+      }
+      var sid = e.screen;
+      var key = e.state ? window.SpecModel.stateKey(sid, e.state) : sid;
+      var sc = hasOwn(ix.screens, sid) ? ix.screens[sid] : null;
+      var found = e.state ? hasOwn(ix.states, key) : !!sc;
+      var html = !sc ? esc(String(sid) + ' · missing') : found ? screenLabelHtml(key) : esc(sc.name + ' · ' + e.state + ' · missing');
+      return '<a class="screen-chip' + (found ? '' : ' missing') + '" href="#screen/' + esc(key) + '">' + html + '</a>';
+    }).join('') + '</div>';
+  }
+
+  // Screens view --------------------------------------------------------------------------------------
+  // The bar's Book · Screens switch. The Screens view is #screens (every screen, then every component) and
+  // #screen/<id> (a screen's page) or #screen/<state key> (that page, scrolled to the state and outlining it); any
+  // other hash is the book. Its headings and states are note targets with review stacks, as in the chapter view.
+  var drawnRoute = 'book';
+  var bookPlace = null; // where the reader was in the book when they left it for the Screens view
+  function routeOf(hash) {
+    var h = String(hash || '');
+    if (h === '#screens') { return { page: 'list', hash: h }; }
+    if (h.indexOf('#screen/') !== 0) { return null; }
+    var key = h.slice(8);
+    try { key = decodeURIComponent(key); } catch (e) { /* kept as written */ }
+    var dot = key.indexOf('.');
+    return { page: 'screen', hash: h, id: dot < 0 ? key : key.slice(0, dot), key: dot < 0 ? null : key };
+  }
+  function routeName(route) { return route ? route.hash : 'book'; }
+  function hashTarget() {
+    if (!location.hash) { return null; }
+    var id = location.hash.slice(1);
+    try { id = decodeURIComponent(id); } catch (e) { /* kept as written */ }
+    return document.getElementById(id);
+  }
+  // Draws the view the hash names. Back in the book, a hash with no target returns the reader to where they were.
+  function showRoute() {
+    var fromBook = drawnRoute === 'book';
+    var route = routeOf(location.hash);
+    if (fromBook && route) { bookPlace = readingAnchor(); }
+    render();
+    if (hashTarget()) { return; }
+    if (!route && !fromBook && bookPlace) { keepPlace(bookPlace); } else if (route || !fromBook) { window.scrollTo(0, 0); }
+  }
+  var toBook = document.getElementById('to-book');
+  var toScreens = document.getElementById('to-screens');
+  function syncSwitch(route) {
+    toBook.setAttribute('aria-pressed', String(!route));
+    toScreens.setAttribute('aria-pressed', String(!!route));
+  }
+  toScreens.addEventListener('click', function () { if (location.hash !== '#screens') { location.hash = 'screens'; } });
+  toBook.addEventListener('click', function () {
+    if (!routeOf(location.hash)) { return; }
+    history.pushState(null, '', location.pathname + location.search);
+    showRoute();
+  });
+  // Links to reviews a section's gate covers that are drawn only in the Screens view: "Under review in Screens: …".
+  function elsewhereLinks(keys) {
+    var span = el('span', { class: 'elsewhere' });
+    span.appendChild(document.createTextNode('Under review in Screens: '));
+    keys.forEach(function (k, i) {
+      if (i) { span.appendChild(document.createTextNode(', ')); }
+      span.appendChild(el('a', { href: '#screen/' + k }, screenLabelHtml(k)));
+    });
+    return span;
+  }
+  function isComponent(sc) { return sc.kind === 'component'; }
+  function fileHtml(sc) {
+    return sc.file ? '<code class="sv-file">' + esc(sc.file) + '</code>' : '<span class="sv-file sv-nofile">No file yet</span>';
+  }
+  function openCount(rv, id) {
+    var n = rv.byScreen[id] || 0;
+    return n ? ' <span class="sb-chg sv-open" title="Open reviews">' + n + '</span>' : '';
+  }
+  function renderScreens(route, rv, toc) {
+    var ix = screens();
+    var order = window.SpecModel.screenOrder(state.book, state.mockups);
+    var groups = [['screen', 'Screens'], ['component', 'Components']].map(function (g) {
+      return { kind: g[0], title: g[1], ids: order.filter(function (id) { return isComponent(ix.screens[id]) === (g[0] === 'component'); }) };
+    });
+    toc.appendChild(el('div', { class: 'sb-ch' }, '<a class="sb-chl" href="#top"><span class="sb-n">‹</span>The book</a>'));
+    groups.forEach(function (g) {
+      var tocCh = el('div', { class: 'sb-ch' }, '<a class="sb-chl" href="#screens"><span class="sb-n">' + g.ids.length + '</span>' + g.title + '</a>');
+      var tocSecs = el('div', { class: 'sb-secs' });
+      g.ids.forEach(function (id) {
+        tocSecs.appendChild(el('a', { href: '#screen/' + id, class: rv.byScreen[id] ? 'has-chg' : 'no-chg' }, esc(ix.screens[id].name || id) + openCount(rv, id)));
+      });
+      tocCh.appendChild(tocSecs);
+      toc.appendChild(tocCh);
+    });
+    if (route.page === 'list') {
+      main.appendChild(el('header', { class: 'cover sv-cover', id: 'screens' }, '<p class="eyebrow">Screens</p><h1>Screens and components</h1>' +
+        '<p>Every screen of the app, then every component placed in them: each with its states, the requirements about it, and where a component is used.</p>'));
+      groups.forEach(function (g) {
+        var sec = el('section', { class: 'sv-list', 'data-kind': g.kind });
+        sec.appendChild(el('h2', {}, g.title + ' <span class="sv-n">' + g.ids.length + '</span>'));
+        if (!g.ids.length) { sec.appendChild(el('p', { class: 'sv-none' }, 'None yet.')); }
+        var ul = el('ul', { class: 'sv-rows' });
+        g.ids.forEach(function (id) {
+          var sc = ix.screens[id];
+          var states = (sc.states || []).length;
+          var li = el('li', { class: 'sv-row' });
+          li.appendChild(el('div', { class: 'sv-row-head' }, '<a class="sv-name" href="#screen/' + esc(id) + '">' + esc(sc.name || id) + '</a>' + openCount(rv, id) +
+            ' <span class="sv-meta">' + plural(states, 'state', 'states') + '</span> ' + fileHtml(sc)));
+          // Every state drawn as in the book; a click opens the screen's page at that state.
+          var strip = el('div', { class: 'states sv-strip' });
+          window.SpecModel.byRole(state.book, sc.states).forEach(function (st) {
+            var key = window.SpecModel.stateKey(id, st.id);
+            var fig = stateFigureFor(key, false, null, null);
+            fig.dataset.go = key;
+            fig.title = 'Open ' + screenLabel(key);
+            var wrap = el('div', { class: 'state-item' });
+            wrap.appendChild(fig);
+            strip.appendChild(wrap);
+          });
+          if (states) { li.appendChild(strip); }
+          ul.appendChild(li);
+        });
+        sec.appendChild(ul);
+        main.appendChild(sec);
+      });
+      fitStrips();
+      return;
+    }
+    main.appendChild(screenPage(route, rv));
+  }
+  // The Screens list draws its pictures as wide as the book's screenshot column (settings.screenshotWidth): each
+  // mockup is scaled down from its own drawn width, once it is laid out.
+  // A screen's picture is also cut to one height for the whole list (the usual phone's, the median shape), so every
+  // phone lines up with its neighbors; a taller drawing loses its bottom here, never on the screen's own page.
+  function fitStrips() {
+    window.requestAnimationFrame(function () {
+      var w = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--shot-w')) || 100;
+      var phones = [];
+      main.querySelectorAll('.sv-strip .mock').forEach(function (m) {
+        m.style.zoom = '';
+        m.style.height = '';
+        var box = m.getBoundingClientRect();
+        if (box.width <= 0) { return; }
+        var z = Math.min(1, w / box.width);
+        m.style.zoom = String(z);
+        if (m.closest('.sv-list[data-kind="screen"]')) { phones.push({ m: m, z: z, ratio: box.height / box.width }); }
+      });
+      if (!phones.length) { return; }
+      var ratios = phones.map(function (p) { return p.ratio; }).sort(function (a, b) { return a - b; });
+      var ratio = ratios[Math.floor(ratios.length / 2)];
+      phones.forEach(function (p) {
+        p.m.style.height = (w * ratio / p.z) + 'px';
+        p.m.style.overflow = 'hidden';
+      });
+    });
+  }
+  // The reviews of a screen's states that are gone from the book, by their keys.
+  function removedStates(rv, id) {
+    var ix = screens();
+    return Object.keys(rv.byKey).filter(function (k) {
+      var r = rv.byKey[k];
+      return r.status === 'removed' && !r.orphan && (k === id || k.indexOf(id + '.') === 0) && !hasOwn(ix.states, k) && !hasOwn(ix.screens, k);
+    });
+  }
+  function screenPage(route, rv) {
+    var ix = screens();
+    var id = route.id;
+    var sc = hasOwn(ix.screens, id) ? ix.screens[id] : null;
+    var page = el('article', { class: 'sv-page' + (sc && isComponent(sc) ? ' sv-comp' : ''), id: 'screen/' + id });
+    page.appendChild(el('p', { class: 'sv-back' }, '<a href="#screens">‹ All screens</a>'));
+    var gone = removedStates(rv, id);
+    if (!sc) {
+      page.appendChild(el('p', { class: 'state-missing' }, id ? 'There is no screen ' + esc(id) + ' in the book.' : 'There is no screen with that id.'));
+      if (gone.length) { page.appendChild(removedList(gone)); }
+      return page;
+    }
+    var comp = isComponent(sc);
+    var word = comp ? 'component' : 'screen';
+    page.appendChild(el('p', { class: 'eyebrow' }, comp ? 'Component' : 'Screen'));
+    var h = el('h2', { class: 'sv-title' }, esc(sc.name || id) + ' <span class="sid">' + esc(id) + '</span>');
+    markReview(h, id);
+    tgtAttrs(h, id, 'The ' + word + ' “' + (sc.name || id) + '” (whole ' + word + ')', '', id);
+    page.appendChild(h);
+    page.appendChild(itemRow('div', id));
+    page.appendChild(el('p', { class: 'sv-filepath' }, fileHtml(sc)));
+    if (sc.intro) { page.appendChild(el('p', { class: 'lede' }, sc.intro)); }
+
+    page.appendChild(el('h3', { class: 'sv-h' }, 'States'));
+    var row = el('div', { class: 'states sv-states' });
+    window.SpecModel.byRole(state.book, sc.states).forEach(function (st) {
+      var key = window.SpecModel.stateKey(id, st.id);
+      var wrap = el('div', { class: 'state-item' });
+      var fig = stateFigureFor(key, false, null, null);
+      fig.id = 'screen/' + key;
+      if (route.key === key) { fig.classList.add('sv-target'); }
+      // A state's free words, never in its caption, are shown here.
+      if (typeof st.also === 'string' && st.also) { fig.querySelector('figcaption').appendChild(el('span', { class: 'sv-also' }, ' · ' + esc(st.also))); }
+      tgtAttrs(fig, key, 'Screens · ' + screenLabel(key), 'Screen: ' + screenLabel(key), key);
+      wrap.appendChild(fig);
+      wrap.appendChild(itemRow('div', key));
+      row.appendChild(wrap);
+    });
+    if (!(sc.states || []).length) { row.appendChild(el('p', { class: 'sv-none' }, 'No states yet.')); }
+    page.appendChild(row);
+    if (gone.length) { page.appendChild(removedList(gone)); }
+    var vars = window.SpecModel.variablesOf(state.book, id);
+    if (vars.length) {
+      page.appendChild(el('h3', { class: 'sv-h' }, 'Variables'));
+      page.appendChild(variablesLine(vars));
+    }
+    page.appendChild(el('h3', { class: 'sv-h' }, 'Coverage'));
+    page.appendChild(coverageList(id));
+
+    page.appendChild(el('h3', { class: 'sv-h' }, 'Requirements'));
+    page.appendChild(screenRequirements(id, word));
+    if (comp) {
+      page.appendChild(el('h3', { class: 'sv-h' }, 'Used on'));
+      page.appendChild(usedOnRow(id));
+    }
+    return page;
+  }
+  // A screen's variables, each with its values in order: "Role: Visitor · Member · Admin", "Connection: Online · Offline".
+  function variablesLine(vars) {
+    var box = el('p', { class: 'sv-vars' });
+    vars.forEach(function (v) {
+      var values = v.values.map(function (x) { return x && (x.label || x.id); }).filter(function (x) { return x; });
+      box.appendChild(el('span', { class: 'sv-var', 'data-var': v.id }, '<span class="sv-var-name">' + esc(v.label) + ':</span> ' + esc(values.join(' · '))));
+    });
+    return box;
+  }
+  // Every combination a screen accounts for (SpecModel.coverage), one row each: its caption, then drawn (a link to the
+  // state), the state it is the same as, its words when it is never shown, or not drawn (its note and the requirements
+  // that imply it, as links).
+  function coverageList(id) {
+    var ix = screens();
+    var rows = window.SpecModel.coverage(state.book, id);
+    if (!rows.length) { return el('p', { class: 'sv-none' }, 'Nothing drawn or listed yet.'); }
+    var ul = el('ul', { class: 'sv-cov' });
+    rows.forEach(function (row) {
+      var hit = row.key && hasOwn(ix.states, row.key) ? ix.states[row.key] : null;
+      var cap = hit ? captionHtml(captionOf(row.key), '') : captionHtml(window.SpecModel.whenCaption(state.book, id, row.when), '');
+      var what = '';
+      if (row.kind === 'drawn') {
+        what = '<a class="sv-cov-go" href="#screen/' + esc(row.key) + '">Drawn</a>';
+      } else if (row.kind === 'same') {
+        var to = window.SpecModel.stateKey(id, hit.state.sameAs);
+        what = 'Same as ' + (hasOwn(ix.states, to) ? '<a class="sv-cov-go" href="#screen/' + esc(to) + '">' + captionHtml(captionOf(to), '') + '</a>' : esc(hit.state.sameAs));
+      } else if (row.kind === 'absent') {
+        what = 'Never shown: ' + esc(hit.state.absent);
+      } else {
+        what = 'Not drawn' + (row.note ? ': ' + esc(row.note) : '') + (row.about.length ? ' ' + row.about.map(function (r) {
+          return '<a class="sv-rid" href="#' + esc(r) + '">' + esc(r) + '</a>';
+        }).join(' ') : '');
+      }
+      ul.appendChild(el('li', { class: 'sv-cov-row', 'data-kind': row.kind }, '<span class="sv-cov-cap">' + (cap || 'Any') + '</span> <span class="sv-cov-what">' + what + '</span>'));
+    });
+    return ul;
+  }
+  // The requirements about a screen, grouped by section in book order ("<chapter> › <section>"), each with the state it
+  // narrows to or the component it reaches the screen through.
+  function screenRequirements(id, word) {
+    var ix = screens();
+    var box = el('div', { class: 'sv-reqs' });
+    var seen = {};
+    var groups = [];
+    window.SpecModel.requirementsFor(state.book, state.mockups, id).forEach(function (x) {
+      var sig = x.req.id + '|' + x.state + '|' + x.via;
+      if (hasOwn(seen, sig)) { return; }
+      seen[sig] = true;
+      var last = groups[groups.length - 1];
+      if (!last || last.fullId !== x.fullId) { last = { fullId: x.fullId, chapterId: x.chapterId, list: [] }; groups.push(last); }
+      last.list.push(x);
+    });
+    if (!groups.length) { box.appendChild(el('p', { class: 'sv-none' }, 'No requirement names this ' + word + ' yet.')); }
+    groups.forEach(function (g) {
+      var ch = (state.book.chapters || []).filter(function (c) { return c.id === g.chapterId; })[0];
+      var s = findSection(g.fullId);
+      var div = el('div', { class: 'sv-group' });
+      div.appendChild(el('p', { class: 'sv-where' }, '<a href="#' + esc(g.fullId) + '">' + esc(ch ? ch.title : g.chapterId) + ' › ' + esc(s ? s.title : g.fullId) + '</a>'));
+      var ul = el('ul', { class: 'sv-req-list' });
+      g.list.forEach(function (x) {
+        var sk = x.state ? window.SpecModel.stateKey(x.via || id, x.state) : '';
+        var via = x.via ? 'via ' + (hasOwn(ix.screens, x.via) ? ix.screens[x.via].name : x.via) : '';
+        var narrow = x.state ? (hasOwn(ix.states, sk) ? captionHtml(captionOf(sk), '') : esc(x.state)) + (via ? ' · ' + esc(via) : '') : esc(via);
+        var li = el('li', { 'data-req': x.req.id || '' }, '<a class="sv-rid" href="#' + esc(x.req.id || g.fullId) + '">' + esc(x.req.id || '') + '</a> ' +
+          '<span class="sv-text">' + (x.req.text || '') + '</span>' + (narrow ? ' <span class="sv-narrow">' + narrow + '</span>' : ''));
+        ul.appendChild(li);
+      });
+      div.appendChild(ul);
+      box.appendChild(div);
+    });
+    return box;
+  }
+  // Where a component is placed: a small picture of each state that places it, the component outlined, linking to it.
+  function usedOnRow(id) {
+    var ix = screens();
+    var row = el('div', { class: 'sv-used' });
+    var keys = window.SpecModel.usedOn(state.book, state.mockups)[id] || [];
+    keys.forEach(function (key) {
+      var hit = hasOwn(ix.states, key) ? ix.states[key] : null;
+      if (!hit) { return; }
+      // The picture that has the tag: a changing state may place it only in its proposed picture, or only today.
+      var path = [hit.state.mockup, hit.state.today].filter(function (p) {
+        return p && window.SpecModel.componentsIn(state.mockups[p]).some(function (c) { return c.id === id; });
+      })[0];
+      if (!path) { return; }
+      var a = el('a', { class: 'sv-thumb', href: '#screen/' + key });
+      a.appendChild(el('span', { class: 'sv-thumb-cap' }, screenLabelHtml(key)));
+      var host = el('div', { class: 'mock' });
+      a.appendChild(host);
+      mountMockup(host, path, id);
+      row.appendChild(a);
+    });
+    if (!row.childNodes.length) { row.appendChild(el('p', { class: 'sv-none' }, 'Not placed on any screen yet.')); }
+    return row;
   }
 
   // Evidence ------------------------------------------------------------------------------------------
@@ -1090,6 +1609,26 @@
     var editing = act && /^(TEXTAREA|INPUT|SELECT)$/.test(act.tagName) && act.closest && act.closest('.inline-editor[data-key]');
     var focusKey = editing ? editing.dataset.key : null;
     var focusName = editing ? act.name : '';
+    // What every view ends with: the media count, the notes and their pins, the cursor back in its editor, and the
+    // hash's target scrolled to.
+    var finish = function () {
+      var shots = state.media.filter(function (m) { return m.indexOf('media/screens/') === 0; }).length;
+      var vids = state.media.filter(function (m) { return m.indexOf('media/videos/') === 0; }).length;
+      document.getElementById('media-count').textContent = shots + ' screenshot' + (shots === 1 ? '' : 's') + ', ' + vids + ' recording' + (vids === 1 ? '' : 's') + ' in media/.';
+      renderNotes();
+      drawSentPins();
+      if (focusKey) {
+        var sel = '.inline-editor[data-key="' + focusKey.replace(/["\\]/g, '\\$&') + '"] ';
+        var back = (focusName ? main.querySelector(sel + '[name="' + focusName + '"]') : null) || main.querySelector(sel + 'textarea');
+        if (back && back.getClientRects().length) {
+          if (back.tagName === 'TEXTAREA') { grow(back); }
+          back.focus({ preventScroll: true });
+          if (back.tagName !== 'SELECT') { back.setSelectionRange(back.value.length, back.value.length); }
+        }
+      }
+      var target = hashTarget();
+      if (target) { target.scrollIntoView({ behavior: 'instant', block: 'start' }); }
+    };
     var b = state.book;
     state.items = window.SpecModel.itemsOf(b, state.mockups);
     var rv = computeReviews();
@@ -1107,6 +1646,15 @@
     main.innerHTML = '';
     var toc = document.getElementById('toc');
     toc.innerHTML = '';
+    var route = routeOf(location.hash);
+    drawnRoute = routeName(route);
+    syncSwitch(route);
+    if (route) {
+      updateChangesBar();
+      renderScreens(route, rv, toc);
+      finish();
+      return;
+    }
 
     var cover = el('header', { class: 'cover', id: 'top' });
     setHtml(cover, '<p class="eyebrow">' + esc(b.eyebrow || 'Spec book') + '</p><h1>' + esc(b.title) + '</h1>' +
@@ -1118,10 +1666,15 @@
     main.appendChild(diffSummary(rv, removed['']));
     updateChangesBar();
 
+    // Reviews a section's Accept gate covers that its chapter view cannot draw: linked to the Screens view, and counted.
+    var offPage = {};
+    (b.chapters || []).forEach(function (ch) {
+      (ch.sections || []).forEach(function (s) { offPage[ch.id + '-' + s.id] = window.SpecModel.offPageKeys(b, state.mockups, ch.id + '-' + s.id, rv); });
+    });
     (b.chapters || []).forEach(function (ch, ci) {
       var n = ci + 1;
       var nn = n < 10 ? '0' + n : String(n);
-      var chChanged = !!rv.byChapter[ch.id];
+      var chChanged = !!rv.byChapter[ch.id] || (ch.sections || []).some(function (s) { return offPage[ch.id + '-' + s.id].keys.length > 0; });
       var sec = el('section', { class: 'chapter ' + (chChanged ? 'has-chg' : 'no-chg'), id: ch.id });
       sec.appendChild(el('p', { class: 'eyebrow' }, 'Chapter ' + nn));
       var chStage = window.SpecModel.chapterStage(ch);
@@ -1140,7 +1693,8 @@
       (ch.sections || []).forEach(function (s, si) {
         var num = '§' + n + '.' + (si + 1);
         var fullId = ch.id + '-' + s.id;
-        var nChg = rv.bySection[fullId] || 0;
+        var off = offPage[fullId];
+        var nChg = (rv.bySection[fullId] || 0) + off.uncounted;
         var box = el('div', { class: 'bk-sec ' + (nChg ? 'has-chg' : 'no-chg'), id: fullId });
         var stage = window.SpecModel.sectionStage(s);
         var sp = window.SpecModel.stagePill(s);
@@ -1158,6 +1712,7 @@
         tgtAttrs(h, fullId, num + ' ' + s.title + ' (whole section)', '');
         box.appendChild(h);
         box.appendChild(itemRow('div', fullId));
+        if (off.keys.length) { box.appendChild(el('p', { class: 'sec-elsewhere' })).appendChild(elsewhereLinks(off.keys)); }
         if (s.intro) { box.appendChild(el('p', { class: 'bk-intro' }, s.intro)); }
         var mixed = false;
         if (s.requirements && s.requirements.length) {
@@ -1185,7 +1740,7 @@
             var extra = kind === 'change' && x.r.today ? '<div class="today"><span>Today:</span> ' + x.r.today + '</div>' :
               kind === 'remove' && x.r.reason ? '<div class="today why"><span>Why:</span> ' + x.r.reason + '</div>' : '';
             var li = el('li', { id: rid || '' }, '<span class="rid' + (kind ? ' chg' : '') + '">' + x.pos + '</span><div>' + text + tag +
-              (rid ? ' <span class="sid" title="Stable id: stays the same when requirements move">' + esc(rid) + '</span>' : '') + extra + '</div>');
+              (rid ? ' <span class="sid" title="Stable id: stays the same when requirements move">' + esc(rid) + '</span>' : '') + extra + screenChips(x.r) + '</div>');
             if (!(rid && markReview(li, rid))) { li.classList.add('same'); }
             var ev = evFor(rid);
             var row = ev ? evidenceRow(rid, ev) : null;
@@ -1216,23 +1771,19 @@
         }
         box.appendChild(addRequirement(fullId));
         if (removed[fullId]) { box.appendChild(removedList(removed[fullId])); }
-        if (s.frames && s.frames.length) {
-          var frames = el('div', { class: 'frames' });
-          s.frames.forEach(function (f) {
-            var role = roleInfo(f.role);
-            var wrap = el('div', { class: 'frame-item' });
-            var fig = el('figure', { class: 'frame' });
-            var cap = el('figcaption', {}, (f.role ? '<span class="role" style="background:' + role.color + '">' + esc(role.label) + '</span> ' : '') + esc(f.caption || f.id) +
-              (f.state === 'proposed' && mixed ? ' <span class="fstate">shows proposed change</span>' : ''));
-            markReview(fig, f.id);
-            fig.appendChild(cap);
-            fig.appendChild(renderFrameBody(f, s));
-            tgtAttrs(fig, f.id, num + ' ' + s.title + ' · screen “' + (f.caption || f.id) + '”', 'Screen: ' + (f.caption || f.id));
+        if (s.shows && s.shows.length) {
+          var shows = el('div', { class: 'states' });
+          s.shows.forEach(function (sh) {
+            if (!sh || !sh.state) { return; }
+            var wrap = el('div', { class: 'state-item' });
+            var fig = stateFigure(sh, num, s);
+            // A state shown in several sections is the same item in each: its place in the page is per section.
+            fig.dataset.place = fullId + ' ' + sh.state;
             wrap.appendChild(fig);
-            wrap.appendChild(itemRow('div', f.id));
-            frames.appendChild(wrap);
+            wrap.appendChild(itemRow('div', sh.state));
+            shows.appendChild(wrap);
           });
-          box.appendChild(frames);
+          box.appendChild(shows);
         }
         var vids = videosFor(fullId, s);
         if (vids.length) {
@@ -1278,24 +1829,7 @@
       toc.appendChild(el('div', { class: 'sb-ch' }, '<a class="sb-chl" href="#changelog"><span class="sb-n">—</span>Changelog</a>'));
     }
 
-    var shots = state.media.filter(function (m) { return m.indexOf('media/screens/') === 0; }).length;
-    var vids = state.media.filter(function (m) { return m.indexOf('media/videos/') === 0; }).length;
-    document.getElementById('media-count').textContent = shots + ' screenshot' + (shots === 1 ? '' : 's') + ', ' + vids + ' recording' + (vids === 1 ? '' : 's') + ' in media/.';
-    renderNotes();
-    drawSentPins();
-    if (focusKey) {
-      var sel = '.inline-editor[data-key="' + focusKey.replace(/["\\]/g, '\\$&') + '"] ';
-      var back = (focusName ? main.querySelector(sel + '[name="' + focusName + '"]') : null) || main.querySelector(sel + 'textarea');
-      if (back && back.getClientRects().length) {
-        if (back.tagName === 'TEXTAREA') { grow(back); }
-        back.focus({ preventScroll: true });
-        if (back.tagName !== 'SELECT') { back.setSelectionRange(back.value.length, back.value.length); }
-      }
-    }
-    if (location.hash) {
-      var target = document.getElementById(location.hash.slice(1));
-      if (target) { target.scrollIntoView({ behavior: 'instant', block: 'start' }); }
-    }
+    finish();
   }
 
   // Notes ---------------------------------------------------------------------------------------------
@@ -1559,7 +2093,10 @@
   }
   window.addEventListener('pagehide', function () { flushNotes(true); });
   function targets() { return Array.prototype.slice.call(document.querySelectorAll('.tgt')); }
-  function byKey(k) {
+  // The target with key k; inside `within` when one is there (a state shown in several sections has a target in each).
+  function byKey(k, within) {
+    var scoped = within ? within.querySelectorAll('.tgt') : [];
+    for (var j = 0; j < scoped.length; j++) { if (scoped[j].dataset.key === k) { return scoped[j]; } }
     var all = document.querySelectorAll('.tgt');
     for (var i = 0; i < all.length; i++) { if (all[i].dataset.key === k) { return all[i]; } }
     return null;
@@ -1576,7 +2113,8 @@
   // Where a note is drawn: its target, else the heading of its section, else nowhere on this page.
   function anchorOf(n) {
     if (!n) { return null; }
-    return byKey(n.target) || (n.section ? byKey(n.section) : null);
+    var sec = n.section ? document.getElementById(n.section) : null;
+    return byKey(n.target, sec) || (n.section ? byKey(n.section) : null);
   }
   function newId() { return 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
   function migrate() {
@@ -1606,7 +2144,7 @@
       if (t) { return t; }
       // A review stack or an item's tools belong to the item above them.
       var row = e.closest('.item-row[data-key]');
-      var owner = row ? byKey(row.dataset.key) : null;
+      var owner = row ? byKey(row.dataset.key, row.parentNode) : null;
       if (owner && owner.getClientRects().length) { return owner; }
     }
     var secs = document.querySelectorAll('.bk-sec');
@@ -1620,9 +2158,9 @@
     var h = best ? best.querySelector('h3.tgt') : null;
     return h && h.getClientRects().length ? h : null;
   }
-  // The mockup element under a point inside a screen, so Claude gets the exact element and not only the screen:
-  // { mockup, selector, text, html }. Null outside a mockup (a screenshot is only an image).
-  function mockupElementAt(t, clientX, clientY) {
+  // The element of a drawn mockup under a point: { e, root, host }, or null outside a mockup (a screenshot is only an
+  // image).
+  function mockupHit(t, clientX, clientY) {
     var hosts = t.querySelectorAll('.mock');
     for (var i = 0; i < hosts.length; i++) {
       var host = hosts[i], root = host.shadowRoot;
@@ -1631,10 +2169,28 @@
       var stack = root.elementsFromPoint(clientX, clientY);
       for (var j = 0; j < stack.length; j++) {
         var e = stack[j];
-        if (e.getRootNode() === root && e.tagName !== 'STYLE') { return describeElement(e, root, host.dataset.mockup); }
+        if (e.getRootNode() === root && e.tagName !== 'STYLE') { return { e: e, root: root, host: host }; }
       }
     }
     return null;
+  }
+  // The mockup element under a point inside a screen, so Claude gets the exact element and not only the screen:
+  // { mockup, selector, text, html }. Null outside a mockup. Inside a placed component it names the component state's
+  // own picture, with the selector from that picture's top (the reader's wrapper is in no file).
+  function mockupElementAt(t, clientX, clientY) {
+    var hit = mockupHit(t, clientX, clientY);
+    if (!hit) { return null; }
+    var comp = hit.e.closest('.sb-component[data-key]');
+    var drawn = comp ? window.SpecModel.drawnState(state.book, comp.dataset.key) : null;
+    if (comp && drawn && drawn.state.mockup) { return describeElement(hit.e, comp, drawn.state.mockup); }
+    return describeElement(hit.e, hit.root, hit.host.dataset.mockup);
+  }
+  // The item a note dropped at a point of target t goes on: the innermost component placed in the picture there (its
+  // state key), else the target's own item.
+  function noteItemAt(t, clientX, clientY) {
+    var hit = mockupHit(t, clientX, clientY);
+    var comp = hit && hit.e.closest('.sb-component[data-key]');
+    return comp ? comp.dataset.key : t.dataset.item || t.dataset.key;
   }
   function describeElement(e, root, mockup) {
     var parts = [];
@@ -1743,7 +2299,7 @@
     if (!t || !t.getClientRects().length) { return null; }
     var r = t.getBoundingClientRect();
     // On the note's own target, its letter, then its pixels; on a stand-in (its section), the fractions.
-    var own = t === byKey(n.target);
+    var own = t.dataset.key === n.target;
     var p = own && isNum(n.ch) && isNum(n.cx) && isNum(n.cy) ? letterPoint(t, n) : null;
     if (!p && own && isNum(n.ax) && isNum(n.ay)) { p = { x: r.left + Math.min(n.ax, r.width), y: r.top + Math.min(n.ay, r.height) }; }
     if (!p) { p = { x: r.left + clamp01(n.rx) * r.width, y: r.top + clamp01(n.ry) * r.height }; }
@@ -1780,8 +2336,11 @@
   // What Revise sends. The screen before Revise is built from this too, so it cannot drift.
   function items() {
     return ordered(false).map(function (id) {
-      var n = state.notes[id], t = byKey(n.target), at = anchorOf(n);
-      var it = { id: n.target, where: at ? at.dataset.label : n.target, about: t ? plain(t.dataset.quote) : '', note: n.text.trim() };
+      var n = state.notes[id], at = anchorOf(n), t = at && at.dataset.key === n.target ? at : null;
+      var where = at ? at.dataset.label : n.target;
+      // A note on a component placed in a picture says which one.
+      if (n.item && n.item !== n.target && hasOwn(screens().states, n.item)) { where += ' · on “' + screenLabel(n.item) + '”'; }
+      var it = { id: n.target, where: where, about: t ? plain(t.dataset.quote) : '', note: n.text.trim() };
       it.noteId = id;
       if (n.el) { it.element = n.el; }
       // A collaborator's words (they wrote it, or changed it last) say whose they are, so Claude weighs them as such.
@@ -1835,7 +2394,7 @@
           var s = stickies[id];
           var sl = s ? parseFloat(s.box.style.left) : NaN, st = s ? parseFloat(s.box.style.top) : NaN;
           n.target = t.dataset.key;
-          n.item = t.dataset.item || t.dataset.key;
+          n.item = noteItemAt(t, px, py);
           setSection(n, t);
           // A drop beside an item (on its review stack, say) pins it to the item's nearest edge.
           setAnchor(n, anchorFor(t, px + window.scrollX, py + window.scrollY));
@@ -2324,13 +2883,19 @@
       act.blur();
       return;
     }
-    if (!commenting || !book) { return; }
+    if (!commenting) {
+      // A picture of a state, in the book or the Screens list, opens that state on its screen's page.
+      var go = book && t && t.closest ? t.closest('[data-go]') : null;
+      if (go && !t.closest('a, button, input, textarea, video')) { e.preventDefault(); location.hash = 'screen/' + go.dataset.go; }
+      return;
+    }
+    if (!book) { return; }
     e.preventDefault(); e.stopPropagation();
     var tg = targetAt(e.clientX, e.clientY);
     if (!tg) { return; }
     var a = anchorFor(tg, e.clientX + window.scrollX, e.clientY + window.scrollY);
     var id = newId();
-    state.notes[id] = { text: '', item: tg.dataset.item || tg.dataset.key, target: tg.dataset.key, created: new Date().toISOString() };
+    state.notes[id] = { text: '', item: noteItemAt(tg, e.clientX, e.clientY), target: tg.dataset.key, created: new Date().toISOString() };
     setAnchor(state.notes[id], a);
     if (viewer().guest) { state.notes[id].author = viewer().name; state.notes[id].mine = true; }
     setSection(state.notes[id], tg);
@@ -2603,7 +3168,11 @@
       .then(function (res) {
         if (!res.ok) {
           msgEl.textContent = res.j.error === 'busy' ? 'Claude is busy; try again when it is done.' :
-            res.j.error === 'nothing-ready' ? 'No section is marked Ready.' : 'Could not start the build: ' + (res.j.error || 'failed') + '.';
+            res.j.error === 'nothing-ready' ? 'No section is marked Ready.' :
+            res.j.error === 'unreviewed' ? 'Only accepted changes are built. Accept every change in ' +
+              (res.j.sections || []).map(function (id) { var s = findSection(id); return '“' + ((s && s.title) || id) + '”'; }).join(', ') +
+              ' first, or move it back to Drafting.' :
+            'Could not start the build: ' + (res.j.error || 'failed') + '.';
         } else {
           msgEl.textContent = 'Build sent to Claude (' + res.j.file + ').';
         }
@@ -3022,7 +3591,6 @@
   barHeight();
   document.getElementById('toc').addEventListener('click', function () { setTimeout(barHeight, 0); });
 
-  // Screens view --------------------------------------------------------------------------------------
   // View: Mockups and Screenshots (both is "both"; one always stays checked), Recordings, Coverage.
   var viewMock = document.getElementById('view-mock');
   var viewShot = document.getElementById('view-shot');
@@ -3055,8 +3623,8 @@
   // With merge, notes changed on this page and not yet saved are kept (see mergeNotes).
   function fetchBook(merge) {
     return fetch('/api/book', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (data) {
-      var paths = [];
-      (data.book.chapters || []).forEach(function (ch) { (ch.sections || []).forEach(function (s) { (s.frames || []).forEach(function (f) { if (f.mockup) { paths.push(f.mockup); } }); }); });
+      // Every state's picture (and today's of a changing one): components are drawn from them wherever they are placed.
+      var paths = window.SpecModel.mockupPaths(data.book);
       var mockups = {};
       var loads = paths.map(function (p) {
         return fetch('/data/' + p, { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : null; }).then(function (t) { if (t !== null) { mockups[p] = t; } });
@@ -3179,7 +3747,8 @@
     Object.keys(notes).forEach(function (id) {
       var n = notes[id];
       if (!n || (n.status !== 'sent' && n.status !== 'answered')) { return; }
-      var t = byKey(n.target) || byKey(n.item) || (n.section ? byKey(n.section) : null);
+      var sec = n.section ? document.getElementById(n.section) : null;
+      var t = byKey(n.target, sec) || byKey(n.item, sec) || (n.section ? byKey(n.section) : null);
       if (!t) { return; }
       var label = (n.status === 'answered' ? 'Answered' : 'Sent') + ' note: ' + (n.text || '');
       var pin = el('span', { class: 'pin pin-sent ' + n.status, role: 'img', 'aria-label': label, title: label });
@@ -3195,8 +3764,8 @@
   // after an Accept or a Change. The reader keeps their place: whatever is at the top of the screen stays where it
   // is, or, when it is hidden or gone, the nearest item after it (before it, at the end of the book) takes its place.
   // Items are found again by their key, so this holds across a new render.
-  var PLACES = '.chapter > h2.tgt, .bk-sec > h3.tgt, .reqs > li.tgt, figure.frame';
-  function placeKey(e) { return e.dataset.key || e.id; }
+  var PLACES = '.chapter > h2.tgt, .bk-sec > h3.tgt, .reqs > li.tgt, figure.state';
+  function placeKey(e) { return e.dataset.place || e.dataset.key || e.id; }
   function readingAnchor() {
     var top = barBottom();
     var all = [].slice.call(main.querySelectorAll(PLACES));
@@ -3451,10 +4020,16 @@
   changesBtn.addEventListener('click', function () { setDiff(!state.diff); });
   nextBtn.addEventListener('click', function () { nextChange(false); });
   prevBtn.addEventListener('click', prevChange);
-  // The bar's menus: View and Claude. A click elsewhere or Escape closes them.
+  // The bar's menus: View and Claude (and live.js's Share). A click elsewhere or Escape closes them, and opening one
+  // closes the others: each says so with a 'specbook-menu' event naming itself.
   function menuToggle(btnId, popId) {
     var btn = document.getElementById(btnId), pop = document.getElementById(popId);
-    function set(open) { pop.hidden = !open; btn.setAttribute('aria-expanded', String(open)); }
+    function set(open) {
+      pop.hidden = !open;
+      btn.setAttribute('aria-expanded', String(open));
+      if (open) { document.dispatchEvent(new CustomEvent('specbook-menu', { detail: popId })); }
+    }
+    document.addEventListener('specbook-menu', function (e) { if (e.detail !== popId && !pop.hidden) { set(false); } });
     btn.addEventListener('click', function (e) { e.stopPropagation(); set(pop.hidden); });
     pop.addEventListener('click', function (e) { if (!e.target.closest('button')) { e.stopPropagation(); } });
     document.addEventListener('click', function (e) { if (!pop.hidden && !pop.contains(e.target)) { set(false); } });

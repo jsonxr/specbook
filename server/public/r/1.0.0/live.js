@@ -258,7 +258,7 @@
       b.type = 'button'; b.className = 'bar-btn share-start'; b.textContent = 'Share'; b.appendChild(chevron());
       b.title = 'Share this book: anyone with the link can read it and leave notes';
       b.setAttribute('aria-expanded', String(menuOpen));
-      b.addEventListener('click', function (e) { e.stopPropagation(); menuOpen = !menuOpen; render(); });
+      b.addEventListener('click', function (e) { e.stopPropagation(); toggleMenu(); });
       pill.appendChild(b);
       if (menuOpen) { pill.appendChild(startMenu()); }
     } else {
@@ -297,7 +297,7 @@
       more.type = 'button'; more.className = 'share-more'; more.textContent = 'Share'; more.appendChild(chevron());
       more.title = 'The link: anyone with it can read the book and leave notes';
       more.setAttribute('aria-expanded', String(menuOpen));
-      more.addEventListener('click', function (e) { e.stopPropagation(); menuOpen = !menuOpen; render(); });
+      more.addEventListener('click', function (e) { e.stopPropagation(); toggleMenu(); });
       pill.appendChild(more);
       if (menuOpen) { pill.appendChild(menu(list)); }
     }
@@ -438,6 +438,13 @@
     return m;
   }
   document.addEventListener('click', function () { if (menuOpen) { menuOpen = false; render(); } });
+  // Opening Share closes the bar's other menus (book.js's View and Claude), and opening one of them closes Share.
+  function toggleMenu() {
+    menuOpen = !menuOpen;
+    if (menuOpen) { document.dispatchEvent(new CustomEvent('specbook-menu', { detail: 'share' })); }
+    render();
+  }
+  document.addEventListener('specbook-menu', function (e) { if (e.detail !== 'share' && menuOpen) { menuOpen = false; render(); } });
 
   // Wiring ---------------------------------------------------------------------------------------------------
   if (guest) {
@@ -451,7 +458,7 @@
     }
     hello();
   } else {
-    Host.onChange(function () {
+    var fromHost = function () {
       // Guests who left without a word (their connection dropped) are gone from the host's list.
       var ids = {};
       Host.people().forEach(function (p) {
@@ -463,7 +470,10 @@
       Object.keys(people).forEach(function (id) { if (!ids[id]) { delete people[id]; } });
       if (follow.leader && !people[follow.leader]) { setFollow({ type: 'leader-left' }); }
       render();
-    });
+    };
+    Host.onChange(fromHost);
+    // Who is reading may have come (the roster, sent as the tab connects) before this script ran.
+    fromHost();
   }
   window.addEventListener('pagehide', function () { send({ kind: 'bye' }); });
   render();

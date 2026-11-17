@@ -331,7 +331,7 @@ body.commenting main .pin, body.commenting main .pin * { cursor: pointer !import
 .fstate { font: 600 11px var(--mono); color: var(--proposed); border: 1px solid var(--proposed); border-radius: 6px; padding: 0 5px; margin-left: 4px; }
 
 /* evidence: which tests prove a requirement */
-.cov { font: 600 11px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 10px; padding: 2px 8px; vertical-align: middle; margin-left: 4px; }
+.cov { font: 600 11px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 10px; padding: 2px 8px; vertical-align: middle; margin-left: 4px; white-space: nowrap; display: inline-block; }
 .cov.full { color: var(--built); border-color: var(--built); }
 /* dim the requirement's own content, not a note pin inside it */
 body.coverage .reqs li.unproven > :not(.pin) { opacity: .38; }
@@ -751,3 +751,7 @@ figure.state.sv-target { outline: 2px solid var(--note); outline-offset: 6px; bo
   .sv-states { flex-direction: column; }
   .sv-title { font-size: 25px; }
 }
+
+/* iOS Safari zooms the page in when a field under 16px takes focus (the pin, a name, a note) and leaves it zoomed, so
+   the page looks wider than the screen. Touch screens get 16px fields. */
+@media (pointer: coarse) { input, textarea, select { font-size: 16px !important; } }
