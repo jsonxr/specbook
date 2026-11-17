@@ -50,8 +50,25 @@ test('share.html is rewritten from index.html', () => {
   const share = html.indexOf('/r/1.4.0/share.js');
   const model = html.indexOf('/r/1.4.0/model.js');
   assert.ok(share > -1 && model > share);
-  assert.ok(html.includes('<script src="/r/1.4.0/share.js"></script>'));
+  assert.match(html, /<script src="\/r\/1\.4\.0\/share\.js\?h=[0-9a-f]{12}"><\/script>/);
   assert.match(html, /<head>[\s\S]*<meta name="specbook-reader" content="1.4.0">[\s\S]*<\/head>/);
+});
+
+// share.html is never cached (the worker serves /s/ no-store), so the hash in each file's address makes a phone load
+// the files again when a version is republished with --force during development, though /r/ is cached for good.
+test('share.html asks for each file by its content hash', () => {
+  const { app, out } = fixture();
+  publish({ app, out, version: '1.4.0' });
+  const before = readFileSync(join(out, '1.4.0', 'share.html'), 'utf8');
+  for (const f of ['book.css', 'relay.js', 'model.js', 'book.js', 'share.js']) {
+    assert.match(before, new RegExp(`/r/1\\.4\\.0/${f.replace('.', '\\.')}\\?h=[0-9a-f]{12}"`), f);
+  }
+  writeFileSync(join(app, 'book.js'), '// book.js, changed\n');
+  publish({ app, out, version: '1.4.0', force: true });
+  const after = readFileSync(join(out, '1.4.0', 'share.html'), 'utf8');
+  const h = (html, f) => new RegExp(`/r/1\\.4\\.0/${f.replace('.', '\\.')}\\?h=([0-9a-f]{12})"`).exec(html)[1];
+  assert.notEqual(h(after, 'book.js'), h(before, 'book.js'));
+  assert.equal(h(after, 'model.js'), h(before, 'model.js'));
 });
 
 test('the same bytes are a no-op', () => {

@@ -47,6 +47,11 @@ plugin can be read on their link:
    every version.
 4. From this folder, `./wrangler.sh deploy`.
 
+**During development**, before a real release, keep the version and republish it over itself:
+`node server/publish-reader.mjs --force`, then `./wrangler.sh deploy`. `share.html` asks for each file by its content
+hash (`book.js?h=…`) and `/s/<room>` is served `no-store`, so every phone loads the new files at its next load, though
+`/r/` is cached for good. A tab already open keeps its reader until it is reloaded (the book itself still updates live).
+
 It serves at `https://specbook.jasonrowland.com` (the `routes` entry in `wrangler.jsonc`; change it to deploy under
 another domain in your own account). The plugin uses `https://specbook.jasonrowland.com` unless a book names another in
 `settings.shareBroker`.

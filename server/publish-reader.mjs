@@ -16,7 +16,9 @@ const bySemver = (a, b) => {
   return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
 };
 
-function shareHtml(index, version) {
+// Each file is asked for by its content hash (`?h=`): /r/ is cached for good, but share.html is served no-store, so a
+// version republished with --force during development reaches every phone at its next load.
+function shareHtml(index, version, files) {
   const base = `/r/${version}/`;
   let html = index
     .replace(/[ \t]*<script\b[^>]*\bsrc="\/app\/owner\.js"[^>]*><\/script>\r?\n?/g, '')
@@ -25,6 +27,7 @@ function shareHtml(index, version) {
   const at = html.indexOf(`<script src="${base}model.js"></script>`);
   if (at < 0) throw new Error('index.html has no model.js script tag');
   html = html.slice(0, at) + share + html.slice(at);
+  for (const [name, bytes] of files) html = html.replaceAll(`"${base}${name}"`, `"${base}${name}?h=${sha(bytes).slice(0, 12)}"`);
   const meta = `<meta name="specbook-reader" content="${version}">`;
   if (!/<head[^>]*>/.test(html)) throw new Error('index.html has no <head>');
   return html.replace(/<head[^>]*>\r?\n?/, m => `${m}${meta}\n`);
@@ -34,7 +37,7 @@ export function publish({ app, out, version, force = false }) {
   if (typeof version !== 'string' || !validReader(version)) throw new Error(`bad version ${version}`);
   const files = new Map();
   for (const f of COPIED) files.set(f, readFileSync(join(app, f)));
-  files.set('share.html', Buffer.from(shareHtml(readFileSync(join(app, 'index.html'), 'utf8'), version)));
+  files.set('share.html', Buffer.from(shareHtml(readFileSync(join(app, 'index.html'), 'utf8'), version, files)));
 
   const dir = join(out, version);
   let wrote = true;
